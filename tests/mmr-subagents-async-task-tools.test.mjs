@@ -318,12 +318,78 @@ describe("async task tools model-visible surface", () => {
       assert.equal(t.parameters.type, "object");
       assert.equal(t.parameters.additionalProperties, false);
     }
-    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["description", "prompt"]);
+    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["description", "notify", "prompt"]);
+    assert.equal(start.parameters.properties.notify.type, "boolean");
     assert.deepEqual(start.parameters.required, ["prompt", "description"]);
     assert.deepEqual(Object.keys(poll.parameters.properties), ["task_id"]);
     assert.deepEqual(wait.parameters.required, ["task_id"]);
     assert.deepEqual(cancel.parameters.required, ["task_id"]);
     assert.match(start.description, /background/i);
     assert.ok(start.promptGuidelines.some((g) => /blocking Task/i.test(g)));
+  });
+});
+
+describe("async task tools completion push", () => {
+  async function pushHarness(overrides = {}) {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "t1" });
+    const def = makeDeferredRunner();
+    const sent = [];
+    const deps = {
+      registry,
+      sessionKey: "S",
+      resolveInvocation: stubTaskInvocation(),
+      runner: def.runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+      pi: { sendMessage: (m, o) => sent.push({ m, o }) },
+      ...overrides,
+    };
+    return { registry, def, sent, startTask: tools.createStartTaskTool(deps) };
+  }
+
+  it("pushes exactly once when the ceiling is on and the task opts in", async () => {
+    const { registry, def, sent, startTask } = await pushHarness({ enableCompletionPush: true });
+    await startTask.execute("c0", { ...GOOD_PARAMS, notify: true }, undefined, undefined, CTX);
+    def.resolve(makeWorkerResult());
+    await flush();
+    assert.equal(sent.length, 1, "exactly one completion push");
+    assert.deepEqual(sent[0].o, { deliverAs: "nextTurn", triggerTurn: true });
+    assert.equal(sent[0].m.customType, "mmr-subagents.async-task-completion");
+    assert.equal(registry.getTask("S", "t1").completionPush, "sent");
+  });
+
+  it("does not push when the ceiling is on but the task did not opt in", async () => {
+    const { registry, def, sent, startTask } = await pushHarness({ enableCompletionPush: true });
+    await startTask.execute("c0", GOOD_PARAMS, undefined, undefined, CTX);
+    def.resolve(makeWorkerResult());
+    await flush();
+    assert.equal(sent.length, 0);
+    assert.equal(registry.getTask("S", "t1").completionPush, "disabled");
+  });
+
+  it("does not push when the task opts in but the session ceiling is off", async () => {
+    const { registry, def, sent, startTask } = await pushHarness();
+    await startTask.execute("c0", { ...GOOD_PARAMS, notify: true }, undefined, undefined, CTX);
+    def.resolve(makeWorkerResult());
+    await flush();
+    assert.equal(sent.length, 0);
+    assert.equal(registry.getTask("S", "t1").completionPush, "disabled");
+  });
+
+  it("strips notify before the shared Task validator (the task still starts)", async () => {
+    const { def, startTask } = await pushHarness({ enableCompletionPush: true });
+    const result = await startTask.execute("c0", { ...GOOD_PARAMS, notify: true }, undefined, undefined, CTX);
+    assert.equal(result.details.taskId, "t1", "notify must not trip the unknown-parameter validator");
+    def.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("treats a non-boolean notify as opt-out", async () => {
+    const { def, sent, startTask } = await pushHarness({ enableCompletionPush: true });
+    await startTask.execute("c0", { ...GOOD_PARAMS, notify: "yes" }, undefined, undefined, CTX);
+    def.resolve(makeWorkerResult());
+    await flush();
+    assert.equal(sent.length, 0);
   });
 });

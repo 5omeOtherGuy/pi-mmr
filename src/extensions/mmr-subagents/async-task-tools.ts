@@ -59,12 +59,21 @@ export interface AsyncTaskToolDeps extends TaskToolDeps {
   /** Deterministic session key override for tests. */
   sessionKey?: string;
   /**
-   * Enable the at-most-once completion push. Default OFF (pull-only):
-   * an injected `nextTurn` message can trigger an extra turn while the
-   * parent is mid-work, so completion push is opt-in.
+   * Session-level ceiling: whether the at-most-once completion push is
+   * PERMITTED at all this session. Default OFF (pull-only). Even when
+   * true, an individual task only pushes when the caller opts in per
+   * task via `start_task({ notify: true })`. Wired from the
+   * `MMR_SUBAGENTS_ASYNC_PUSH` environment gate in `index.ts`.
    */
   enableCompletionPush?: boolean;
 }
+
+/**
+ * Environment gate (the user ceiling) for async completion push. Off unless
+ * explicitly enabled; mirrors the opt-in posture of other network/autonomy
+ * switches in this package.
+ */
+export const MMR_SUBAGENTS_ASYNC_PUSH_ENV = "MMR_SUBAGENTS_ASYNC_PUSH";
 
 const START_TASK_PARAMETERS = Type.Object(
   {
@@ -73,6 +82,12 @@ const START_TASK_PARAMETERS = Type.Object(
         "The bounded task prompt for the background worker. Include goal, scope, context, constraints, validation, and expected result shape.",
     }),
     description: Type.String({ description: "Short display label for the background task." }),
+    notify: Type.Optional(
+      Type.Boolean({
+        description:
+          "Set true ONLY when you are about to end your turn with nothing else to do, to be poked once when this task finishes. Leave unset (default) when you will poll or task_wait yourself. The poke wakes the session only if it is idle; it never interrupts an active turn. Requires the session push ceiling to be enabled, and is bounded per session.",
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -118,6 +133,7 @@ const START_TASK_DESCRIPTION = [
   "Use start_task only for independent work that can proceed while you do other things (long analysis, broad search, a self-contained implementation unit).",
   "Prefer the blocking Task tool when you need the result before your next reasoning step.",
   "Always follow start_task with task_poll or task_wait before relying on the result; the parent remains responsible for integration and the final answer.",
+  "Pass notify:true only when you are about to end your turn with nothing else to do and want to be poked once when the task finishes; otherwise poll or task_wait yourself.",
   "",
   "Background tasks are in-memory and session-scoped: they are lost if the Pi process exits, and they cannot spawn further background tasks.",
 ].join("\n");
@@ -128,6 +144,7 @@ const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "Call task_poll with no task_id to list this session's background tasks (active, stalled, finished).",
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task.",
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
+  "Prefer polling. Use start_task({ notify: true }) only when you will go idle and want a one-time poke on completion; the poke wakes the session only when idle and is bounded per session.",
 ];
 
 function resolveCwd(ctx: ExtensionContext | undefined): string {
@@ -324,9 +341,20 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
     promptGuidelines: [...ASYNC_TASK_GUIDELINES],
     parameters: START_TASK_PARAMETERS,
     async execute(toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
+      // Pull the async-only `notify` opt-in off the params before handing
+      // them to the shared Task validation path, which rejects unknown
+      // keys. `notify` only requests a completion push; it never changes
+      // the worker's prompt or routing.
+      let wantsNotify = false;
+      let taskParams: unknown = rawParams;
+      if (rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)) {
+        const { notify: notifyOptIn, ...rest } = rawParams as Record<string, unknown>;
+        wantsNotify = notifyOptIn === true;
+        taskParams = rest;
+      }
       // Reuse the blocking Task validation/routing path. A pre-spawn
       // failure returns the same shaped result and creates no record.
-      const prep = prepareTaskRun(rawParams, ctx, deps);
+      const prep = prepareTaskRun(taskParams, ctx, deps);
       if (!prep.ok) {
         return {
           content: prep.result.content,
@@ -339,7 +367,12 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       }
       const { params, cwd, detailsContext, runnerOptionsBase, runner } = prep.prepared;
       const sessionKey = resolveSessionKey(ctx, deps);
-      const notify = deps.enableCompletionPush ? buildCompletionNotifier(deps.pi) : undefined;
+      // Two-layer gate: the session ceiling must permit push AND the caller
+      // must opt this task in. The registry adds at-most-once + a per-session
+      // budget on top. Delivery is `nextTurn` + `triggerTurn`, so a push only
+      // wakes an idle session and otherwise rides the next turn.
+      const notify =
+        deps.enableCompletionPush && wantsNotify ? buildCompletionNotifier(deps.pi) : undefined;
       const started = registry.startTask({
         sessionKey,
         originToolCallId: toolCallId,

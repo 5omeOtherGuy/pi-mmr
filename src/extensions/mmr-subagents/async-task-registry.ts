@@ -63,7 +63,16 @@ export type MmrAsyncTaskCompletionPushState =
   | "pending"
   | "sending"
   | "sent"
-  | "failed";
+  | "failed"
+  /** Push was requested but suppressed because the per-session budget was exhausted. */
+  | "suppressed";
+
+/**
+ * Hard ceiling on how many completion pushes a single session may fire,
+ * regardless of how many tasks opt in. A safety rail against a plan that
+ * launches many notifying tasks and repeatedly self-wakes the session.
+ */
+export const DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION = 8;
 
 /** Run thunk: the registry supplies its own signal + progress sink. */
 export type MmrAsyncTaskRun = (ctx: {
@@ -257,6 +266,8 @@ export interface MmrAsyncTaskRegistryDeps {
   cancelDeadAfterMs?: number;
   terminalTtlMs?: number;
   observedTerminalTtlMs?: number;
+  /** Hard cap on completion pushes per session (default {@link DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION}). */
+  maxCompletionPushesPerSession?: number;
 }
 
 interface MmrAsyncTaskRecord {
@@ -313,6 +324,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   private readonly cancelDeadAfterMs: number;
   private readonly terminalTtlMs: number;
   private readonly observedTerminalTtlMs: number;
+  private readonly maxCompletionPushesPerSession: number;
+  /** sessionKey -> completion pushes already fired this session. */
+  private readonly completionPushesUsed = new Map<string, number>();
 
   constructor(deps: MmrAsyncTaskRegistryDeps = {}) {
     this.nowMs = deps.nowMs ?? (() => Date.now());
@@ -323,6 +337,8 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     this.cancelDeadAfterMs = deps.cancelDeadAfterMs ?? ASYNC_TASK_CANCEL_DEAD_AFTER_MS;
     this.terminalTtlMs = deps.terminalTtlMs ?? ASYNC_TASK_TERMINAL_TTL_MS;
     this.observedTerminalTtlMs = deps.observedTerminalTtlMs ?? ASYNC_TASK_OBSERVED_TERMINAL_TTL_MS;
+    this.maxCompletionPushesPerSession =
+      deps.maxCompletionPushesPerSession ?? DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION;
   }
 
   private sessionMap(sessionKey: string): Map<string, MmrAsyncTaskRecord> {
@@ -524,6 +540,15 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
 
   private maybeNotify(record: MmrAsyncTaskRecord): void {
     if (record.completionPush !== "pending" || !record.notify) return;
+    // Per-session budget: even with push opted in, a session can only
+    // self-wake a bounded number of times so a runaway plan cannot spam
+    // (or loop) turns. An over-budget completion is recorded as suppressed.
+    const used = this.completionPushesUsed.get(record.sessionKey) ?? 0;
+    if (used >= this.maxCompletionPushesPerSession) {
+      record.completionPush = "suppressed";
+      return;
+    }
+    this.completionPushesUsed.set(record.sessionKey, used + 1);
     // Mutate state synchronously BEFORE awaiting so concurrent
     // poll/cancel/prune can never trigger a second send.
     record.completionPush = "sending";
@@ -721,6 +746,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
           }
         }
       }
+      this.completionPushesUsed.delete(key);
       this.sessions.delete(key);
     }
   }

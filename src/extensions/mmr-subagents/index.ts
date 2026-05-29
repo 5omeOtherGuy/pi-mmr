@@ -9,8 +9,9 @@ import { type MmrAdvisorToolDeps, registerOracleTool } from "./oracle.js";
 import { registerCthuluTool } from "./cthulu.js";
 import { registerMmrSubagentsPromptBuilders } from "./prompts.js";
 import { type TaskToolDeps, registerTaskParentPromptCapture, registerTaskTool } from "./task.js";
-import { type AsyncTaskToolDeps, registerAsyncTaskTools } from "./async-task-tools.js";
+import { type AsyncTaskToolDeps, MMR_SUBAGENTS_ASYNC_PUSH_ENV, registerAsyncTaskTools } from "./async-task-tools.js";
 import { getMmrAsyncTaskRegistry } from "./async-task-registry.js";
+import { parseBoolEnv } from "../mmr-core/internal/env.js";
 import {
   createMmrSubagentsFeatureGateProvider,
   createMmrSubagentsToolProvider,
@@ -67,7 +68,15 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
     registerTaskParentPromptCapture(pi);
     registerTaskTool(pi, overrides.task ?? {});
     registerLibrarianTool(pi, overrides.librarian ?? {});
-    registerAsyncTaskTools(pi, overrides.asyncTasks ?? {});
+    // User ceiling for async completion push: off unless explicitly
+    // enabled. Even when enabled, a task only pushes when the caller opts
+    // in per task (start_task notify:true), and the registry bounds it.
+    // Test overrides win so deterministic tests control the seam.
+    const asyncPushCeiling = parseBoolEnv(process.env[MMR_SUBAGENTS_ASYNC_PUSH_ENV]) ?? false;
+    registerAsyncTaskTools(pi, {
+      enableCompletionPush: asyncPushCeiling,
+      ...(overrides.asyncTasks ?? {}),
+    });
     pi.on("tool_result", maybeNumberFinderReadToolResult);
     // Tear down background tasks when the session ends: abort active
     // worker controllers and clear all session-scoped records. The

@@ -454,3 +454,48 @@ describe("toPublicAsyncTaskSnapshot", () => {
     }
   });
 });
+
+describe("async-task-registry completion-push budget", () => {
+  it("suppresses pushes once the per-session budget is exhausted", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${n++}`, maxCompletionPushesPerSession: 1 });
+    const calls = [];
+
+    const d0 = makeDeferredRun();
+    reg.startTask(startArgs({ run: d0.run, originToolCallId: "c0", notify: (s) => calls.push(s.taskId) }));
+    d0.resolve(makeWorkerResult());
+    await flush();
+    assert.deepEqual(calls, ["t0"], "first push fires");
+    assert.equal(reg.getTask("sess-A", "t0").completionPush, "sent");
+
+    const d1 = makeDeferredRun();
+    reg.startTask(startArgs({ run: d1.run, originToolCallId: "c1", notify: (s) => calls.push(s.taskId) }));
+    d1.resolve(makeWorkerResult());
+    await flush();
+    assert.deepEqual(calls, ["t0"], "second push is suppressed (budget exhausted)");
+    assert.equal(reg.getTask("sess-A", "t1").completionPush, "suppressed");
+  });
+
+  it("resets the per-session push budget on shutdown", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${n++}`, maxCompletionPushesPerSession: 1 });
+    const calls = [];
+
+    const d0 = makeDeferredRun();
+    reg.startTask(startArgs({ run: d0.run, originToolCallId: "c0", notify: (s) => calls.push(s.taskId) }));
+    d0.resolve(makeWorkerResult());
+    await flush();
+    assert.equal(reg.getTask("sess-A", "t0").completionPush, "sent");
+
+    reg.shutdownSession("sess-A", "quit");
+
+    const d1 = makeDeferredRun();
+    reg.startTask(startArgs({ run: d1.run, originToolCallId: "c1", notify: (s) => calls.push(s.taskId) }));
+    d1.resolve(makeWorkerResult());
+    await flush();
+    assert.deepEqual(calls, ["t0", "t1"], "budget cleared on shutdown so a fresh task can push again");
+    assert.equal(reg.getTask("sess-A", "t1").completionPush, "sent");
+  });
+});
