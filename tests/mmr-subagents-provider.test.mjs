@@ -58,12 +58,15 @@ describe("mmr-subagents tool provider", () => {
     assert.equal(provider.name, MMR_SUBAGENTS_PROVIDER_NAME);
   });
 
-  it("only claims its four owned logical tool names", async () => {
+  it("only claims its owned logical tool names", async () => {
     const { createMmrSubagentsToolProvider, MMR_SUBAGENTS_OWNED_TOOLS } = await importSource(
       "extensions/mmr-subagents/provider.ts",
     );
     const provider = createMmrSubagentsToolProvider();
-    assert.deepEqual([...MMR_SUBAGENTS_OWNED_TOOLS].sort(), ["Task", "cthulu", "finder", "librarian", "oracle"]);
+    assert.deepEqual(
+      [...MMR_SUBAGENTS_OWNED_TOOLS].sort(),
+      ["Task", "cthulu", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+    );
     for (const unowned of [
       "Read",
       "Bash",
@@ -89,18 +92,44 @@ describe("mmr-subagents tool provider", () => {
     const { createMmrSubagentsToolProvider, MMR_SUBAGENTS_OWNED_TOOLS, MMR_SUBAGENTS_FEATURE_GATE } = await importSource(
       "extensions/mmr-subagents/provider.ts",
     );
+    const { MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE, MMR_SUBAGENTS_ASYNC_TASK_TOOLS } = await importSource(
+      "extensions/mmr-subagents/provider.ts",
+    );
+    const asyncSet = new Set(MMR_SUBAGENTS_ASYNC_TASK_TOOLS);
     const provider = createMmrSubagentsToolProvider();
     for (const logical of MMR_SUBAGENTS_OWNED_TOOLS) {
       const rule = provider.resolve(logical);
       assert.ok(rule, `must produce a rule for ${logical}`);
       assert.equal(rule.kind, "gated");
-      assert.equal(rule.gate, MMR_SUBAGENTS_FEATURE_GATE);
-      if (logical === "librarian") {
+      if (asyncSet.has(logical)) {
+        assert.equal(rule.gate, MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE);
+        assert.match(rule.reason, /async background task tools are not enabled/);
+      } else if (logical === "librarian") {
+        assert.equal(rule.gate, MMR_SUBAGENTS_FEATURE_GATE);
         assert.equal(rule.reason, "librarian: requires mmr-github read-only GitHub tools (set MMR_GITHUB_ENABLE=true).");
       } else {
+        assert.equal(rule.gate, MMR_SUBAGENTS_FEATURE_GATE);
         assert.match(rule.reason, new RegExp(`${logical}: implementation pending in mmr-subagents`));
       }
     }
+  });
+
+  it("gates and activates the async background task tools behind the async-tasks gate", async () => {
+    const {
+      createMmrSubagentsToolProvider,
+      createMmrSubagentsFeatureGateProvider,
+      MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE,
+      MMR_SUBAGENTS_ASYNC_TASK_TOOLS,
+    } = await importSource("extensions/mmr-subagents/provider.ts");
+    const active = createMmrSubagentsToolProvider({ asyncTasks: true });
+    for (const logical of MMR_SUBAGENTS_ASYNC_TASK_TOOLS) {
+      assert.deepEqual(active.resolve(logical), { kind: "active" }, `${logical} must resolve active when enabled`);
+    }
+    const gate = createMmrSubagentsFeatureGateProvider({ asyncTasks: true });
+    const enabled = gate.evaluate(MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE);
+    assert.equal(enabled.status, "enabled");
+    const disabled = createMmrSubagentsFeatureGateProvider().evaluate(MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE);
+    assert.equal(disabled.status, "disabled");
   });
 
   it("returns active rules for shipped capabilities including librarian", async () => {

@@ -291,7 +291,7 @@ describe("resolveMmrSubagentInvocation", () => {
       assert.deepEqual([...result.workerTools], TASK_REGISTERED_TOOLS);
       assert.deepEqual(
         [...result.toolResolution.deniedTools].sort(),
-        ["Task", "handoff", "librarian", "oracle"],
+        ["Task", "handoff", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
       );
       assert.deepEqual([...result.toolResolution.omittedTools], []);
     }

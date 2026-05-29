@@ -318,7 +318,18 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
       "skill",
       "task_list",
     ],
-    denyTools: ["Task", "oracle", "librarian", "handoff"],
+    denyTools: [
+      "Task",
+      "oracle",
+      "librarian",
+      "handoff",
+      // Async background task tools: a worker must not spawn or manage
+      // its own background workers (recursion control, issue #23).
+      "start_task",
+      "task_poll",
+      "task_wait",
+      "task_cancel",
+    ],
     promptRoute: "mode-derived",
     baseMode: "from-parent",
     promptBuilder: "task-subagent",

@@ -45,6 +45,10 @@ const DEFAULT_TOOL_CATALOG: Record<string, { owner: string }> = {
   oracle: { owner: "mmr-subagents" },
   cthulu: { owner: "mmr-subagents" },
   librarian: { owner: "mmr-subagents" },
+  start_task: { owner: "mmr-subagents" },
+  task_poll: { owner: "mmr-subagents" },
+  task_wait: { owner: "mmr-subagents" },
+  task_cancel: { owner: "mmr-subagents" },
   // mmr-history
   find_session: { owner: "mmr-history" },
   read_session: { owner: "mmr-history" },
