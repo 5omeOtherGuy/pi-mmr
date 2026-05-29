@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { isRecord } from "../mmr-core/internal/json.js";
+import {
+  MMR_SUBAGENT_MODEL_PREFERENCES_ENV,
+  serializeMmrSubagentModelPreferencesEnv,
+} from "../mmr-core/subagent-model-override-env.js";
 import { extractMmrSubagentActivationFailure } from "../mmr-core/subagent-resolver.js";
+import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildMmrWorkerArgs, resolveMmrWorkerPiInvocation } from "./runner-invocation.js";
 import type { MmrWorkerInvocation } from "./runner-invocation.js";
 import { copyMmrWorkerTrailItem, createMmrWorkerTrailAggregator } from "./worker-trail.js";
@@ -378,6 +383,14 @@ export interface RunMmrSubagentWorkerOptions {
   model?: string;
   /** Concrete Pi tool allowlist passed through `--tools`. */
   tools?: readonly string[];
+  /**
+   * Optional session-scoped model-preference override (issue #9). Forwarded
+   * to the child Pi worker through the {@link MMR_SUBAGENT_MODEL_PREFERENCES_ENV}
+   * env channel for this spawn only (never persisted), so the child's
+   * activation guard resolves the same fallback route the parent selected
+   * and passed via `model`/`--model`.
+   */
+  modelPreferencesOverride?: readonly MmrModelPreference[];
   /** Optional system prompt written to a temporary file. Delivered to the
    * child Pi via `--append-system-prompt` (default) or `--system-prompt`
    * depending on {@link systemPromptDelivery}. */
@@ -601,10 +614,25 @@ export async function runMmrSubagentWorker(
     command = invocation.command;
     args = invocation.args;
 
+    // Forward a session-scoped model-preference override (issue #9) to the
+    // child through the env channel so child activation resolves the same
+    // fallback route the parent selected. Always build the child env from a
+    // copy of process.env and SCRUB the override var when this spawn has no
+    // override: otherwise a nested worker (e.g. a fallback-spawned Task
+    // child that itself calls finder) would inherit the parent's override
+    // var and resolve the wrong route / fail child activation.
+    const overrideEnv = serializeMmrSubagentModelPreferencesEnv(options.modelPreferencesOverride);
+    const childEnv = { ...process.env };
+    if (overrideEnv === undefined) {
+      delete childEnv[MMR_SUBAGENT_MODEL_PREFERENCES_ENV];
+    } else {
+      childEnv[MMR_SUBAGENT_MODEL_PREFERENCES_ENV] = overrideEnv;
+    }
     const proc = spawnImpl(command, args, {
       cwd: options.cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
+      env: childEnv,
     });
 
     let killTimer: NodeJS.Timeout | undefined;
@@ -796,6 +824,8 @@ export interface MmrSubagentRunOptions {
   systemPrompt?: string;
   /** See {@link RunMmrSubagentWorkerOptions.systemPromptDelivery}. */
   systemPromptDelivery?: "append" | "replace";
+  /** See {@link RunMmrSubagentWorkerOptions.modelPreferencesOverride}. */
+  modelPreferencesOverride?: readonly MmrModelPreference[];
   signal?: AbortSignal;
   outputByteLimit?: number;
   /** Optional grace period between SIGTERM and SIGKILL on cancellation. */
@@ -826,6 +856,7 @@ function toRunMmrSubagentWorkerOptions(
   if (options.tools !== undefined) mapped.tools = options.tools;
   if (options.systemPrompt !== undefined) mapped.systemPrompt = options.systemPrompt;
   if (options.systemPromptDelivery !== undefined) mapped.systemPromptDelivery = options.systemPromptDelivery;
+  if (options.modelPreferencesOverride !== undefined) mapped.modelPreferencesOverride = options.modelPreferencesOverride;
   if (options.signal !== undefined) mapped.signal = options.signal;
   if (options.outputByteLimit !== undefined) mapped.outputByteLimit = options.outputByteLimit;
   if (options.killTimeoutMs !== undefined) mapped.killTimeoutMs = options.killTimeoutMs;

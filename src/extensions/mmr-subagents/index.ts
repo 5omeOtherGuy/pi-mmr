@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMmrOwnedExtensionPath } from "../mmr-core/owned-tools.js";
-import { registerMmrFeatureGateProvider, registerMmrToolProvider } from "../mmr-core/runtime.js";
+import { getMmrSubagentState, registerMmrFeatureGateProvider, registerMmrToolProvider } from "../mmr-core/runtime.js";
+import { resetMmrWorkerFallbackState } from "./fallback.js";
 import { type FinderToolDeps, maybeNumberFinderReadToolResult, registerFinderTool } from "./finder.js";
 import { type LibrarianToolDeps, isLibrarianGithubToolPrerequisiteRegistered, registerLibrarianTool } from "./librarian.js";
 import { type MmrAdvisorToolDeps, registerOracleTool } from "./oracle.js";
@@ -64,6 +65,19 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
     registerTaskTool(pi, overrides.task ?? {});
     registerLibrarianTool(pi, overrides.librarian ?? {});
     pi.on("tool_result", maybeNumberFinderReadToolResult);
+    // Clear session-scoped worker-model fallback state at session
+    // boundaries so one session's failure counts and stored overrides can
+    // never leak into another (including the degenerate undefined-session
+    // case where scope keys collapse to "-"). Only a genuinely fresh
+    // session resets: "new" and "fork" start clean, while "resume" keeps
+    // any in-process state. Skip the reset inside a subagent worker so a
+    // child Pi process never wipes the parent's shared in-process map.
+    pi.on("session_start", (event) => {
+      if (getMmrSubagentState()) return;
+      if (event.reason === "new" || event.reason === "fork") {
+        resetMmrWorkerFallbackState();
+      }
+    });
     const capabilities: MmrSubagentsCapabilities = {
       finder: true,
       oracle: true,

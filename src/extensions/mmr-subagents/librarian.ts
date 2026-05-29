@@ -27,6 +27,11 @@ import {
   type MmrGithubToolInfoLike,
 } from "../mmr-github/tool-ownership.js";
 import { buildLibrarianWorkerSystemPrompt as buildLibrarianWorkerSystemPromptFromPrompts } from "./prompts.js";
+import {
+  type MmrWorkerFallbackRegistry,
+  readMmrWorkerSessionId,
+  runMmrWorkerWithModelFallback,
+} from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
@@ -718,9 +723,53 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
           : deps.runnerDeps
             ? createChildCliMmrSubagentRunner(deps.runnerDeps)
             : runner;
+
+      // Session-scoped model fallback (issue #9). Under an applied override
+      // the closure re-resolves the route (so parent spawn and child
+      // activation agree) and forwards the override to the child via the
+      // runner env channel.
+      const runWorkerOnce = async (
+        runArgs: { override?: readonly MmrModelPreference[] },
+      ): Promise<{ result: MmrWorkerResult; route: string | undefined }> => {
+        let options = runnerOptions;
+        let route = invocation.modelArg;
+        if (runArgs.override) {
+          const overrideInput: ResolveLibrarianInvocationInput = { ctx };
+          if (registeredTools !== undefined) overrideInput.registeredTools = registeredTools;
+          overrideInput.modelPreferencesOverride = runArgs.override;
+          const overrideInvocation = resolveInvocation(overrideInput);
+          if (overrideInvocation.ok) {
+            route = overrideInvocation.modelArg;
+            options = {
+              ...runnerOptions,
+              model: overrideInvocation.modelArg,
+              tools: overrideInvocation.workerTools,
+              modelPreferencesOverride: runArgs.override,
+            };
+          }
+          // If the override does not resolve (rare — the chosen candidate
+          // was authenticated), fall through to the original route WITHOUT
+          // forwarding the override env, so parent --model and child
+          // activation still agree rather than guaranteeing a mismatch.
+        }
+        const runResult = await effectiveRunner.run(options);
+        return { result: runResult, route };
+      };
+
       let result: MmrWorkerResult;
       try {
-        result = await effectiveRunner.run(runnerOptions);
+        const outcome = await runMmrWorkerWithModelFallback({
+          ctx,
+          sessionId: readMmrWorkerSessionId(ctx),
+          registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
+          toolName: LIBRARIAN_TOOL_NAME,
+          profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
+          candidatePreferences: requireLibrarianProfile().modelPreferences,
+          classifyOutcome: (candidate) => classifyMmrWorkerOutcome(candidate, { partialOutputPolicy: "fail-on-nonzero" }),
+          run: runWorkerOnce,
+        });
+        result = outcome.result;
+        if (outcome.route !== undefined) detailsCtx.resolvedModel = outcome.route;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (isContextWindowError(err)) {

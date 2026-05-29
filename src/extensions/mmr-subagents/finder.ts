@@ -26,6 +26,11 @@ import {
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildFinderWorkerSystemPrompt as buildFinderWorkerSystemPromptFromPrompts } from "./prompts.js";
+import {
+  type MmrWorkerFallbackRegistry,
+  readMmrWorkerSessionId,
+  runMmrWorkerWithModelFallback,
+} from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import {
   listAvailableMmrWorkerModelsFromCtx,
@@ -686,36 +691,7 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
       const availableModels = deps.listAvailableModels
         ? deps.listAvailableModels()
         : listAvailableMmrWorkerModelsFromCtx(ctx);
-      const preferences = resolveFinderModelPreferences(cwd, deps);
-      const model = selectFinderWorkerModel(availableModels, preferences);
-      const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
-      const runnerOptions: MmrSubagentRunOptions = {
-        profileName: FINDER_SUBAGENT_PROFILE,
-        prompt: params.query,
-        cwd,
-        // Child Pi process computes its own workerTools via
-        // `resolveMmrSubagentInvocation` against its registered-tool
-        // inventory. Skipping explicit --tools keeps parent and child
-        // agreement even if the child's `read`/`grep`/`find` registry
-        // diverges from the parent's, preventing a spurious tools.mismatch
-        // failure at child activation time.
-        systemPrompt: assembleFinderSystemPrompt(cwd, deps.buildSystemPrompt),
-        signal,
-        outputByteLimit,
-        onProgress: onUpdate
-          ? (snapshot) => {
-              onUpdate({
-                content: [{ type: "text", text: progressContent(snapshot) }],
-                details: buildProgressDetails(snapshot, model, cwd, contextWindow),
-              });
-            }
-          : undefined,
-      };
-      if (model) runnerOptions.model = model;
-
-      // When the legacy `runWorker` seam is in use, forward `runnerDeps`
-      // through the adapter so existing tests that inject a custom spawn
-      // continue to work. The new `runner` seam owns its own deps.
+      const basePreferences = resolveFinderModelPreferences(cwd, deps);
       const effectiveRunner = deps.runner
         ? deps.runner
         : deps.runWorker
@@ -723,10 +699,62 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
           : deps.runnerDeps
             ? createChildCliMmrSubagentRunner(deps.runnerDeps)
             : runner;
-      const result = await effectiveRunner.run(runnerOptions);
+
+      // Session-scoped model fallback (issue #9). The closure owns normal
+      // route selection; under an override it selects from the override and
+      // forwards it to the child via the runner.
+      const runWorkerOnce = async (
+        runArgs: { override?: readonly MmrModelPreference[] },
+      ): Promise<{ result: Awaited<ReturnType<typeof effectiveRunner.run>>; route: string | undefined }> => {
+        const preferences = runArgs.override
+          ? expandMmrModelPreferencesToStrings(runArgs.override)
+          : basePreferences;
+        const model = selectFinderWorkerModel(availableModels, preferences);
+        const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
+        const runnerOptions: MmrSubagentRunOptions = {
+          profileName: FINDER_SUBAGENT_PROFILE,
+          prompt: params.query,
+          cwd,
+        // Child Pi process computes its own workerTools via
+        // `resolveMmrSubagentInvocation` against its registered-tool
+        // inventory. Skipping explicit --tools keeps parent and child
+        // agreement even if the child's `read`/`grep`/`find` registry
+        // diverges from the parent's, preventing a spurious tools.mismatch
+        // failure at child activation time.
+          systemPrompt: assembleFinderSystemPrompt(cwd, deps.buildSystemPrompt),
+          signal,
+          outputByteLimit,
+          onProgress: onUpdate
+            ? (snapshot) => {
+                onUpdate({
+                  content: [{ type: "text", text: progressContent(snapshot) }],
+                  details: buildProgressDetails(snapshot, model, cwd, contextWindow),
+                });
+              }
+            : undefined,
+        };
+        if (model) runnerOptions.model = model;
+        if (runArgs.override) runnerOptions.modelPreferencesOverride = runArgs.override;
+        const result = await effectiveRunner.run(runnerOptions);
+        return { result, route: model };
+      };
+
+      const outcome = await runMmrWorkerWithModelFallback({
+        ctx,
+        sessionId: readMmrWorkerSessionId(ctx),
+        registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
+        toolName: FINDER_TOOL_NAME,
+        profileName: FINDER_SUBAGENT_PROFILE,
+        candidatePreferences: requireFinderProfile().modelPreferences,
+        classifyOutcome: (result) => classifyMmrWorkerOutcome(result, { partialOutputPolicy: "fail-on-nonzero" }),
+        run: runWorkerOnce,
+      });
+
+      const model = outcome.route;
+      const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
       return {
-        content: [{ type: "text", text: buildFinalContent(result, cwd) }],
-        details: buildDetails(result, model, cwd, contextWindow),
+        content: [{ type: "text", text: buildFinalContent(outcome.result, cwd) }],
+        details: buildDetails(outcome.result, model, cwd, contextWindow),
       };
     },
   } satisfies ToolDefinition;

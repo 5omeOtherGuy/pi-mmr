@@ -420,6 +420,10 @@ export function createApplyPatchTool(): ToolDefinition {
     promptSnippet: APPLY_PATCH_PROMPT_SNIPPET,
     promptGuidelines: [...APPLY_PATCH_PROMPT_GUIDELINES],
     parameters: APPLY_PATCH_PARAMS,
+    // Workspace-mutating tool: force sequential scheduling so an assistant
+    // turn that batches apply_patch with other tool calls runs the whole
+    // batch in model order instead of racing concurrent edits.
+    executionMode: "sequential",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       // Errors from `applyCodexPatch` (ApplyPatchError or otherwise)
       // propagate as-is; Pi's tool runtime turns a thrown error into a

@@ -22,6 +22,11 @@ import {
 import { checkMmrToolParams } from "../mmr-core/tool-params.js";
 import type { MmrModelRegistryLike, MmrRegisteredModelLike } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings } from "../mmr-core/settings.js";
+import {
+  type MmrWorkerFallbackRegistry,
+  readMmrWorkerSessionId,
+  runMmrWorkerWithModelFallback,
+} from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
@@ -741,6 +746,12 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
     promptSnippet: TASK_PROMPT_SNIPPET,
     promptGuidelines: [...TASK_PROMPT_GUIDELINES],
     parameters: taskParameters,
+    // Workflow worker: a Task child can run bash/edit/write in the
+    // workspace, so force sequential scheduling. Read-only research
+    // workers (finder, oracle, librarian, cthulu) stay parallel-eligible
+    // because independent read-only subagent research is safe to run
+    // concurrently.
+    executionMode: "sequential" as const,
     renderShell: "self" as const,
     renderCall(args, theme, context) {
       return renderMmrSubagentCall(TASK_TOOL_NAME, args, theme, context);
@@ -878,11 +889,61 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
           : deps.runnerDeps
             ? createChildCliMmrSubagentRunner(deps.runnerDeps)
             : runner;
+      // Session-scoped model fallback (issue #9). The closure re-resolves
+      // the route under an applied override so parent spawn and child
+      // activation agree, and forwards the override to the child via the
+      // runner env channel. Task is mode-derived, so the fallback scope key
+      // includes the parent mode.
+      const runWorkerOnce = async (
+        runArgs: { override?: readonly MmrModelPreference[] },
+      ): Promise<{ result: MmrWorkerResult; route: string | undefined }> => {
+        let options = runnerOptions;
+        let route = invocation.modelArg;
+        if (runArgs.override) {
+          const overrideInput: ResolveTaskInvocationInput = { ctx, parentMode };
+          if (registeredTools !== undefined) overrideInput.registeredTools = registeredTools;
+          overrideInput.modelPreferencesOverride = runArgs.override;
+          const overrideInvocation = resolveInvocation(overrideInput);
+          if (overrideInvocation.ok) {
+            route = overrideInvocation.modelArg;
+            options = {
+              ...runnerOptions,
+              model: overrideInvocation.modelArg,
+              tools: overrideInvocation.workerTools,
+              modelPreferencesOverride: runArgs.override,
+            };
+          }
+          // If the override does not resolve (rare — the chosen candidate
+          // was authenticated), fall through to the original route WITHOUT
+          // forwarding the override env, so parent --model and child
+          // activation still agree rather than guaranteeing a mismatch.
+        }
+        const runResult = await effectiveRunner.run(options);
+        return { result: runResult, route };
+      };
+
       // Spec §9.4 rule 2: runner throws (spawn failures) before/while
       // spawning are mapped to status `spawn-error`.
       let result: MmrWorkerResult;
       try {
-        result = await effectiveRunner.run(runnerOptions);
+        const outcome = await runMmrWorkerWithModelFallback({
+          ctx,
+          sessionId: readMmrWorkerSessionId(ctx),
+          registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
+          toolName: TASK_TOOL_NAME,
+          profileName: TASK_SUBAGENT_PROFILE,
+          ...(parentMode !== undefined ? { parentMode } : {}),
+          // Rank/suggest candidates from the parent mode's chain when the
+          // profile declares mode-specific preferences (e.g. rush uses a
+          // cheaper chain), falling back to the default chain otherwise.
+          candidatePreferences:
+            (parentMode !== undefined ? requireTaskProfile().modeModelPreferences?.[parentMode] : undefined)
+            ?? requireTaskProfile().modelPreferences,
+          classifyOutcome: (candidate) => classifyMmrWorkerOutcome(candidate, { partialOutputPolicy: "prefer-usable-output" }),
+          run: runWorkerOnce,
+        });
+        result = outcome.result;
+        if (outcome.route !== undefined) detailsCtx.resolvedModel = outcome.route;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const failureDetails = makeFailureResult({

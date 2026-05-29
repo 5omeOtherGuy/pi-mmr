@@ -90,6 +90,7 @@ Concrete prompts live in [`prompts.ts`](prompts.ts):
 - Parameters: `{ prompt: string, description: string }`; caps `TASK_PROMPT_MAX_BYTES` (8 KiB), `TASK_DESCRIPTION_MAX_BYTES` (512 B).
 - Parent spawn passes `--mmr-parent-mode`, resolver-selected `--model`, effective `--tools`, and exact system-prompt replacement.
 - Status values: `success`, `validation-error`, `activation-error`, `aborted`, `spawn-error`, `worker-error`, `no-agent-start`, `empty-output`. Task uses the `prefer-usable-output` policy: nonzero exit with usable final text still classifies as `success`.
+- Execution mode: `Task` declares `executionMode: "sequential"` (issue #8) because a Task child can run `bash`/`edit`/`write` in the workspace. Pi serializes the whole assistant tool-call batch when any called tool is sequential. The read-only research workers (`finder`, `oracle`, `librarian`, `cthulu`) stay parallel-eligible, so independent read-only subagent research can still run concurrently.
 
 ### `history-reader`
 

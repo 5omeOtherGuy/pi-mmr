@@ -39,6 +39,7 @@ Guidelines:
 
 bash:
 - Do NOT chain commands with `;` or `&&` or use `&` for background processes; make separate tool calls instead.
+- Do NOT emit dependent or stateful `bash` calls (e.g. git checkout/commit/push/PR-create, install/build/test/release) as parallel sibling tool calls in one assistant turn; the runtime may run siblings concurrently, so order them as separate sequential steps.
 - Do NOT use interactive commands (REPLs, editors, password prompts).
 - Environment variables and `cd` do not persist between commands; make separate tool calls instead.
 - On Windows, use PowerShell commands and `\` path separators.

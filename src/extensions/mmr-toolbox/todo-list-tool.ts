@@ -583,6 +583,10 @@ export function createTodoListTool(
     promptSnippet: TASK_LIST_PROMPT_SNIPPET,
     promptGuidelines: [...TASK_LIST_PROMPT_GUIDELINES],
     parameters: TASK_LIST_PARAMS,
+    // Session-state-mutating tool: whole-list replacement means two
+    // concurrent task_list calls in one assistant turn would race the
+    // stored list, so force sequential scheduling.
+    executionMode: "sequential",
     async execute(_toolCallId, params: TaskListParams, _signal, _onUpdate, ctx) {
       // Defense-in-depth validation: TypeBox declares the shape for Pi's
       // host validator, but tests and any host that skips schema validation

@@ -3,6 +3,10 @@ import { hasMmrGithubOwnedTools, type MmrGithubToolInfoLike } from "../mmr-githu
 import { isMmrModeKey } from "./modes.js";
 import { setMmrSubagentState, type MmrSubagentState } from "./runtime.js";
 import { loadMmrCoreSettings } from "./settings.js";
+import {
+  MMR_SUBAGENT_MODEL_PREFERENCES_ENV,
+  parseMmrSubagentModelPreferencesEnv,
+} from "./subagent-model-override-env.js";
 import { getMmrSubagentProfile, listMmrSubagentProfiles } from "./subagent-profiles.js";
 import {
   MMR_SUBAGENT_ACTIVATION_FAILURE_STDERR_PREFIX,
@@ -109,7 +113,14 @@ export async function applyMmrSubagentProfile(
   bindings.setSettingsWarnings([...loadedSettings.warnings]);
   bindings.notifyWarnings(ctx, loadedSettings.warnings);
 
-  const subagentOverride = subagentPreferences[profile.name];
+  // Session-scoped fallback override (issue #9) takes precedence over the
+  // on-disk settings override. The parent tool forwards the user-selected
+  // fallback preferences through the env channel for this spawn only; it
+  // is never persisted. A malformed/absent value parses to `undefined`,
+  // so the child cleanly falls back to settings/profile resolution.
+  const envOverride = parseMmrSubagentModelPreferencesEnv(process.env[MMR_SUBAGENT_MODEL_PREFERENCES_ENV]);
+  const settingsOverride = subagentPreferences[profile.name];
+  const subagentOverride = envOverride ?? settingsOverride;
 
   const explicitFlags = extractExplicitWorkerCliFlags(process.argv.slice(2));
   const explicitModel = explicitFlags.explicitModel !== undefined && ctx.model

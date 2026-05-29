@@ -64,6 +64,12 @@ A session-local todo list. Plan and track multi-step work within the current Pi 
 - **Result shape**: `content[0].text` is a short human-readable summary of the new list plus a capped previous-list summary when one existed. `details` is `{ oldTasks, newTasks, allCompleted }` on success or `{ error }` with `isError: true` on validation failure.
 - **Errors**: validation failures (missing fields, empty `content` / `activeForm`, unknown status, unknown field) return `{ isError: true, details: { error } }` so the model reacts. Persistence failures propagate as unexpected errors so Pi surfaces them as tool crashes.
 
+### Execution mode (capability-aware parallelism)
+
+Both `apply_patch` and `task_list` declare `executionMode: "sequential"`. Pi's agent loop runs the entire assistant tool-call batch sequentially, in model order, whenever any called tool is sequential, so a turn that mixes `apply_patch` (workspace mutation) or `task_list` (whole-list session-state replacement) with other tool calls can no longer race itself. Read-only tools keep Pi's default parallel scheduling.
+
+This is the limit of what an extension can enforce: Pi exposes no API to set `executionMode` on its built-in `bash` / `edit` / `write` tools or to change the agent-level default, so those remain parallel-eligible. `mmr-core`'s built-in `bash` guidance instead steers the model away from emitting dependent/stateful `bash` calls as parallel siblings.
+
 ### Pinned UI widget and `/tasks`
 
 `task_list` projects the current session's list onto Pi's persistent widget above the input editor (widget id `pi-mmr-task-list`). The session log entry is the source of truth; the widget is a UI mirror. Refresh fires after every successful tool call and after Pi emits `session_compact`, so the display is reprojected from persisted state after compaction reloads context.

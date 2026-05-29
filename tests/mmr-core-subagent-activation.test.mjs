@@ -159,6 +159,41 @@ describe("mmr-core subagent activation", () => {
     assert.equal(notifications.find((n) => n.level === "error"), undefined);
   });
 
+  it("applies the session fallback env override (#9) over profile defaults at child activation", async () => {
+    // Issue #9: the parent forwards a user-selected fallback through the
+    // env channel for the spawn only. Child activation must read it and
+    // resolve the same route the parent passed via --model, taking
+    // precedence over the profile's default model preferences (never
+    // persisted to settings).
+    const { MMR_SUBAGENT_MODEL_PREFERENCES_ENV } = await importSource("extensions/mmr-core/subagent-model-override-env.ts");
+    const extension = (await importSource("extensions/mmr-core/index.ts")).default;
+    const { pi, handlers, calls } = createPi({ flags: { "mmr-subagent": "finder" } });
+    const { ctx } = createContext({
+      // Both authenticated. Finder's default chain would pick gpt-5.4-mini
+      // first; the env override forces claude-haiku-4-5 instead.
+      models: [
+        { provider: "openai-codex", id: "gpt-5.4-mini" },
+        { provider: "anthropic", id: "claude-haiku-4-5" },
+      ],
+    });
+    extension(pi);
+
+    const original = process.env[MMR_SUBAGENT_MODEL_PREFERENCES_ENV];
+    process.env[MMR_SUBAGENT_MODEL_PREFERENCES_ENV] = JSON.stringify([
+      { model: "claude-haiku-4-5", providers: ["anthropic"] },
+    ]);
+    try {
+      await handlers.get("session_start")({ type: "session_start", reason: "new" }, ctx);
+    } finally {
+      if (original === undefined) delete process.env[MMR_SUBAGENT_MODEL_PREFERENCES_ENV];
+      else process.env[MMR_SUBAGENT_MODEL_PREFERENCES_ENV] = original;
+    }
+
+    assert.equal(calls.setModel.length, 1, "setModel must be called once");
+    assert.equal(calls.setModel[0].provider, "anthropic");
+    assert.equal(calls.setModel[0].id, "claude-haiku-4-5");
+  });
+
   it("filters profile.tools through the tool registry before pi.setActiveTools — same path modes use", async () => {
     // Subagent activation must mirror locked-mode activation: a profile
     // is allowed to list its full intended tool surface (including tools

@@ -83,6 +83,17 @@ function readThinkingLevel(value: unknown): ThinkingLevel | undefined {
   return isThinkingLevel(value) ? value : undefined;
 }
 
+/**
+ * Parse a single model-preference value (string shorthand `provider/model`
+ * or `{ model, providers?, thinkingLevel? }` object) into a normalized
+ * {@link MmrModelPreference}. Exported so the session-scoped subagent
+ * fallback can parse env-forwarded overrides through the same normalizer
+ * the settings loader uses, instead of duplicating the shape rules.
+ */
+export function parseMmrModelPreferenceValue(value: unknown): MmrModelPreference | undefined {
+  return readModelPreference(value);
+}
+
 function readModelPreference(value: unknown): MmrModelPreference | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();

@@ -184,7 +184,7 @@ describe("mmr-subagents extension factory", () => {
     );
     assert.equal(typeof handlers.get("tool_result"), "function", "finder installs a read-result normalizer");
     assert.equal(typeof handlers.get("before_agent_start"), "function", "Task captures the parent prompt for mode-derived workers");
-    assert.equal(handlers.has("session_start"), false, "this slice has no warnings to drain on session_start");
+    assert.equal(typeof handlers.get("session_start"), "function", "clears session-scoped worker-fallback state on new/fork sessions");
   });
 
   it("numbers native read output only while the finder subagent profile is active", async () => {

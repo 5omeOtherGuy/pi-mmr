@@ -24,6 +24,11 @@ import {
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildOracleWorkerSystemPrompt as buildOracleWorkerSystemPromptFromPrompts } from "./prompts.js";
+import {
+  type MmrWorkerFallbackRegistry,
+  readMmrWorkerSessionId,
+  runMmrWorkerWithModelFallback,
+} from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import {
   listAvailableMmrWorkerModelsFromCtx,
@@ -717,19 +722,36 @@ export function createMmrAdvisorTool(
       const availableModels = deps.listAvailableModels
         ? deps.listAvailableModels()
         : listAvailableMmrWorkerModelsFromCtx(ctx);
-      const preferences = resolveAdvisorModelPreferences(
+      const basePreferences = resolveAdvisorModelPreferences(
         config.profileName,
         config.defaultModelPreferences,
         cwd,
         deps,
       );
-      const model = selectOracleWorkerModel(availableModels, preferences);
-      const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
       const profile = requireMmrAdvisorProfile(config.profileName);
-      const runnerOptions: MmrSubagentRunOptions = {
-        profileName: config.profileName,
-        prompt: userPrompt,
-        cwd,
+      const effectiveRunner = deps.runner
+        ? deps.runner
+        : deps.runWorker
+          ? createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps)
+          : deps.runnerDeps
+            ? createChildCliMmrSubagentRunner(deps.runnerDeps)
+            : runner;
+
+      // Run the worker with session-scoped model fallback (issue #9). The
+      // closure owns normal route selection; when a fallback override is
+      // supplied it selects from the override and forwards it to the child.
+      const runWorkerOnce = async (
+        runArgs: { override?: readonly MmrModelPreference[] },
+      ): Promise<{ result: Awaited<ReturnType<typeof effectiveRunner.run>>; route: string | undefined }> => {
+        const preferences = runArgs.override
+          ? expandMmrModelPreferencesToStrings(runArgs.override)
+          : basePreferences;
+        const model = selectOracleWorkerModel(availableModels, preferences);
+        const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
+        const runnerOptions: MmrSubagentRunOptions = {
+          profileName: config.profileName,
+          prompt: userPrompt,
+          cwd,
         // Worker tool set is resolved by the child Pi process against its
         // own registered-tool inventory (see `resolveMmrSubagentInvocation`
         // in mmr-core). Parent must not pass explicit --tools here because
@@ -738,31 +760,40 @@ export function createMmrAdvisorTool(
         // read_web_page, mmr-history's read_session / find_session). The
         // child computes the deny-aware, registered intersection itself and
         // applies it via pi.setActiveTools.
-        systemPrompt: assembleAdvisorSystemPrompt(profile, cwd, deps.buildSystemPrompt),
-        signal,
-        outputByteLimit,
-        onProgress: onUpdate
-          ? (snapshot) => {
-              onUpdate({
-                content: [{ type: "text", text: progressContent(snapshot, config.progressPlaceholder) }],
-                details: buildProgressDetails(config, snapshot, model, cwd, attachments, contextWindow),
-              });
-            }
-          : undefined,
+          systemPrompt: assembleAdvisorSystemPrompt(profile, cwd, deps.buildSystemPrompt),
+          signal,
+          outputByteLimit,
+          onProgress: onUpdate
+            ? (snapshot) => {
+                onUpdate({
+                  content: [{ type: "text", text: progressContent(snapshot, config.progressPlaceholder) }],
+                  details: buildProgressDetails(config, snapshot, model, cwd, attachments, contextWindow),
+                });
+              }
+            : undefined,
+        };
+        if (model) runnerOptions.model = model;
+        if (runArgs.override) runnerOptions.modelPreferencesOverride = runArgs.override;
+        const result = await effectiveRunner.run(runnerOptions);
+        return { result, route: model };
       };
-      if (model) runnerOptions.model = model;
 
-      const effectiveRunner = deps.runner
-        ? deps.runner
-        : deps.runWorker
-          ? createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps)
-          : deps.runnerDeps
-            ? createChildCliMmrSubagentRunner(deps.runnerDeps)
-            : runner;
-      const result = await effectiveRunner.run(runnerOptions);
+      const outcome = await runMmrWorkerWithModelFallback({
+        ctx,
+        sessionId: readMmrWorkerSessionId(ctx),
+        registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
+        toolName: config.toolName,
+        profileName: config.profileName,
+        candidatePreferences: profile.modelPreferences,
+        classifyOutcome: (result) => classifyMmrWorkerOutcome(result, { partialOutputPolicy: "fail-on-nonzero" }),
+        run: runWorkerOnce,
+      });
+
+      const model = outcome.route;
+      const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
       return {
-        content: [{ type: "text", text: buildFinalContent(config.outputLabel, result) }],
-        details: buildDetails(config, result, model, cwd, attachments, contextWindow),
+        content: [{ type: "text", text: buildFinalContent(config.outputLabel, outcome.result) }],
+        details: buildDetails(config, outcome.result, model, cwd, attachments, contextWindow),
       };
     },
   } satisfies ToolDefinition;
