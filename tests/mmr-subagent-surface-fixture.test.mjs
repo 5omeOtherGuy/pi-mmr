@@ -42,6 +42,22 @@ function assertFixtureMatches(filename, actual) {
   );
 }
 
+function assertNoRepeatedLongSystemPromptLines(name, rendered) {
+  const systemPrompt = rendered.split("=== Tools ===")[0] ?? rendered;
+  const counts = new Map();
+  for (const line of systemPrompt.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length < 80) continue;
+    counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
+  }
+
+  const duplicates = [...counts]
+    .filter(([, count]) => count > 1)
+    .map(([line, count]) => `${count}x ${line}`);
+
+  assert.deepEqual(duplicates, [], `${name}: subagent system prompt must not duplicate long instruction lines`);
+}
+
 function makePiToolManifestEntry(name, description, schema) {
   return {
     name,
@@ -308,6 +324,7 @@ describe("mmr-subagent-surface: finder fixture", () => {
     assert.match(rendered, /You are a fast, parallel code search agent\./);
     assert.match(rendered, /Workspace root: \/abs\/repo/);
     assert.match(rendered, /8\+ parallel tool calls/);
+    assertNoRepeatedLongSystemPromptLines("finder", rendered);
 
     assertFixtureMatches("finder.md", rendered);
   });
@@ -362,8 +379,25 @@ describe("mmr-subagent-surface: Task fixture", () => {
     assert.match(rendered, /<mmr_mode name="smart">/);
     assert.match(rendered, /## Task Worker Role/);
     assert.match(rendered, /Return a compact result, not a transcript/);
+    assertNoRepeatedLongSystemPromptLines("Task", rendered);
 
     assertFixtureMatches("task.md", rendered);
+  });
+
+  it("does not duplicate parent mode guidance when Task receives an already-rewritten parent prompt", () => {
+    const profile = getMmrSubagentProfile("task-subagent");
+    const rewrittenParentPrompt = readFileSync(path.join(import.meta.dirname, "fixtures/mmr-core-prompts/smart.md"), "utf8");
+    const result = assembleMmrSubagentSurface({
+      profile,
+      baseSystemPrompt: rewrittenParentPrompt,
+      activeToolManifest: buildTaskActiveManifest(),
+      cwd: "/abs/repo",
+      parentMode: "smart",
+    });
+
+    const rendered = renderMmrPromptDebugFixture(result);
+    assert.match(rendered, /## Task Worker Role/);
+    assertNoRepeatedLongSystemPromptLines("Task runtime parent prompt", rendered);
   });
 });
 
@@ -414,6 +448,7 @@ describe("mmr-subagent-surface: oracle fixture", () => {
     assert.match(rendered, /Workspace root: \/abs\/repo/);
     assert.match(rendered, /TL;DR/);
     assert.match(rendered, /IMPORTANT: Only your last message is returned/);
+    assertNoRepeatedLongSystemPromptLines("oracle", rendered);
 
     assertFixtureMatches("oracle.md", rendered);
   });
@@ -467,6 +502,7 @@ describe("mmr-subagent-surface: librarian fixture", () => {
     assert.match(rendered, /Search code inside a single GitHub repository/);
     assert.doesNotMatch(rendered, /\/home\//);
     assert.doesNotMatch(rendered, /docs\/private\//i);
+    assertNoRepeatedLongSystemPromptLines("librarian", rendered);
 
     assertFixtureMatches("librarian-github.md", rendered);
   });

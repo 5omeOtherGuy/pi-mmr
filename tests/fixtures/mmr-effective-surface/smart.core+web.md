@@ -82,8 +82,6 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 
 ## Tool execution policy
 
-Use context first; reach for a tool only when it would change your answer. Run independent read-only calls in parallel; never parallelize edits to the same file. Avoid repeated reads of the same content.
-
 Prefer the repository's existing patterns, frameworks, and helper APIs over inventing new ones. Use dedicated tools when they are active and relevant; otherwise choose the safest local mechanism available in the current tool surface.
 
 Before manually chaining local tools for bounded multi-step work, check whether an available purpose-built worker or subagent tool fits the job. Use the specialized tool when it matches the work; use direct tools for exact file/path/symbol lookups or single-step actions.

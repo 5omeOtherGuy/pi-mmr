@@ -122,11 +122,22 @@ export function assembleActiveSurface(
   const docsBlankIdx = base.indexOf("\n\n", piDocsStart);
   const docsDateIdx = base.indexOf(DATE_TAIL_ANCHOR, piDocsStart);
   const docsEndCandidates = [docsBlankIdx, docsDateIdx].filter((idx) => idx !== -1);
-  const headEnd = docsEndCandidates.length === 0 ? base.length : Math.min(...docsEndCandidates);
+  const docsEnd = docsEndCandidates.length === 0 ? base.length : Math.min(...docsEndCandidates);
+
+  // `before_agent_start` handlers are chained. Mode-derived Task workers can
+  // receive the parent prompt after mmr-core already assembled it, then call
+  // this function again to rebuild the active-tools block for the child. In
+  // that case, strip the previous MMR-owned shared/mode blocks and preserve
+  // only Pi's docs block plus the original tail; otherwise repeated assembly
+  // duplicates every long MMR instruction.
+  const previousMmrGateStart = base.indexOf(MMR_CTHULU_SUMMON_GATE, docsEnd);
+  const headEnd = previousMmrGateStart === -1
+    ? docsEnd
+    : previousMmrGateStart + MMR_CTHULU_SUMMON_GATE.length;
 
   const toolsContent = base.slice(toolsStart, toolsEnd);
   const guidelinesContent = base.slice(guidelinesStart, guidelinesEnd);
-  const piDocumentationContent = base.slice(piDocsStart, headEnd);
+  const piDocumentationContent = base.slice(piDocsStart, docsEnd);
 
   const template = MMR_MODE_PROMPT_TEMPLATES[mode];
   const before = base.slice(0, introStart);

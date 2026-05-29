@@ -15,6 +15,7 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Fixed
 
+- `mmr-core`: remove a duplicated locked-mode prompt guidance sentence and make reassembly of an already MMR-rewritten prompt replace prior MMR-owned blocks, so the tool-use posture and shared guidance are emitted once in locked-mode and mode-derived Task prompts.
 - Security audit: resolve GitHub code-scanning findings by replacing slow-path regexes, hardening HTML/entity and URL-scheme handling, removing file check-then-use races, avoiding shell interpolation in smoke-test path resolution, and cleaning up static-analysis quality warnings in tests and helpers.
 - `mmr-subagents`: a successful `finder` or `oracle` run is now rendered as `completed` even when an earlier worker turn preserved a non-fatal provider `errorMessage` (for example a transient HTTP 429 before the usable final answer). `finder`/`oracle` worker details now carry a `status` from the shared `classifyMmrWorkerOutcome` classifier — matching `librarian` — so the renderer no longer falls back to the legacy heuristic that flagged any preserved `errorMessage` as a failed run, and the preserved message renders as a warning instead of an error. Covered by new render-seam cases in `tests/mmr-subagents-finder.test.mjs` and `tests/mmr-subagents-oracle.test.mjs`.
 

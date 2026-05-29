@@ -53,6 +53,18 @@ const MODE_MARKER_OPENINGS = {
   deep: '<mmr_mode name="deep">You are an autonomous coding agent in Deep mode.',
 };
 
+function repeatedLongInstructionLines(prompt) {
+  const counts = new Map();
+  for (const line of prompt.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length < 80) continue;
+    counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
+  }
+  return [...counts]
+    .filter(([, count]) => count > 1)
+    .map(([line, count]) => `${count}x ${line}`);
+}
+
 async function importRuntime() {
   const runtimeUrl = pathToFileURL(path.join(getPreparedSourceRoot(), "extensions/mmr-core/runtime.ts")).href;
   return import(runtimeUrl);
@@ -83,6 +95,50 @@ describe("mmr-core prompt layer", () => {
       const result = buildMmrPromptLayer({ state, baseSystemPrompt: BASE_PROMPT });
       assert.equal(result, readModeFixture(mode), `${mode}: rendered prompt must match fixture`);
       assert.equal(result.startsWith(`${PI_IDENTITY_LINE} ${MODE_MARKER_OPENINGS[mode]}`), true);
+    }
+  });
+
+  it("emits the shared tool-use posture only once per locked-mode prompt", async () => {
+    const { buildMmrPromptLayer } = await importSource("extensions/mmr-core/prompt.ts");
+    const { MMR_TOOL_USE_POSTURE_LINE } = await importSource("extensions/mmr-core/prompt-assembly.ts");
+
+    for (const mode of MODES) {
+      const state = createState({ mode, displayName: mode[0].toUpperCase() + mode.slice(1) });
+      const result = buildMmrPromptLayer({ state, baseSystemPrompt: BASE_PROMPT });
+      assert.equal(
+        result.split(MMR_TOOL_USE_POSTURE_LINE).length - 1,
+        1,
+        `${mode}: duplicated prompt guidance reinforces repetitive tool-use behavior`,
+      );
+    }
+  });
+
+  it("does not duplicate long instruction lines in locked-mode prompts", async () => {
+    const { buildMmrPromptLayer } = await importSource("extensions/mmr-core/prompt.ts");
+
+    for (const mode of MODES) {
+      const state = createState({ mode, displayName: mode[0].toUpperCase() + mode.slice(1) });
+      const result = buildMmrPromptLayer({ state, baseSystemPrompt: BASE_PROMPT });
+      assert.deepEqual(
+        repeatedLongInstructionLines(result),
+        [],
+        `${mode}: long model-visible instruction lines must not be emitted more than once`,
+      );
+    }
+  });
+
+  it("does not duplicate shared guidance when reassembling an already MMR-rewritten prompt", async () => {
+    const { buildMmrPromptLayer } = await importSource("extensions/mmr-core/prompt.ts");
+
+    for (const mode of MODES) {
+      const state = createState({ mode, displayName: mode[0].toUpperCase() + mode.slice(1) });
+      const first = buildMmrPromptLayer({ state, baseSystemPrompt: BASE_PROMPT });
+      const second = buildMmrPromptLayer({ state, baseSystemPrompt: first });
+      assert.deepEqual(
+        repeatedLongInstructionLines(second),
+        [],
+        `${mode}: reassembly must replace prior MMR-owned blocks instead of preserving and duplicating them`,
+      );
     }
   });
 
