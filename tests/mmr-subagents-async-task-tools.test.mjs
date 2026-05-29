@@ -31,6 +31,45 @@ function stubTaskInvocation() {
   });
 }
 
+const LIBRARIAN_WORKER_TOOLS = Object.freeze([
+  "read_github",
+  "list_directory_github",
+  "glob_github",
+  "search_github",
+  "commit_search",
+  "diff_github",
+  "list_repositories",
+]);
+
+function stubLibrarianInvocation() {
+  return () => ({
+    ok: true,
+    profile: { name: "librarian" },
+    promptRoute: "standalone",
+    selected: {
+      provider: "claude-subscription",
+      model: "claude-opus-4-6",
+      thinkingLevel: "medium",
+      registeredModel: { provider: "claude-subscription", id: "claude-opus-4-6", contextWindow: 200000 },
+    },
+    modelArg: "claude-subscription/claude-opus-4-6",
+    workerTools: LIBRARIAN_WORKER_TOOLS,
+    tools: LIBRARIAN_WORKER_TOOLS,
+    toolResolution: { intendedTools: LIBRARIAN_WORKER_TOOLS, deniedTools: [], omittedTools: [] },
+    candidates: [],
+    diagnostics: [],
+  });
+}
+
+async function makeGithubOwnedPi() {
+  const ownership = await importSource("extensions/mmr-github/tool-ownership.ts");
+  ownership.__resetMmrGithubToolSourcePathsForTests();
+  ownership.registerMmrGithubToolSourcePath("/mmr-github");
+  return {
+    getAllTools: () => ownership.MMR_GITHUB_TOOL_NAMES.map((name) => ({ name, sourceInfo: { path: "/mmr-github" } })),
+  };
+}
+
 function makeWorkerResult(overrides = {}) {
   return {
     messages: [],
@@ -155,6 +194,149 @@ describe("start_task", () => {
     assert.equal(second.details.taskId, undefined);
     def.resolve(makeWorkerResult());
     await flush();
+  });
+
+  it("accepts explicit Task agent params as a background Task worker", async () => {
+    const { startTask, def } = await makeToolset();
+    const result = await startTask.execute(
+      "call-1",
+      { agent: "Task", params: GOOD_PARAMS },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.equal(result.details.agent, "Task");
+    assert.equal(result.details.taskId, "t1");
+    assert.equal(def.calls[0].profileName, "task-subagent");
+    def.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("runs finder as a selected background agent and polls its final result", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "finder-1" });
+    const def = makeDeferredRunner();
+    const startTask = tools.createStartTaskTool({
+      registry,
+      sessionKey: "S",
+      finderDeps: { runner: def.runner, buildSystemPrompt: () => "FINDER PROMPT" },
+    });
+    const poll = tools.createTaskPollTool({ registry, sessionKey: "S" });
+
+    const started = await startTask.execute(
+      "f0",
+      { agent: "finder", description: "find files", params: { query: "Find the async task tool" } },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.equal(started.details.agent, "finder");
+    assert.equal(started.details.taskId, "finder-1");
+    assert.equal(def.calls[0].profileName, "finder");
+    assert.equal(def.calls[0].prompt, "Find the async task tool");
+
+    def.resolve(makeWorkerResult({ finalOutput: "finder answer", truncatedFinalOutput: "finder answer" }));
+    await flush();
+    const result = await poll.execute("p0", { task_id: "finder-1" }, undefined, undefined, CTX);
+    assert.equal(result.details.status, "succeeded");
+    assert.equal(result.details.agent, "finder");
+    assert.equal(result.details.final.worker, "mmr-subagents.finder");
+    assert.match(result.content[0].text, /finder answer/);
+  });
+
+  it("maps a selected agent empty-output result to a failed outer async status", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "finder-empty" });
+    const def = makeDeferredRunner();
+    const startTask = tools.createStartTaskTool({
+      registry,
+      sessionKey: "S",
+      finderDeps: { runner: def.runner, buildSystemPrompt: () => "FINDER PROMPT" },
+    });
+    const poll = tools.createTaskPollTool({ registry, sessionKey: "S" });
+
+    await startTask.execute(
+      "f-empty",
+      { agent: "finder", description: "empty finder", params: { query: "Find nothing" } },
+      undefined,
+      undefined,
+      CTX,
+    );
+    def.resolve(makeWorkerResult({ finalOutput: "", truncatedFinalOutput: "" }));
+    await flush();
+    const result = await poll.execute("p-empty", { task_id: "finder-empty" }, undefined, undefined, CTX);
+    assert.equal(result.details.status, "failed");
+    assert.equal(result.details.final.status, "empty-output");
+  });
+
+  it("runs oracle as a selected background agent and preserves advisor details", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "oracle-1" });
+    const def = makeDeferredRunner();
+    const startTask = tools.createStartTaskTool({
+      registry,
+      sessionKey: "S",
+      oracleDeps: { runner: def.runner, buildSystemPrompt: () => "ORACLE PROMPT" },
+    });
+    const poll = tools.createTaskPollTool({ registry, sessionKey: "S" });
+
+    await startTask.execute(
+      "o0",
+      { agent: "oracle", description: "review design", params: { task: "Review the design" } },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.equal(def.calls[0].profileName, "oracle");
+    assert.match(def.calls[0].prompt, /Task: Review the design/);
+
+    def.resolve(makeWorkerResult({ finalOutput: "oracle answer", truncatedFinalOutput: "oracle answer" }));
+    await flush();
+    const result = await poll.execute("p0", { task_id: "oracle-1" }, undefined, undefined, CTX);
+    assert.equal(result.details.agent, "oracle");
+    assert.equal(result.details.final.worker, "mmr-subagents.oracle");
+    assert.deepEqual(result.details.final.attachments, []);
+    assert.match(result.content[0].text, /oracle answer/);
+  });
+
+  it("runs librarian as a selected background agent and uses librarian-specific deps", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "librarian-1" });
+    const def = makeDeferredRunner();
+    const pi = await makeGithubOwnedPi();
+    const startTask = tools.createStartTaskTool({
+      registry,
+      sessionKey: "S",
+      librarianDeps: {
+        runner: def.runner,
+        resolveInvocation: stubLibrarianInvocation(),
+        buildSystemPrompt: () => "LIBRARIAN PROMPT",
+        pi,
+      },
+    });
+    const poll = tools.createTaskPollTool({ registry, sessionKey: "S" });
+
+    await startTask.execute(
+      "l0",
+      { agent: "librarian", description: "research repo", params: { query: "Explain owner/repo auth" } },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.equal(def.calls[0].profileName, "librarian");
+    assert.match(def.calls[0].prompt, /Query: Explain owner\/repo auth/);
+
+    def.resolve(makeWorkerResult({ finalOutput: "librarian answer", truncatedFinalOutput: "librarian answer" }));
+    await flush();
+    const result = await poll.execute("p0", { task_id: "librarian-1" }, undefined, undefined, CTX);
+    assert.equal(result.details.agent, "librarian");
+    assert.equal(result.details.final.worker, "mmr-subagents.librarian");
+    assert.equal(result.details.final.query, "Explain owner/repo auth");
+    assert.match(result.content[0].text, /librarian answer/);
   });
 });
 
@@ -318,9 +500,10 @@ describe("async task tools model-visible surface", () => {
       assert.equal(t.parameters.type, "object");
       assert.equal(t.parameters.additionalProperties, false);
     }
-    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["description", "notify", "prompt"]);
+    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "description", "notify", "params", "prompt"]);
     assert.equal(start.parameters.properties.notify.type, "boolean");
-    assert.deepEqual(start.parameters.required, ["prompt", "description"]);
+    assert.deepEqual(start.parameters.properties.agent.anyOf.map((entry) => entry.const), ["Task", "finder", "oracle", "librarian"]);
+    assert.equal(start.parameters.required, undefined);
     assert.deepEqual(Object.keys(poll.parameters.properties), ["task_id"]);
     assert.deepEqual(wait.parameters.required, ["task_id"]);
     assert.deepEqual(cancel.parameters.required, ["task_id"]);

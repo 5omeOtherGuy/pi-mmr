@@ -75,6 +75,10 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
     const asyncPushCeiling = parseBoolEnv(process.env[MMR_SUBAGENTS_ASYNC_PUSH_ENV]) ?? false;
     registerAsyncTaskTools(pi, {
       enableCompletionPush: asyncPushCeiling,
+      finderDeps: overrides.finder,
+      oracleDeps: overrides.oracle,
+      taskDeps: overrides.task,
+      librarianDeps: overrides.librarian,
       ...(overrides.asyncTasks ?? {}),
     });
     pi.on("tool_result", maybeNumberFinderReadToolResult);

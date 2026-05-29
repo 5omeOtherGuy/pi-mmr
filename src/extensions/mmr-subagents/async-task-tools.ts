@@ -13,10 +13,24 @@ import {
   buildTaskFinalResult,
   buildTaskProgressResult,
   prepareTaskRun,
-  type TaskDetails,
   type TaskDetailsContext,
   type TaskToolDeps,
 } from "./task.js";
+import {
+  createFinderTool,
+  FINDER_WORKER_TOOLS,
+  type FinderToolDeps,
+} from "./finder.js";
+import {
+  createOracleTool,
+  ORACLE_WORKER_TOOLS,
+  type OracleToolDeps,
+} from "./oracle.js";
+import {
+  createLibrarianTool,
+  LIBRARIAN_WORKER_TOOLS,
+  type LibrarianToolDeps,
+} from "./librarian.js";
 import {
   getMmrAsyncTaskRegistry,
   MAX_TASK_WAIT_TIMEOUT_MS,
@@ -38,16 +52,22 @@ export const ASYNC_TASK_TOOL_NAMES = [
   TASK_CANCEL_TOOL_NAME,
 ] as const;
 
+export const ASYNC_TASK_AGENT_NAMES = ["Task", "finder", "oracle", "librarian"] as const;
+export type AsyncTaskAgentName = typeof ASYNC_TASK_AGENT_NAMES[number];
+
+const START_TASK_ALLOWED_TOP_LEVEL_KEYS = new Set(["agent", "params", "prompt", "description", "notify"]);
+
 /** Discriminated details for the async task tools' results. */
 export interface AsyncTaskToolDetails {
   worker: "mmr-subagents.async-task";
   tool: (typeof ASYNC_TASK_TOOL_NAMES)[number];
+  agent?: AsyncTaskAgentName;
   taskId?: string;
   status?: MmrAsyncTaskStatus;
   freshness?: MmrAsyncTaskInternalSnapshot["freshness"];
   timedOut?: boolean;
-  /** Final projected Task details when a polled/awaited task is terminal. */
-  final?: TaskDetails;
+  /** Final projected subagent details when a polled/awaited task is terminal. */
+  final?: unknown;
   /** Board snapshot for `task_poll` list mode. */
   board?: MmrAsyncTaskBoard;
   errorMessage?: string;
@@ -58,6 +78,14 @@ export interface AsyncTaskToolDeps extends TaskToolDeps {
   registry?: MmrAsyncTaskRegistry;
   /** Deterministic session key override for tests. */
   sessionKey?: string;
+  /** Tool-specific seams used when start_task launches the finder agent. */
+  finderDeps?: FinderToolDeps;
+  /** Tool-specific seams used when start_task launches the oracle agent. */
+  oracleDeps?: OracleToolDeps;
+  /** Tool-specific seams used when start_task launches the librarian agent. */
+  librarianDeps?: LibrarianToolDeps;
+  /** Tool-specific seams used when start_task launches the Task agent. */
+  taskDeps?: TaskToolDeps;
   /**
    * Session-level ceiling: whether the at-most-once completion push is
    * PERMITTED at all this session. Default OFF (pull-only). Even when
@@ -75,13 +103,34 @@ export interface AsyncTaskToolDeps extends TaskToolDeps {
  */
 export const MMR_SUBAGENTS_ASYNC_PUSH_ENV = "MMR_SUBAGENTS_ASYNC_PUSH";
 
+const START_TASK_AGENT_SCHEMA = Type.Union([
+  Type.Literal("Task"),
+  Type.Literal("finder"),
+  Type.Literal("oracle"),
+  Type.Literal("librarian"),
+], {
+  description:
+    "Background agent to launch. Defaults to Task. Use params for agent-specific inputs: Task {prompt,description}, finder {query}, oracle {task,context?,files?}, librarian {query,context?}.",
+});
+
 const START_TASK_PARAMETERS = Type.Object(
   {
-    prompt: Type.String({
+    agent: Type.Optional(START_TASK_AGENT_SCHEMA),
+    params: Type.Optional(
+      Type.Object(
+        {},
+        {
+          additionalProperties: true,
+          description:
+            "Parameters for the selected background agent. For Task use {prompt, description}; for finder use {query}; for oracle use {task, context?, files?}; for librarian use {query, context?}.",
+        },
+      ),
+    ),
+    prompt: Type.Optional(Type.String({
       description:
-        "The bounded task prompt for the background worker. Include goal, scope, context, constraints, validation, and expected result shape.",
-    }),
-    description: Type.String({ description: "Short display label for the background task." }),
+        "Legacy Task prompt shortcut. Equivalent to params.prompt when agent is omitted or Task.",
+    })),
+    description: Type.Optional(Type.String({ description: "Short display label for the background task." })),
     notify: Type.Optional(
       Type.Boolean({
         description:
@@ -131,7 +180,8 @@ const START_TASK_DESCRIPTION = [
   "Start a bounded subagent worker in the background and return an opaque task_id immediately, so you can keep working while it runs.",
   "",
   "Use start_task only for independent work that can proceed while you do other things (long analysis, broad search, a self-contained implementation unit).",
-  "Prefer the blocking Task tool when you need the result before your next reasoning step.",
+  "Set agent to choose the background worker: Task (default), finder, oracle, or librarian. Use params for the selected tool's normal input shape.",
+  "Prefer the blocking Task/finder/oracle/librarian tools when you need the result before your next reasoning step.",
   "Always follow start_task with task_poll or task_wait before relying on the result; the parent remains responsible for integration and the final answer.",
   "Pass notify:true only when you are about to end your turn with nothing else to do and want to be poked once when the task finishes; otherwise poll or task_wait yourself.",
   "",
@@ -139,7 +189,7 @@ const START_TASK_DESCRIPTION = [
 ].join("\n");
 
 const ASYNC_TASK_GUIDELINES: readonly string[] = [
-  "Use start_task only for independent work that can run while you continue; prefer blocking Task when you need the result immediately.",
+  "Use start_task only for independent work that can run while you continue; prefer the blocking Task/finder/oracle/librarian tools when you need the result immediately.",
   "After start_task, use task_poll (with the task_id) or task_wait to check on the worker; a task_wait timeout is not a failure and does not stop the worker.",
   "Call task_poll with no task_id to list this session's background tasks (active, stalled, finished).",
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task.",
@@ -198,11 +248,99 @@ function isTerminal(status: MmrAsyncTaskStatus): boolean {
 }
 
 /** Read the first text part from a tool-result content array. */
-function firstText(content: AgentToolResult<TaskDetails>["content"]): string | undefined {
+function firstText(content: AgentToolResult<unknown>["content"]): string | undefined {
   for (const part of content) {
     if (part.type === "text" && typeof part.text === "string") return part.text;
   }
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeAgent(raw: unknown): AsyncTaskAgentName | undefined {
+  if (raw === undefined) return "Task";
+  if (typeof raw !== "string") return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "task" || normalized === "task-subagent") return "Task";
+  if (normalized === "finder") return "finder";
+  if (normalized === "oracle") return "oracle";
+  if (normalized === "librarian") return "librarian";
+  return undefined;
+}
+
+function firstParamString(params: unknown, key: string): string | undefined {
+  if (!isRecord(params)) return undefined;
+  const value = params[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function summarizeInput(agent: AsyncTaskAgentName, params: unknown): string {
+  const value = agent === "oracle"
+    ? firstParamString(params, "task")
+    : agent === "Task"
+      ? firstParamString(params, "prompt")
+      : firstParamString(params, "query");
+  if (value) return value;
+  try {
+    return JSON.stringify(params);
+  } catch {
+    return String(params);
+  }
+}
+
+function shortDescription(agent: AsyncTaskAgentName, params: unknown, explicit: unknown): string {
+  if (typeof explicit === "string" && explicit.trim().length > 0) return explicit.trim();
+  const summary = summarizeInput(agent, params).replace(/\s+/g, " ").trim();
+  const clipped = summary.length > 80 ? `${summary.slice(0, 77)}…` : summary;
+  return `${agent}: ${clipped || "background run"}`;
+}
+
+function baseToolDeps(deps: AsyncTaskToolDeps): Record<string, unknown> {
+  const {
+    registry: _registry,
+    sessionKey: _sessionKey,
+    enableCompletionPush: _enableCompletionPush,
+    finderDeps: _finderDeps,
+    oracleDeps: _oracleDeps,
+    librarianDeps: _librarianDeps,
+    taskDeps: _taskDeps,
+    ...base
+  } = deps;
+  return base as Record<string, unknown>;
+}
+
+function inferToolRunStatus(result: AgentToolResult<unknown>, signal: AbortSignal): MmrAsyncTaskStatus {
+  const details = isRecord(result.details) ? result.details : {};
+  const status = details.status;
+  if (signal.aborted || status === "aborted" || details.aborted === true) return "cancelled";
+  if (status === "success") return "succeeded";
+  if (typeof status === "string") {
+    if (
+      status === "no-agent-start"
+      || status === "empty-output"
+      || status.includes("error")
+      || status.includes("gated")
+      || status.includes("exhausted")
+    ) return "failed";
+  }
+  if (typeof details.exitCode === "number" && details.exitCode !== 0) return "failed";
+  if (typeof details.spawnError === "string" || typeof details.subagentActivationError === "string") return "failed";
+  return "succeeded";
+}
+
+function inferToolErrorMessage(result: AgentToolResult<unknown>): string | undefined {
+  const details = isRecord(result.details) ? result.details : {};
+  return typeof details.errorMessage === "string" && details.errorMessage.length > 0
+    ? details.errorMessage
+    : undefined;
+}
+
+function extractTrailFromToolResult(result: AgentToolResult<unknown> | undefined): readonly MmrWorkerTrailItem[] | undefined {
+  const details = isRecord(result?.details) ? result.details : undefined;
+  const trail = details?.trail;
+  return Array.isArray(trail) ? trail as MmrWorkerTrailItem[] : undefined;
 }
 
 function freshnessNote(snapshot: MmrAsyncTaskInternalSnapshot): string {
@@ -234,10 +372,12 @@ function projectRunning(
   snapshot: MmrAsyncTaskInternalSnapshot,
   opts: { timedOut?: boolean } = {},
 ): AgentToolResult<AsyncTaskToolDetails> {
-  const progressText = snapshot.latestProgress
-    ? firstText(buildTaskProgressResult(snapshot.latestProgress, detailsContextFromSnapshot(snapshot)).content)
-    : undefined;
-  const header = `${tool}: task ${snapshot.taskId} is ${snapshot.status}${freshnessNote(snapshot)}.`;
+  const progressText = snapshot.latestToolResult
+    ? firstText(snapshot.latestToolResult.content)
+    : snapshot.latestProgress
+      ? firstText(buildTaskProgressResult(snapshot.latestProgress, detailsContextFromSnapshot(snapshot)).content)
+      : undefined;
+  const header = `${tool}: ${snapshot.agent} task ${snapshot.taskId} is ${snapshot.status}${freshnessNote(snapshot)}.`;
   const waitHint = opts.timedOut ? " Wait timed out; the worker is still running. Poll or wait again." : "";
   const body = progressText && progressText.trim().length > 0 ? `\n\n${progressText}` : "";
   return {
@@ -245,6 +385,7 @@ function projectRunning(
     details: {
       worker: "mmr-subagents.async-task",
       tool,
+      agent: snapshot.agent as AsyncTaskAgentName,
       taskId: snapshot.taskId,
       status: snapshot.status,
       freshness: snapshot.freshness,
@@ -258,10 +399,14 @@ function projectTerminal(
   tool: AsyncTaskToolDetails["tool"],
   snapshot: MmrAsyncTaskInternalSnapshot,
 ): AgentToolResult<AsyncTaskToolDetails> {
-  const statusLine = `${tool}: task ${snapshot.taskId} ${snapshot.status}.`;
+  const statusLine = `${tool}: ${snapshot.agent} task ${snapshot.taskId} ${snapshot.status}.`;
   let body = snapshot.errorMessage ? `\n\n${snapshot.errorMessage}` : "";
-  let final: TaskDetails | undefined;
-  if (snapshot.finalResult) {
+  let final: unknown;
+  if (snapshot.finalToolResult) {
+    final = snapshot.finalToolResult.details;
+    const text = firstText(snapshot.finalToolResult.content);
+    if (text && text.trim().length > 0) body = `\n\n${text}`;
+  } else if (snapshot.finalResult) {
     const projected = buildTaskFinalResult(snapshot.finalResult, detailsContextFromSnapshot(snapshot));
     final = projected.details;
     const text = firstText(projected.content);
@@ -272,6 +417,7 @@ function projectTerminal(
     details: {
       worker: "mmr-subagents.async-task",
       tool,
+      agent: snapshot.agent as AsyncTaskAgentName,
       taskId: snapshot.taskId,
       status: snapshot.status,
       freshness: snapshot.freshness,
@@ -331,6 +477,71 @@ function buildCompletionNotifier(
   };
 }
 
+interface ParsedStartParams {
+  agent: AsyncTaskAgentName;
+  params: unknown;
+  description: string;
+  promptSummary: string;
+  wantsNotify: boolean;
+}
+
+function parseStartParams(rawParams: unknown): ParsedStartParams | { error: string } {
+  if (!isRecord(rawParams)) {
+    return { error: "start_task expects an object." };
+  }
+  const unknownKey = Object.keys(rawParams).find((key) => !START_TASK_ALLOWED_TOP_LEVEL_KEYS.has(key));
+  if (unknownKey) {
+    return { error: `start_task received unknown parameter: ${unknownKey}.` };
+  }
+  const agent = normalizeAgent(rawParams.agent);
+  if (!agent) {
+    return { error: "start_task.agent must be one of: Task, finder, oracle, librarian." };
+  }
+  let params: unknown = rawParams.params;
+  if (params === undefined) {
+    if (agent === "Task") {
+      params = { prompt: rawParams.prompt, description: rawParams.description };
+    } else if (typeof rawParams.prompt === "string") {
+      params = agent === "oracle" ? { task: rawParams.prompt } : { query: rawParams.prompt };
+    } else {
+      return { error: `start_task.params is required when agent is ${agent}.` };
+    }
+  } else if (agent === "Task" && isRecord(params) && params.description === undefined && rawParams.description !== undefined) {
+    params = { ...params, description: rawParams.description };
+  }
+  if (!isRecord(params)) {
+    return { error: "start_task.params must be an object." };
+  }
+  return {
+    agent,
+    params,
+    description: shortDescription(agent, params, rawParams.description),
+    promptSummary: summarizeInput(agent, params),
+    wantsNotify: rawParams.notify === true,
+  };
+}
+
+function validationResult(message: string): AgentToolResult<AsyncTaskToolDetails> {
+  return {
+    content: [{ type: "text", text: `start_task: invalid parameters: ${message}` }],
+    details: { worker: "mmr-subagents.async-task", tool: START_TASK_TOOL_NAME, errorMessage: message },
+  };
+}
+
+function createSelectedTool(agent: Exclude<AsyncTaskAgentName, "Task">, deps: AsyncTaskToolDeps): ToolDefinition {
+  const base = baseToolDeps(deps);
+  if (agent === "finder") return createFinderTool({ ...base, ...(deps.finderDeps ?? {}) } as FinderToolDeps);
+  if (agent === "oracle") return createOracleTool({ ...base, ...(deps.oracleDeps ?? {}) } as OracleToolDeps);
+  return createLibrarianTool({ ...base, ...(deps.librarianDeps ?? {}) } as LibrarianToolDeps);
+}
+
+function workerToolsForAgent(agent: AsyncTaskAgentName, taskTools: readonly string[] = []): readonly string[] {
+  if (agent === "Task") return taskTools;
+  if (agent === "finder") return FINDER_WORKER_TOOLS;
+  if (agent === "oracle") return ORACLE_WORKER_TOOLS;
+  return LIBRARIAN_WORKER_TOOLS;
+}
+
 export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
   return {
@@ -341,73 +552,108 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
     promptGuidelines: [...ASYNC_TASK_GUIDELINES],
     parameters: START_TASK_PARAMETERS,
     async execute(toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
-      // Pull the async-only `notify` opt-in off the params before handing
-      // them to the shared Task validation path, which rejects unknown
-      // keys. `notify` only requests a completion push; it never changes
-      // the worker's prompt or routing.
-      let wantsNotify = false;
-      let taskParams: unknown = rawParams;
-      if (rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)) {
-        const { notify: notifyOptIn, ...rest } = rawParams as Record<string, unknown>;
-        wantsNotify = notifyOptIn === true;
-        taskParams = rest;
-      }
-      // Reuse the blocking Task validation/routing path. A pre-spawn
-      // failure returns the same shaped result and creates no record.
-      const prep = prepareTaskRun(taskParams, ctx, deps);
-      if (!prep.ok) {
-        return {
-          content: prep.result.content,
-          details: {
-            worker: "mmr-subagents.async-task",
-            tool: START_TASK_TOOL_NAME,
-            errorMessage: prep.result.details?.errorMessage,
-          },
-        };
-      }
-      const { params, cwd, detailsContext, runnerOptionsBase, runner } = prep.prepared;
+      const parsed = parseStartParams(rawParams);
+      if ("error" in parsed) return validationResult(parsed.error);
       const sessionKey = resolveSessionKey(ctx, deps);
       // Two-layer gate: the session ceiling must permit push AND the caller
       // must opt this task in. The registry adds at-most-once + a per-session
       // budget on top. Delivery is `nextTurn` + `triggerTurn`, so a push only
       // wakes an idle session and otherwise rides the next turn.
-      const notify =
-        deps.enableCompletionPush && wantsNotify ? buildCompletionNotifier(deps.pi) : undefined;
-      const started = registry.startTask({
-        sessionKey,
-        originToolCallId: toolCallId,
-        description: params.description,
-        prompt: params.prompt,
-        cwd,
-        ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
-        ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
-        workerTools: detailsContext.workerTools,
-        // The run thunk never throws: a spawn failure is converted into a
-        // synthetic spawn-error worker result so the background task
-        // finalizes with the SAME `spawn-error` status/shaping as blocking
-        // Task (rather than a generic registry error).
-        run: async ({ signal, onProgress }) => {
-          try {
-            return await runner.run({ ...runnerOptionsBase, signal, onProgress });
-          } catch (err) {
-            return buildSpawnErrorWorkerResult(err, { prompt: params.prompt, cwd });
-          }
-        },
-        ...(notify !== undefined ? { notify } : {}),
-      });
-      if (!started.ok) {
-        const message =
-          `start_task: cannot start; ${started.runningCount} background task(s) already running ` +
-          `(cap ${started.cap}). Wait for one to finish (task_wait) or stop one (task_cancel) first.`;
+      const notify = deps.enableCompletionPush && parsed.wantsNotify
+        ? buildCompletionNotifier(deps.pi)
+        : undefined;
+
+      const started = parsed.agent === "Task"
+        ? (() => {
+            const taskDeps = { ...baseToolDeps(deps), ...(deps.taskDeps ?? {}) } as TaskToolDeps;
+            // Reuse the blocking Task validation/routing path. A pre-spawn
+            // failure returns the same shaped result and creates no record.
+            const prep = prepareTaskRun(parsed.params, ctx, taskDeps);
+            if (!prep.ok) return { result: prep.result } as const;
+            const { params, cwd, detailsContext, runnerOptionsBase, runner } = prep.prepared;
+            return {
+              started: registry.startTask({
+                sessionKey,
+                originToolCallId: toolCallId,
+                agent: "Task",
+                description: params.description,
+                prompt: params.prompt,
+                cwd,
+                ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
+                ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
+                workerTools: detailsContext.workerTools,
+                // The run thunk never throws: a spawn failure is converted into a
+                // synthetic spawn-error worker result so the background task
+                // finalizes with the SAME `spawn-error` status/shaping as blocking
+                // Task (rather than a generic registry error).
+                run: async ({ signal, onProgress }) => {
+                  try {
+                    return await runner.run({ ...runnerOptionsBase, signal, onProgress });
+                  } catch (err) {
+                    return buildSpawnErrorWorkerResult(err, { prompt: params.prompt, cwd });
+                  }
+                },
+                ...(notify !== undefined ? { notify } : {}),
+              }),
+            } as const;
+          })()
+        : (() => {
+            const agent = parsed.agent;
+            const tool = createSelectedTool(agent, deps);
+            const cwd = resolveCwd(ctx);
+            return {
+              started: registry.startTask({
+                sessionKey,
+                originToolCallId: toolCallId,
+                agent,
+                description: parsed.description,
+                prompt: parsed.promptSummary,
+                cwd,
+                workerTools: workerToolsForAgent(agent),
+                run: async ({ signal, onProgress }) => {
+                  const result = await tool.execute(
+                    `${toolCallId}:${agent}`,
+                    parsed.params,
+                    signal,
+                    (update) => onProgress(update),
+                    ctx,
+                  );
+                  const status = inferToolRunStatus(result, signal);
+                  return {
+                    toolResult: result,
+                    status,
+                    ...(status === "failed" ? { errorMessage: inferToolErrorMessage(result) } : {}),
+                  };
+                },
+                ...(notify !== undefined ? { notify } : {}),
+              }),
+            } as const;
+          })();
+
+      if ("result" in started) {
         return {
-          content: [{ type: "text", text: message }],
-          details: { worker: "mmr-subagents.async-task", tool: START_TASK_TOOL_NAME, errorMessage: message },
+          content: started.result.content,
+          details: {
+            worker: "mmr-subagents.async-task",
+            tool: START_TASK_TOOL_NAME,
+            agent: parsed.agent,
+            errorMessage: started.result.details?.errorMessage,
+          },
         };
       }
-      const snapshot = started.snapshot;
-      const dedupNote = started.deduplicated ? " (existing task for this call)" : "";
+      if (!started.started.ok) {
+        const message =
+          `start_task: cannot start; ${started.started.runningCount} background task(s) already running ` +
+          `(cap ${started.started.cap}). Wait for one to finish (task_wait) or stop one (task_cancel) first.`;
+        return {
+          content: [{ type: "text", text: message }],
+          details: { worker: "mmr-subagents.async-task", tool: START_TASK_TOOL_NAME, agent: parsed.agent, errorMessage: message },
+        };
+      }
+      const snapshot = started.started.snapshot;
+      const dedupNote = started.started.deduplicated ? " (existing task for this call)" : "";
       const message =
-        `start_task: started background worker ${snapshot.taskId}${dedupNote} ("${snapshot.description}"). ` +
+        `start_task: started background worker ${snapshot.taskId}${dedupNote} ("${snapshot.description}", agent ${snapshot.agent}). ` +
         `Use task_poll({task_id:"${snapshot.taskId}"}) to check progress, task_wait to block briefly, ` +
         `or task_cancel to stop it. Background tasks are in-memory and lost if the session ends.`;
       return {
@@ -415,6 +661,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
         details: {
           worker: "mmr-subagents.async-task",
           tool: START_TASK_TOOL_NAME,
+          agent: snapshot.agent as AsyncTaskAgentName,
           taskId: snapshot.taskId,
           status: snapshot.status,
           freshness: snapshot.freshness,
@@ -433,7 +680,7 @@ function renderBoard(board: MmrAsyncTaskBoard): string {
     lines.push(`${title}:`);
     for (const e of entries) {
       const fresh = e.freshness !== "healthy" && e.freshness !== "terminal" ? ` [${e.freshness}]` : "";
-      lines.push(`  - ${e.taskId} (${e.status}${fresh}) "${e.description}"`);
+      lines.push(`  - ${e.taskId} (${e.status}${fresh}, ${e.agent}) "${e.description}"`);
     }
   };
   section("Active", board.active);
@@ -527,7 +774,10 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
         ...(reason !== undefined ? { reason } : {}),
       });
       if (!snapshot) return notFoundResult(TASK_CANCEL_TOOL_NAME, taskId);
-      const trail = snapshot.finalResult?.trail ?? snapshot.latestProgress?.trail;
+      const trail = snapshot.finalResult?.trail
+        ?? snapshot.latestProgress?.trail
+        ?? extractTrailFromToolResult(snapshot.finalToolResult)
+        ?? extractTrailFromToolResult(snapshot.latestToolResult);
       const summary = summarizeTrail(trail);
       const settledNote =
         snapshot.status === "cancelling"
@@ -535,11 +785,12 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
           : "";
       return {
         content: [
-          { type: "text", text: `task_cancel: task ${snapshot.taskId} ${snapshot.status}. ${summary}${settledNote}` },
+          { type: "text", text: `task_cancel: ${snapshot.agent} task ${snapshot.taskId} ${snapshot.status}. ${summary}${settledNote}` },
         ],
         details: {
           worker: "mmr-subagents.async-task",
           tool: TASK_CANCEL_TOOL_NAME,
+          agent: snapshot.agent as AsyncTaskAgentName,
           taskId: snapshot.taskId,
           status: snapshot.status,
           freshness: snapshot.freshness,

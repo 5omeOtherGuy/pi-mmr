@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { MmrWorkerProgressSnapshot, MmrWorkerResult } from "./runner.js";
 
 /**
@@ -74,11 +75,22 @@ export type MmrAsyncTaskCompletionPushState =
  */
 export const DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION = 8;
 
+/** Completed result from a background run that delegates to a Pi tool definition. */
+export interface MmrAsyncTaskToolRunResult {
+  toolResult: AgentToolResult<unknown>;
+  status?: MmrAsyncTaskStatus;
+  errorMessage?: string;
+}
+
+export type MmrAsyncTaskRunResult = MmrWorkerResult | MmrAsyncTaskToolRunResult;
+
+export type MmrAsyncTaskProgressResult = MmrWorkerProgressSnapshot | AgentToolResult<unknown>;
+
 /** Run thunk: the registry supplies its own signal + progress sink. */
 export type MmrAsyncTaskRun = (ctx: {
   signal: AbortSignal;
-  onProgress: (snapshot: MmrWorkerProgressSnapshot) => void;
-}) => Promise<MmrWorkerResult>;
+  onProgress: (snapshot: MmrAsyncTaskProgressResult) => void;
+}) => Promise<MmrAsyncTaskRunResult>;
 
 /** At-most-once completion notifier (e.g. a `pi.sendMessage` closure). */
 export type MmrAsyncTaskNotifier = (
@@ -89,6 +101,8 @@ export interface StartAsyncTaskArgs {
   sessionKey: string;
   /** Originating Pi tool-call id; used for at-most-once idempotency. */
   originToolCallId: string;
+  /** User-facing worker kind launched by start_task (Task, finder, oracle, librarian). */
+  agent?: string;
   description: string;
   prompt: string;
   cwd: string;
@@ -126,6 +140,7 @@ export interface MmrAsyncTaskInternalSnapshot {
   status: MmrAsyncTaskStatus;
   freshness: MmrAsyncTaskFreshness;
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
+  agent: string;
   description: string;
   prompt: string;
   cwd: string;
@@ -143,7 +158,9 @@ export interface MmrAsyncTaskInternalSnapshot {
   lastProgressAgeMs?: number;
   completionPush: MmrAsyncTaskCompletionPushState;
   latestProgress?: MmrWorkerProgressSnapshot;
+  latestToolResult?: AgentToolResult<unknown>;
   finalResult?: MmrWorkerResult;
+  finalToolResult?: AgentToolResult<unknown>;
   errorMessage?: string;
 }
 
@@ -160,6 +177,7 @@ export interface MmrAsyncTaskSnapshot {
   status: MmrAsyncTaskStatus;
   freshness: MmrAsyncTaskFreshness;
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
+  agent: string;
   description: string;
   createdAtMs: number;
   startedAtMs: number;
@@ -189,6 +207,7 @@ export function toPublicAsyncTaskSnapshot(
     ...(snapshot.terminalFreshness !== undefined
       ? { terminalFreshness: snapshot.terminalFreshness }
       : {}),
+    agent: snapshot.agent,
     description: snapshot.description,
     createdAtMs: snapshot.createdAtMs,
     startedAtMs: snapshot.startedAtMs,
@@ -207,7 +226,7 @@ export function toPublicAsyncTaskSnapshot(
       : {}),
     completionPush: snapshot.completionPush,
     promptChars: snapshot.prompt.length,
-    hasFinalResult: snapshot.finalResult !== undefined,
+    hasFinalResult: snapshot.finalResult !== undefined || snapshot.finalToolResult !== undefined,
     ...(snapshot.errorMessage !== undefined ? { errorMessage: snapshot.errorMessage } : {}),
   };
 }
@@ -217,6 +236,7 @@ export interface MmrAsyncTaskBoardEntry {
   status: MmrAsyncTaskStatus;
   freshness: MmrAsyncTaskFreshness;
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
+  agent: string;
   description: string;
   createdAtMs: number;
   startedAtMs: number;
@@ -274,6 +294,7 @@ interface MmrAsyncTaskRecord {
   taskId: string;
   sessionKey: string;
   originToolCallId: string;
+  agent: string;
   description: string;
   prompt: string;
   cwd: string;
@@ -297,7 +318,9 @@ interface MmrAsyncTaskRecord {
   runnerSettled: boolean;
   watchdogTimer?: ReturnType<typeof setTimeout>;
   latestProgress?: MmrWorkerProgressSnapshot;
+  latestToolResult?: AgentToolResult<unknown>;
   finalResult?: MmrWorkerResult;
+  finalToolResult?: AgentToolResult<unknown>;
   errorMessage?: string;
   notify?: MmrAsyncTaskNotifier;
   completionPush: MmrAsyncTaskCompletionPushState;
@@ -311,6 +334,19 @@ function isTerminalStatus(status: MmrAsyncTaskStatus): boolean {
 
 function defaultIdFactory(): string {
   return `task_${randomBytes(6).toString("hex")}`;
+}
+
+function isAgentToolResult(value: unknown): value is AgentToolResult<unknown> {
+  return typeof value === "object"
+    && value !== null
+    && Array.isArray((value as { content?: unknown }).content);
+}
+
+function isToolRunResult(value: MmrAsyncTaskRunResult): value is MmrAsyncTaskToolRunResult {
+  return typeof value === "object"
+    && value !== null
+    && "toolResult" in value
+    && isAgentToolResult((value as { toolResult?: unknown }).toolResult);
 }
 
 class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
@@ -381,6 +417,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       taskId: this.idFactory(),
       sessionKey: args.sessionKey,
       originToolCallId: args.originToolCallId,
+      agent: args.agent ?? "Task",
       description: args.description,
       prompt: args.prompt,
       cwd: args.cwd,
@@ -405,7 +442,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
 
     const generation = record.runGeneration;
     record.promise = (async () => {
-      let result: MmrWorkerResult;
+      let result: MmrAsyncTaskRunResult;
       try {
         result = await args.run({
           signal: controller.signal,
@@ -433,13 +470,14 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   private handleProgress(
     record: MmrAsyncTaskRecord,
     generation: number,
-    snapshot: MmrWorkerProgressSnapshot,
+    snapshot: MmrAsyncTaskProgressResult,
   ): void {
     // Late-write guard: ignore progress after terminal or from a stale run.
     if (generation !== record.runGeneration) return;
     if (isTerminalStatus(record.status)) return;
     const now = this.nowMs();
-    record.latestProgress = snapshot;
+    if (isAgentToolResult(snapshot)) record.latestToolResult = snapshot;
+    else record.latestProgress = snapshot;
     record.lastProgressAtMs = now;
     record.updatedAtMs = now;
   }
@@ -447,17 +485,21 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   private finalizeResult(
     record: MmrAsyncTaskRecord,
     generation: number,
-    result: MmrWorkerResult,
+    result: MmrAsyncTaskRunResult,
   ): void {
     if (generation !== record.runGeneration) return;
     if (isTerminalStatus(record.status)) return;
+    if (isToolRunResult(result)) {
+      this.finalizeToolResult(record, result);
+      return;
+    }
     const now = this.nowMs();
     record.finalResult = result;
     record.runnerSettled = true;
     record.completedAtMs = now;
     record.updatedAtMs = now;
 
-    if (result.aborted) {
+    if (record.cancelRequestedAtMs !== undefined) {
       if (record.expiredByWatchdog) {
         record.status = "failed";
         record.terminalFreshness = "dead";
@@ -466,6 +508,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
         record.status = "cancelled";
         record.terminalFreshness = "healthy";
       }
+    } else if (result.aborted) {
+      record.status = "cancelled";
+      record.terminalFreshness = "healthy";
     } else if (result.spawnError || result.subagentActivationError) {
       record.status = "failed";
       record.terminalFreshness = "healthy";
@@ -482,6 +527,51 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     this.settle(record);
   }
 
+  private finalizeToolResult(
+    record: MmrAsyncTaskRecord,
+    result: MmrAsyncTaskToolRunResult,
+  ): void {
+    const now = this.nowMs();
+    record.finalToolResult = result.toolResult;
+    record.runnerSettled = true;
+    record.completedAtMs = now;
+    record.updatedAtMs = now;
+    let status = result.status ?? "succeeded";
+    if (record.cancelRequestedAtMs !== undefined) {
+      if (record.expiredByWatchdog) {
+        status = "failed";
+        record.terminalFreshness = "dead";
+        record.errorMessage = result.errorMessage ?? "Background task exceeded its maximum runtime.";
+      } else {
+        status = "cancelled";
+        record.terminalFreshness = "healthy";
+      }
+    } else {
+      record.terminalFreshness = "healthy";
+      if (result.errorMessage) record.errorMessage = result.errorMessage;
+    }
+    record.status = status;
+    this.settle(record);
+  }
+
+  private finalizeDead(
+    record: MmrAsyncTaskRecord,
+    now: number,
+    message = "Background task did not stop after cancellation.",
+  ): void {
+    if (isTerminalStatus(record.status)) return;
+    record.runGeneration += 1;
+    record.runnerSettled = true;
+    record.completedAtMs = now;
+    record.updatedAtMs = now;
+    record.status = "failed";
+    record.terminalFreshness = "dead";
+    record.errorMessage = record.expiredByWatchdog
+      ? "Background task exceeded its maximum runtime."
+      : message;
+    this.settle(record);
+  }
+
   private finalizeError(
     record: MmrAsyncTaskRecord,
     generation: number,
@@ -493,9 +583,20 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     record.runnerSettled = true;
     record.completedAtMs = now;
     record.updatedAtMs = now;
-    record.status = "failed";
-    record.terminalFreshness = "healthy";
-    record.errorMessage = err instanceof Error ? err.message : String(err);
+    if (record.cancelRequestedAtMs !== undefined) {
+      if (record.expiredByWatchdog) {
+        record.status = "failed";
+        record.terminalFreshness = "dead";
+        record.errorMessage = "Background task exceeded its maximum runtime.";
+      } else {
+        record.status = "cancelled";
+        record.terminalFreshness = "healthy";
+      }
+    } else {
+      record.status = "failed";
+      record.terminalFreshness = "healthy";
+      record.errorMessage = err instanceof Error ? err.message : String(err);
+    }
     this.settle(record);
   }
 
@@ -673,16 +774,23 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     // Best-effort bounded wait for the worker to actually settle. Clear the
     // grace timer when the worker settles first so it does not linger.
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
       await Promise.race([
         record.promise ?? Promise.resolve(),
         new Promise<void>((resolve) => {
-          graceTimer = setTimeout(resolve, this.cancelDeadAfterMs);
+          graceTimer = setTimeout(() => {
+            timedOut = true;
+            resolve();
+          }, this.cancelDeadAfterMs);
           if (typeof graceTimer.unref === "function") graceTimer.unref();
         }),
       ]);
     } finally {
       if (graceTimer) clearTimeout(graceTimer);
+    }
+    if (timedOut && !isTerminalStatus(record.status)) {
+      this.finalizeDead(record, this.nowMs());
     }
     return this.snapshot(record);
   }
@@ -696,9 +804,16 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       for (const [taskId, record] of [...map.entries()]) {
         if (!isTerminalStatus(record.status)) {
           // Backstop watchdog: request cancellation for runaway tasks even
-          // if the active timer was missed. The run settles asynchronously
-          // and finalizes as failed/dead.
+          // if the active timer was missed.
           if (now >= record.maxRuntimeAtMs) this.requestExpiry(record, now);
+          // A worker that ignores the abort cannot keep consuming the
+          // concurrency cap forever; finalize it after the cancel grace.
+          if (
+            record.cancelRequestedAtMs !== undefined
+            && now - record.cancelRequestedAtMs > this.cancelDeadAfterMs
+          ) {
+            this.finalizeDead(record, now);
+          }
           continue;
         }
         const observed = record.finalObservedAtMs;
@@ -773,6 +888,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       status: record.status,
       freshness: this.freshness(record, now),
       ...(record.terminalFreshness !== undefined ? { terminalFreshness: record.terminalFreshness } : {}),
+      agent: record.agent,
       description: record.description,
       prompt: record.prompt,
       cwd: record.cwd,
@@ -790,7 +906,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       ...(lastProgressAt !== undefined ? { lastProgressAgeMs: now - lastProgressAt } : {}),
       completionPush: record.completionPush,
       ...(record.latestProgress !== undefined ? { latestProgress: record.latestProgress } : {}),
+      ...(record.latestToolResult !== undefined ? { latestToolResult: record.latestToolResult } : {}),
       ...(record.finalResult !== undefined ? { finalResult: record.finalResult } : {}),
+      ...(record.finalToolResult !== undefined ? { finalToolResult: record.finalToolResult } : {}),
       ...(record.errorMessage !== undefined ? { errorMessage: record.errorMessage } : {}),
     };
   }
@@ -803,6 +921,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       status: record.status,
       freshness: this.freshness(record, now),
       ...(record.terminalFreshness !== undefined ? { terminalFreshness: record.terminalFreshness } : {}),
+      agent: record.agent,
       description: record.description,
       createdAtMs: record.createdAtMs,
       startedAtMs: record.startedAtMs,

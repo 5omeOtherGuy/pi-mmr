@@ -432,6 +432,7 @@ export type {
   TaskWorkerSystemPromptInput,
 } from "./extensions/mmr-subagents/task.js";
 export {
+  ASYNC_TASK_AGENT_NAMES,
   ASYNC_TASK_TOOL_NAMES,
   MMR_SUBAGENTS_ASYNC_PUSH_ENV,
   START_TASK_TOOL_NAME,
@@ -445,6 +446,7 @@ export {
   registerAsyncTaskTools,
 } from "./extensions/mmr-subagents/async-task-tools.js";
 export type {
+  AsyncTaskAgentName,
   AsyncTaskToolDeps,
   AsyncTaskToolDetails,
 } from "./extensions/mmr-subagents/async-task-tools.js";

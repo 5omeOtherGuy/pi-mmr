@@ -172,14 +172,52 @@ describe("async-task-registry cancellation", () => {
 
   it("late success after a cancel request does not overwrite the cancellation", async () => {
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
-    const reg = createMmrAsyncTaskRegistry({ idFactory: () => "t", cancelDeadAfterMs: 10 });
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => "t", cancelDeadAfterMs: 50 });
     const d = makeDeferredRun();
     reg.startTask(startArgs({ run: d.run }));
-    await reg.cancelTask({ sessionKey: "sess-A", taskId: "t" });
-    // Worker eventually returns a non-aborted success: it must still be cancelled.
-    d.resolve(makeWorkerResult({ aborted: true, exitCode: null }));
+    const cancelPromise = reg.cancelTask({ sessionKey: "sess-A", taskId: "t" });
+    assert.equal(d.captured.signal.aborted, true);
+    // Worker eventually returns a non-aborted success: cancellation must still win.
+    d.resolve(makeWorkerResult({ aborted: false, exitCode: 0 }));
+    const snap = await cancelPromise;
     await flush();
+    assert.equal(snap.status, "cancelled");
     assert.equal(reg.getTask("sess-A", "t").status, "cancelled");
+  });
+
+  it("manual cancellation wins when the worker rejects during abort", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => "t", cancelDeadAfterMs: 50 });
+    const d = makeDeferredRun();
+    reg.startTask(startArgs({ run: d.run }));
+    const cancelPromise = reg.cancelTask({ sessionKey: "sess-A", taskId: "t" });
+    d.reject(new Error("abort surfaced as rejection"));
+    const snap = await cancelPromise;
+    await flush();
+    assert.equal(snap.status, "cancelled");
+    assert.equal(reg.getTask("sess-A", "t").status, "cancelled");
+  });
+
+  it("finalizes an abort-ignoring cancellation as failed/dead and frees the concurrency cap", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({
+      idFactory: () => `t${n++}`,
+      maxRunningPerSession: 1,
+      cancelDeadAfterMs: 20,
+    });
+    const d = makeDeferredRun();
+    assert.equal(reg.startTask(startArgs({ run: d.run, originToolCallId: "c0" })).ok, true);
+    const snap = await reg.cancelTask({ sessionKey: "sess-A", taskId: "t0" });
+    assert.equal(snap.status, "failed");
+    assert.equal(snap.terminalFreshness, "dead");
+    const next = makeDeferredRun();
+    const started = reg.startTask(startArgs({ run: next.run, originToolCallId: "c1" }));
+    assert.equal(started.ok, true, "dead cancelled tasks must not consume the running cap");
+    next.resolve(makeWorkerResult());
+    d.resolve(makeWorkerResult({ aborted: false, exitCode: 0, finalOutput: "late" }));
+    await flush();
+    assert.equal(reg.getTask("sess-A", "t0").status, "failed", "late success must be ignored after dead finalization");
   });
 });
 
@@ -283,6 +321,22 @@ describe("async-task-registry freshness, TTL, watchdog, shutdown", () => {
     const snap = reg.getTask("sess-A", "t");
     assert.equal(snap.status, "failed");
     assert.equal(snap.terminalFreshness, "dead");
+  });
+
+  it("watchdog expiry remains failed/dead when the worker rejects during abort", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let clock = 0;
+    const reg = createMmrAsyncTaskRegistry({ nowMs: () => clock, idFactory: () => "t", maxRuntimeMs: 1000 });
+    const d = makeDeferredRun();
+    reg.startTask(startArgs({ run: d.run }));
+    clock = 2000;
+    reg.prune("sess-A");
+    d.reject(new Error("abort surfaced as rejection"));
+    await flush();
+    const snap = reg.getTask("sess-A", "t");
+    assert.equal(snap.status, "failed");
+    assert.equal(snap.terminalFreshness, "dead");
+    assert.match(snap.errorMessage, /maximum runtime/);
   });
 
   it("prunes unobserved terminal records after the long TTL, observed ones after the short TTL", async () => {
