@@ -42,6 +42,9 @@ after(cleanupLoadedSource);
 const ORACLE_MODULE = "extensions/mmr-subagents/oracle.ts";
 const PROMPTS_MODULE = "extensions/mmr-subagents/prompts.ts";
 const PROMPT_ASSEMBLY_MODULE = "extensions/mmr-core/subagent-prompt-assembly.ts";
+const MODEL_RESOLVER_MODULE = "extensions/mmr-core/model-resolver.ts";
+const SUBAGENT_RESOLVER_MODULE = "extensions/mmr-core/subagent-resolver.ts";
+const PROFILES_MODULE = "extensions/mmr-core/subagent-profiles.ts";
 
 beforeEach(async () => {
   const { clearMmrSubagentPromptBuilders } = await importSource(PROMPT_ASSEMBLY_MODULE);
@@ -81,6 +84,19 @@ function makeRunnerSpy(result = makeWorkerResult()) {
     return result;
   };
   return { runWorker, calls };
+}
+
+// Registry stub matching the shape `selectMmrModelRoute` consumes, plus the
+// `getAvailable()` the advisor context-window lookup reads. `models` entries
+// are `{ provider, id, contextWindow? }`.
+function makeRegistry(models) {
+  return {
+    getAll: () => models,
+    find: (provider, id) => models.find((m) => m.provider === provider && m.id === id),
+    hasConfiguredAuth: () => true,
+    isUsingOAuth: (model) => model.provider.endsWith("subscription") || model.provider.endsWith("codex"),
+    getAvailable: () => models,
+  };
 }
 
 function makeTempDir() {
@@ -252,38 +268,6 @@ describe("ORACLE_DEFAULT_MODEL_PREFERENCES", () => {
   });
 });
 
-describe("selectOracleWorkerModel", () => {
-  it("prefers a registered GPT-5.5 route when present", async () => {
-    const { selectOracleWorkerModel } = await importSource(ORACLE_MODULE);
-    const chosen = selectOracleWorkerModel([
-      "openai-codex/gpt-5.5",
-      "claude-subscription/claude-opus-4-6",
-    ]);
-    assert.equal(chosen, "openai-codex/gpt-5.5");
-  });
-
-  it("falls back to Claude Opus 4.6 when GPT-5.5 is not available", async () => {
-    const { selectOracleWorkerModel } = await importSource(ORACLE_MODULE);
-    const chosen = selectOracleWorkerModel([
-      "claude-subscription/claude-opus-4-6",
-      "openai/gpt-5.4",
-    ]);
-    assert.equal(chosen, "claude-subscription/claude-opus-4-6");
-  });
-
-  it("returns undefined when neither preference is registered", async () => {
-    const { selectOracleWorkerModel } = await importSource(ORACLE_MODULE);
-    assert.equal(selectOracleWorkerModel(["openai/gpt-5.4"]), undefined);
-    assert.equal(selectOracleWorkerModel([]), undefined);
-  });
-
-  it("matches by bare model id when only the tail is exposed", async () => {
-    const { selectOracleWorkerModel } = await importSource(ORACLE_MODULE);
-    assert.equal(selectOracleWorkerModel(["gpt-5.5"]), "gpt-5.5");
-    assert.equal(selectOracleWorkerModel(["claude-opus-4-6"]), "claude-opus-4-6");
-  });
-});
-
 describe("oracle execute() seam", () => {
   it("rejects missing or blank task before spawning a worker", async () => {
     const { createOracleTool } = await importSource(ORACLE_MODULE);
@@ -320,7 +304,6 @@ describe("oracle execute() seam", () => {
     const controller = new AbortController();
     const tool = createOracleTool({
       runWorker,
-      listAvailableModels: () => ["openai-codex/gpt-5.5"],
       buildSystemPrompt: (cwd) => `SP for ${cwd}`,
     });
     const result = await tool.execute(
@@ -328,7 +311,7 @@ describe("oracle execute() seam", () => {
       { task: "Review the auth module." },
       controller.signal,
       undefined,
-      { cwd: "/abs/project" },
+      { cwd: "/abs/project", modelRegistry: makeRegistry([{ provider: "openai-codex", id: "gpt-5.5" }]) },
     );
     assert.equal(calls.length, 1);
     const options = calls[0];
@@ -366,7 +349,7 @@ describe("oracle execute() seam", () => {
       assert.equal(profile.name, "oracle");
       return `oracle surface spy ${cwd}`;
     });
-    const tool = createOracleTool({ runWorker, listAvailableModels: () => [] });
+    const tool = createOracleTool({ runWorker });
     await tool.execute("c", { task: "Review" }, undefined, undefined, { cwd: "/tmp/oracle-surface" });
     assert.equal(spyCalls, 1, "execute must call the registered oracle prompt builder via the surface API");
     assert.equal(calls[0].systemPrompt, "oracle surface spy /tmp/oracle-surface");
@@ -377,7 +360,7 @@ describe("oracle execute() seam", () => {
     const { clearMmrSubagentPromptBuilders } = await importSource(PROMPT_ASSEMBLY_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
     clearMmrSubagentPromptBuilders();
-    const tool = createOracleTool({ runWorker, listAvailableModels: () => [] });
+    const tool = createOracleTool({ runWorker });
     await assert.rejects(
       tool.execute("c", { task: "Review" }, undefined, undefined, { cwd: "/tmp" }),
       /no subagent prompt builder registered.*oracle/i,
@@ -492,24 +475,25 @@ describe("oracle execute() seam", () => {
   it("omits --model when no preferred worker model is available", async () => {
     const { createOracleTool } = await importSource(ORACLE_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
-    const tool = createOracleTool({ runWorker, listAvailableModels: () => ["openai/gpt-5.4"] });
-    await tool.execute("c", { task: "review" }, undefined, undefined, { cwd: "/tmp" });
+    const tool = createOracleTool({ runWorker });
+    await tool.execute("c", { task: "review" }, undefined, undefined, {
+      cwd: "/tmp",
+      modelRegistry: makeRegistry([{ provider: "openai", id: "gpt-5.4" }]),
+    });
     assert.equal("model" in calls[0], false);
   });
 
-  it("defaults to ctx.modelRegistry.getAvailable() when no listAvailableModels dep is provided", async () => {
+  it("resolves the worker route from ctx.modelRegistry", async () => {
     const { createOracleTool } = await importSource(ORACLE_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
     const tool = createOracleTool({ runWorker });
     const ctx = {
       cwd: "/abs/project",
-      modelRegistry: {
-        getAvailable: () => [
-          { provider: "openai", id: "gpt-5.4" },
-          { provider: "openai-codex", id: "gpt-5.5" },
-          { provider: "claude-subscription", id: "claude-opus-4-6" },
-        ],
-      },
+      modelRegistry: makeRegistry([
+        { provider: "openai", id: "gpt-5.4" },
+        { provider: "openai-codex", id: "gpt-5.5" },
+        { provider: "claude-subscription", id: "claude-opus-4-6" },
+      ]),
     };
     await tool.execute("c", { task: "review" }, undefined, undefined, ctx);
     assert.equal(calls[0].model, "openai-codex/gpt-5.5");
@@ -801,18 +785,21 @@ describe("oracle execute() seam", () => {
           },
         };
       },
-      listAvailableModels: () => [
-        "openai-codex/gpt-5.5",
-        "claude-subscription/claude-opus-4-8",
-        "claude-opus-4-8",
-      ],
     });
     await tool.execute(
       "c1",
       { task: "review" },
       undefined,
       undefined,
-      { cwd: "/tmp/repo" },
+      {
+        cwd: "/tmp/repo",
+        // Registry includes the settings override (claude-opus-4-8) so the
+        // resolver picks it over the profile default.
+        modelRegistry: makeRegistry([
+          { provider: "openai-codex", id: "gpt-5.5" },
+          { provider: "claude-subscription", id: "claude-opus-4-8" },
+        ]),
+      },
     );
     assert.equal(loadCalls, 1, "oracle must read settings exactly once per execute");
     assert.equal(captured[0], "/tmp/repo", "settings loader must be called with ctx.cwd");
@@ -841,5 +828,55 @@ describe("oracle execute() seam", () => {
     const tool = createOracleTool({ runWorker });
     const result = await tool.execute("c", { task: "go" }, undefined, undefined, { cwd: "/tmp" });
     assert.equal(result.details.spawnError, "spawn ENOENT");
+  });
+});
+
+describe("oracle parent↔child route agreement", () => {
+  // Proves the production unification (issue-#1 "Option A"): the parent
+  // oracle tool and the child Pi process both resolve the worker route
+  // through the SAME `selectMmrModelRoute` resolver, so they can never
+  // disagree on the `--model`. The parent route string the tool would pass
+  // must equal the child's `resolveMmrSubagentInvocation(...).modelArg`,
+  // and passing that route back as an explicit `--model` must not trip the
+  // child's model.mismatch guard.
+  it("parent route equals the child's resolved modelArg for the oracle profile", async () => {
+    const { selectMmrModelRoute } = await importSource(MODEL_RESOLVER_MODULE);
+    const { resolveMmrSubagentInvocation } = await importSource(SUBAGENT_RESOLVER_MODULE);
+    const { getMmrSubagentProfile } = await importSource(PROFILES_MODULE);
+    const profile = getMmrSubagentProfile("oracle");
+    // Registry includes the profile's primary (GPT-5.5) plus the Claude
+    // Opus 4.6 fallback so the resolver has a real route to pick.
+    const registry = makeRegistry([
+      { provider: "openai-codex", id: "gpt-5.5" },
+      { provider: "claude-subscription", id: "claude-opus-4-6" },
+    ]);
+
+    // Parent route: exactly what oracle.execute() forms as --model.
+    const parentSelected = selectMmrModelRoute({
+      modelPreferences: profile.modelPreferences,
+      modeThinkingLevel: profile.thinkingLevel,
+      registry,
+    }).selected;
+    assert.ok(parentSelected, "parent must resolve a route");
+    const parentModelArg = `${parentSelected.provider}/${parentSelected.model}`;
+
+    // Child resolution: same profile + registry through the per-invocation resolver.
+    const child = resolveMmrSubagentInvocation({
+      profile,
+      registry,
+      registeredTools: [...profile.tools],
+    });
+    assert.equal(child.ok, true, "child resolution must succeed");
+    assert.equal(child.modelArg, parentModelArg, "parent and child must resolve the same route");
+
+    // When the parent passes that --model explicitly, child resolution must not mismatch.
+    const childWithExplicit = resolveMmrSubagentInvocation({
+      profile,
+      registry,
+      registeredTools: [...profile.tools],
+      explicitModel: parentModelArg,
+    });
+    assert.equal(childWithExplicit.ok, true, "explicit parent --model must agree with the child route");
+    assert.equal(childWithExplicit.modelArg, parentModelArg);
   });
 });

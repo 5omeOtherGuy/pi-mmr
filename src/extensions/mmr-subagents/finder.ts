@@ -21,8 +21,8 @@ import {
 import {
   expandMmrModelPreferencesToStrings,
   getMmrSubagentProfile,
-  selectFirstMatchingAvailableModel,
 } from "../mmr-core/subagent-profiles.js";
+import { selectMmrModelRoute } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildFinderWorkerSystemPrompt as buildFinderWorkerSystemPromptFromPrompts } from "./prompts.js";
@@ -33,7 +33,7 @@ import {
 } from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import {
-  listAvailableMmrWorkerModelsFromCtx,
+  resolveCtxMmrModelRegistry,
   resolveMmrWorkerModelContextWindowFromCtx,
 } from "./worker-model-metadata.js";
 import {
@@ -178,22 +178,6 @@ export const FINDER_PROGRESS_PLACEHOLDER = "finder: searching codebase…";
  */
 export function buildFinderWorkerSystemPrompt(cwd: string): string {
   return buildFinderWorkerSystemPromptFromPrompts(cwd);
-}
-
-/**
- * Pick the first preferred worker model the parent Pi process actually has a
- * matching route for. Returns `undefined` when none match.
- *
- * Matching is intentionally loose without crossing provider routes: a
- * preference like `provider/model-id` matches that exact route (or an entry
- * ending with that full suffix), and a bare `model-id` matches any entry whose
- * tail (after the last `/`) equals it.
- */
-export function selectFinderWorkerModel(
-  availableModels: readonly string[],
-  preferences: readonly string[] = FINDER_DEFAULT_MODEL_PREFERENCES,
-): string | undefined {
-  return selectFirstMatchingAvailableModel(availableModels, preferences, { strictProviderRoutes: true });
 }
 
 interface FinderLinkRange {
@@ -418,20 +402,14 @@ export interface FinderToolDeps {
    */
   runWorker?: typeof runMmrSubagentWorker;
   /**
-   * Resolve the list of model IDs Pi knows about. Used by
-   * {@link selectFinderWorkerModel}. When omitted, `execute()` reads
-   * `ctx.modelRegistry.getAvailable()` from the Pi extension context and
-   * flattens each entry into both its `provider/id` and bare `id` form.
-   */
-  listAvailableModels?: () => readonly string[];
-  /**
    * Override the ordered worker-model preference list. When set, this
    * value wins over both the settings-driven
    * `subagentModelPreferences.finder` block and the profile defaults;
    * useful for tests and host integrations that want to pin a
-   * preference without touching `.pi/settings.json`.
+   * preference without touching `.pi/settings.json`. Fed straight into
+   * the shared `selectMmrModelRoute` registry resolver.
    */
-  modelPreferences?: readonly string[];
+  modelPreferences?: readonly MmrModelPreference[];
   /**
    * Settings-driven override: when present, expanded via
    * `expandMmrModelPreferencesToStrings` and used as the preference
@@ -471,21 +449,15 @@ function resolveCwd(ctx: ExtensionContext | undefined): string {
 }
 
 /**
- * Read available model IDs from Pi's extension context. Returns each model
- * as both `provider/id` (canonical) and bare `id` so the loose-match logic
- * in {@link selectFinderWorkerModel} succeeds regardless of which form a
- * preference uses. Returns an empty array when `ctx` is missing or does
- * not expose `modelRegistry.getAvailable`.
- */
-/**
- * Resolve the ordered worker-model preference list used by the
- * `finder` parent on every execute. Precedence (top wins):
+ * Resolve the ordered worker-model preference list used by the `finder`
+ * parent on every execute, as `MmrModelPreference[]` fed straight into the
+ * shared `selectMmrModelRoute` registry resolver — the same path the child
+ * Pi process uses at activation, so parent and child can never disagree on
+ * the route. Precedence (top wins):
  *  1. `deps.modelPreferences` — explicit programmatic override.
  *  2. `subagentModelPreferences.finder` from settings — user-driven
- *     `/mmr-config` override; expanded via
- *     `expandMmrModelPreferencesToStrings` so the bare/canonical loose
- *     match still applies.
- *  3. `FINDER_DEFAULT_MODEL_PREFERENCES` — profile defaults.
+ *     `/mmr-config` override.
+ *  3. the `finder` profile's `modelPreferences` — defaults.
  *
  * Settings are re-read on every invocation (matching the child Pi
  * process's activation path) so a `/mmr-config` update takes effect on
@@ -495,7 +467,7 @@ function resolveCwd(ctx: ExtensionContext | undefined): string {
 function resolveFinderModelPreferences(
   cwd: string,
   deps: FinderToolDeps,
-): readonly string[] {
+): readonly MmrModelPreference[] {
   if (deps.modelPreferences && deps.modelPreferences.length > 0) {
     return deps.modelPreferences;
   }
@@ -514,10 +486,9 @@ function resolveFinderModelPreferences(
     }
   }
   if (settingsBlock && settingsBlock.length > 0) {
-    const expanded = expandMmrModelPreferencesToStrings(settingsBlock);
-    if (expanded.length > 0) return expanded;
+    return settingsBlock;
   }
-  return FINDER_DEFAULT_MODEL_PREFERENCES;
+  return requireFinderProfile().modelPreferences;
 }
 
 function progressContent(snapshot: MmrWorkerProgressSnapshot): string {
@@ -688,9 +659,8 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
     ): Promise<AgentToolResult<FinderDetails>> {
       const params = coerceFinderParams(rawParams);
       const cwd = resolveCwd(ctx);
-      const availableModels = deps.listAvailableModels
-        ? deps.listAvailableModels()
-        : listAvailableMmrWorkerModelsFromCtx(ctx);
+      const profile = requireFinderProfile();
+      const registry = resolveCtxMmrModelRegistry(ctx);
       const basePreferences = resolveFinderModelPreferences(cwd, deps);
       const effectiveRunner = deps.runner
         ? deps.runner
@@ -706,10 +676,15 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
       const runWorkerOnce = async (
         runArgs: { override?: readonly MmrModelPreference[] },
       ): Promise<{ result: Awaited<ReturnType<typeof effectiveRunner.run>>; route: string | undefined }> => {
-        const preferences = runArgs.override
-          ? expandMmrModelPreferencesToStrings(runArgs.override)
-          : basePreferences;
-        const model = selectFinderWorkerModel(availableModels, preferences);
+        const preferences = runArgs.override ?? basePreferences;
+        const route = registry
+          ? selectMmrModelRoute({
+              modelPreferences: preferences,
+              modeThinkingLevel: profile.thinkingLevel,
+              registry,
+            }).selected
+          : undefined;
+        const model = route ? `${route.provider}/${route.model}` : undefined;
         const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
         const runnerOptions: MmrSubagentRunOptions = {
           profileName: FINDER_SUBAGENT_PROFILE,
@@ -745,7 +720,7 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
         registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
         toolName: FINDER_TOOL_NAME,
         profileName: FINDER_SUBAGENT_PROFILE,
-        candidatePreferences: requireFinderProfile().modelPreferences,
+        candidatePreferences: profile.modelPreferences,
         classifyOutcome: (result) => classifyMmrWorkerOutcome(result, { partialOutputPolicy: "fail-on-nonzero" }),
         run: runWorkerOnce,
       });

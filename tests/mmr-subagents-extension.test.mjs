@@ -109,13 +109,19 @@ describe("mmr-subagents package wiring", () => {
     assert.equal(typeof root.createFinderTool, "function");
     assert.equal(typeof root.registerFinderTool, "function");
     assert.equal(typeof root.buildFinderWorkerSystemPrompt, "function");
-    assert.equal(typeof root.selectFinderWorkerModel, "function");
+    // selectFinderWorkerModel was removed (issue-#1 "Option A"): finder now
+    // resolves its worker route through the shared selectMmrModelRoute
+    // registry resolver, so the public string selector is no longer exported.
+    assert.equal(root.selectFinderWorkerModel, undefined, "selectFinderWorkerModel must no longer be exported");
     assert.equal(root.FINDER_TOOL_NAME, "finder");
     assert.deepEqual([...root.FINDER_WORKER_TOOLS].sort(), ["find", "grep", "read"]);
     assert.equal(typeof root.createOracleTool, "function");
     assert.equal(typeof root.registerOracleTool, "function");
     assert.equal(typeof root.buildOracleWorkerSystemPrompt, "function");
-    assert.equal(typeof root.selectOracleWorkerModel, "function");
+    // selectOracleWorkerModel was removed (issue-#1 "Option A"): oracle now
+    // resolves its worker route through the shared selectMmrModelRoute
+    // registry resolver, so the public string selector is no longer exported.
+    assert.equal(root.selectOracleWorkerModel, undefined, "selectOracleWorkerModel must no longer be exported");
     assert.equal(root.ORACLE_TOOL_NAME, "oracle");
     assert.deepEqual(
       [...root.ORACLE_WORKER_TOOLS],

@@ -78,6 +78,15 @@ const FILES = (process.env.ORACLE_SMOKE_FILES ?? "")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
 const FORCED_MODEL = process.env.ORACLE_SMOKE_MODEL?.trim();
+// oracle now resolves its worker route through the shared
+// selectMmrModelRoute registry resolver, so an operator override is a
+// MmrModelPreference[]. A `provider/id` value pins the provider; a bare id
+// matches any registered provider for that model.
+const FORCED_MODEL_PREFERENCE = FORCED_MODEL
+  ? (FORCED_MODEL.includes("/")
+      ? [{ model: FORCED_MODEL.slice(FORCED_MODEL.indexOf("/") + 1), providers: [FORCED_MODEL.slice(0, FORCED_MODEL.indexOf("/"))] }]
+      : [{ model: FORCED_MODEL }])
+  : undefined;
 const TIMEOUT_MS = Number.parseInt(process.env.ORACLE_SMOKE_TIMEOUT_MS ?? "180000", 10);
 
 async function main() {
@@ -113,8 +122,8 @@ async function main() {
   const forcedResolve = (args) => ({ command: "pi", args: [...args, ...devLoopExtraArgs] });
   const deps = {
     runnerDeps: { resolveInvocation: forcedResolve },
-    ...(FORCED_MODEL
-      ? { listAvailableModels: () => [FORCED_MODEL], modelPreferences: [FORCED_MODEL] }
+    ...(FORCED_MODEL_PREFERENCE
+      ? { modelPreferences: FORCED_MODEL_PREFERENCE }
       : {}),
   };
   const tool = createOracleTool(deps);

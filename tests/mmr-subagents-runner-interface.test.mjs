@@ -254,7 +254,7 @@ describe("createFinderTool({ runner })", () => {
         return makeWorkerResult({ finalOutput: "via runner", truncatedFinalOutput: "via runner" });
       },
     };
-    const tool = createFinderTool({ runner: fakeRunner, listAvailableModels: () => [] });
+    const tool = createFinderTool({ runner: fakeRunner });
     const result = await tool.execute("call-1", { query: "find me" }, undefined, undefined, { cwd: "/tmp/runner-cwd" });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].profileName, "finder");
@@ -286,7 +286,6 @@ describe("createFinderTool({ runner })", () => {
             return makeWorkerResult({ finalOutput: "from runner" });
           },
         },
-        listAvailableModels: () => [],
       });
       await tool.execute("call-1", { query: "find" }, undefined, undefined, { cwd: "/tmp/cwd" });
     } finally {
@@ -311,7 +310,7 @@ describe("createOracleTool({ runner })", () => {
         return makeWorkerResult({ finalOutput: "oracle-via-runner", truncatedFinalOutput: "oracle-via-runner" });
       },
     };
-    const tool = createOracleTool({ runner: fakeRunner, listAvailableModels: () => [] });
+    const tool = createOracleTool({ runner: fakeRunner });
     const result = await tool.execute("call-1", { task: "Help debug" }, undefined, undefined, { cwd: "/tmp/oracle-cwd" });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].profileName, "oracle");

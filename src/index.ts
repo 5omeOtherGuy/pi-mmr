@@ -320,7 +320,6 @@ export {
   buildFinderWorkerSystemPrompt,
   createFinderTool,
   registerFinderTool,
-  selectFinderWorkerModel,
 } from "./extensions/mmr-subagents/finder.js";
 export type { FinderDetails, FinderParams, FinderToolDeps } from "./extensions/mmr-subagents/finder.js";
 export {
@@ -338,7 +337,6 @@ export {
   createOracleTool,
   registerOracleTool,
   requireMmrAdvisorProfile,
-  selectOracleWorkerModel,
 } from "./extensions/mmr-subagents/oracle.js";
 export type {
   MmrAdvisorToolConfig,

@@ -46,6 +46,9 @@ after(cleanupLoadedSource);
 const FINDER_MODULE = "extensions/mmr-subagents/finder.ts";
 const PROMPTS_MODULE = "extensions/mmr-subagents/prompts.ts";
 const PROMPT_ASSEMBLY_MODULE = "extensions/mmr-core/subagent-prompt-assembly.ts";
+const MODEL_RESOLVER_MODULE = "extensions/mmr-core/model-resolver.ts";
+const SUBAGENT_RESOLVER_MODULE = "extensions/mmr-core/subagent-resolver.ts";
+const PROFILES_MODULE = "extensions/mmr-core/subagent-profiles.ts";
 
 beforeEach(async () => {
   const { clearMmrSubagentPromptBuilders } = await importSource(PROMPT_ASSEMBLY_MODULE);
@@ -85,6 +88,19 @@ function makeRunnerSpy(result = makeWorkerResult()) {
     return result;
   };
   return { runWorker, calls };
+}
+
+// Registry stub matching the shape `selectMmrModelRoute` consumes, plus the
+// `getAvailable()` the finder context-window lookup reads. `models` entries
+// are `{ provider, id, contextWindow? }`.
+function makeRegistry(models) {
+  return {
+    getAll: () => models,
+    find: (provider, id) => models.find((m) => m.provider === provider && m.id === id),
+    hasConfiguredAuth: () => true,
+    isUsingOAuth: (model) => model.provider.endsWith("subscription") || model.provider.endsWith("codex"),
+    getAvailable: () => models,
+  };
 }
 
 function makeTempDir() {
@@ -226,67 +242,6 @@ describe("FINDER_DEFAULT_MODEL_PREFERENCES", () => {
   });
 });
 
-describe("selectFinderWorkerModel", () => {
-  it("prefers the antigravity Flash route when both Gemini providers are present", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    const chosen = selectFinderWorkerModel([
-      "google/gemini-3.5-flash",
-      "antigravity/gemini-3.5-flash-extra-low",
-      "openai-codex/gpt-5.4-mini",
-      "claude-subscription/claude-haiku-4-5",
-    ]);
-    assert.equal(chosen, "antigravity/gemini-3.5-flash-extra-low");
-  });
-
-  it("does not use the Google Gemini 3.5 Flash route when antigravity is unavailable", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    const chosen = selectFinderWorkerModel([
-      "google/gemini-3.5-flash",
-      "openai-codex/gpt-5.4-mini",
-      "claude-subscription/claude-haiku-4-5",
-    ]);
-    assert.equal(chosen, "openai-codex/gpt-5.4-mini");
-  });
-
-  it("falls back to a GPT-5.4 Mini route when Gemini 3.5 Flash is not available", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    const chosen = selectFinderWorkerModel([
-      "openai-codex/gpt-5.4-mini",
-      "claude-subscription/claude-haiku-4-5",
-    ]);
-    assert.equal(chosen, "openai-codex/gpt-5.4-mini");
-  });
-
-  it("falls back to a Haiku 4.5 route when neither Gemini nor GPT-5.4 Mini is available", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    const chosen = selectFinderWorkerModel([
-      "claude-subscription/claude-haiku-4-5",
-      "openai/gpt-5.5",
-    ]);
-    assert.equal(chosen, "claude-subscription/claude-haiku-4-5");
-  });
-
-  it("returns undefined when neither preference is registered", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    assert.equal(selectFinderWorkerModel(["openai/gpt-5.5"]), undefined);
-    assert.equal(selectFinderWorkerModel([]), undefined);
-  });
-
-  it("matches by bare model id when only the model tail is exposed", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    assert.equal(selectFinderWorkerModel(["gpt-5.4-mini"]), "gpt-5.4-mini");
-  });
-
-  it("respects an explicit preference order override", async () => {
-    const { selectFinderWorkerModel } = await importSource(FINDER_MODULE);
-    const chosen = selectFinderWorkerModel(
-      ["openai-codex/gpt-5.4-mini", "claude-subscription/claude-haiku-4-5"],
-      ["claude-subscription/claude-haiku-4-5"],
-    );
-    assert.equal(chosen, "claude-subscription/claude-haiku-4-5");
-  });
-});
-
 describe("sanitizeFinderFileLinks", () => {
   it("leaves valid in-workspace file line ranges unchanged", async () => {
     const { sanitizeFinderFileLinks } = await importSource(FINDER_MODULE);
@@ -410,7 +365,6 @@ describe("finder execute() seam", () => {
     const controller = new AbortController();
     const tool = createFinderTool({
       runWorker,
-      listAvailableModels: () => ["openai-codex/gpt-5.4-mini"],
       buildSystemPrompt: (cwd) => `SP for ${cwd}`,
     });
     const result = await tool.execute(
@@ -418,7 +372,7 @@ describe("finder execute() seam", () => {
       { query: "where is the auth middleware?" },
       controller.signal,
       undefined,
-      { cwd: "/abs/project" },
+      { cwd: "/abs/project", modelRegistry: makeRegistry([{ provider: "openai-codex", id: "gpt-5.4-mini" }]) },
     );
     assert.equal(calls.length, 1);
     const options = calls[0];
@@ -456,7 +410,7 @@ describe("finder execute() seam", () => {
       assert.equal(profile.name, "finder");
       return `surface spy ${cwd}`;
     });
-    const tool = createFinderTool({ runWorker, listAvailableModels: () => [] });
+    const tool = createFinderTool({ runWorker });
     await tool.execute("c", { query: "find foo" }, undefined, undefined, { cwd: "/tmp/finder-surface" });
     assert.equal(spyCalls, 1, "execute must call the registered finder prompt builder via the surface API");
     assert.equal(calls[0].systemPrompt, "surface spy /tmp/finder-surface");
@@ -467,7 +421,7 @@ describe("finder execute() seam", () => {
     const { clearMmrSubagentPromptBuilders } = await importSource(PROMPT_ASSEMBLY_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
     clearMmrSubagentPromptBuilders();
-    const tool = createFinderTool({ runWorker, listAvailableModels: () => [] });
+    const tool = createFinderTool({ runWorker });
     await assert.rejects(
       tool.execute("c", { query: "find foo" }, undefined, undefined, { cwd: "/tmp" }),
       /no subagent prompt builder registered.*finder/i,
@@ -478,25 +432,26 @@ describe("finder execute() seam", () => {
   it("omits --model when no preferred worker model is available", async () => {
     const { createFinderTool } = await importSource(FINDER_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
-    const tool = createFinderTool({ runWorker, listAvailableModels: () => ["openai/gpt-5.5"] });
-    await tool.execute("c", { query: "find foo" }, undefined, undefined, { cwd: "/tmp" });
+    const tool = createFinderTool({ runWorker });
+    await tool.execute("c", { query: "find foo" }, undefined, undefined, {
+      cwd: "/tmp",
+      modelRegistry: makeRegistry([{ provider: "openai", id: "gpt-5.5" }]),
+    });
     assert.equal(calls.length, 1);
     assert.equal("model" in calls[0], false, "options.model must be omitted when no preference matches");
   });
 
-  it("defaults to ctx.modelRegistry.getAvailable() (mapped to provider/id) when no listAvailableModels dep is provided", async () => {
+  it("resolves the worker route from ctx.modelRegistry and reads its context window via getAvailable()", async () => {
     const { createFinderTool } = await importSource(FINDER_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
-    const tool = createFinderTool({ runWorker }); // no listAvailableModels override
+    const tool = createFinderTool({ runWorker });
     const ctx = {
       cwd: "/abs/project",
-      modelRegistry: {
-        getAvailable: () => [
-          { provider: "openai", id: "gpt-5.5" },
-          { provider: "openai-codex", id: "gpt-5.4-mini", contextWindow: 300_000 },
-          { provider: "claude-subscription", id: "claude-haiku-4-5" },
-        ],
-      },
+      modelRegistry: makeRegistry([
+        { provider: "openai", id: "gpt-5.5" },
+        { provider: "openai-codex", id: "gpt-5.4-mini", contextWindow: 300_000 },
+        { provider: "claude-subscription", id: "claude-haiku-4-5" },
+      ]),
     };
     const result = await tool.execute("c", { query: "find foo" }, undefined, undefined, ctx);
     assert.equal(calls.length, 1);
@@ -514,13 +469,11 @@ describe("finder execute() seam", () => {
     const tool = createFinderTool({ runWorker });
     const ctx = {
       cwd: "/abs/project",
-      modelRegistry: {
-        getAvailable: () => [
-          { provider: "google", id: "gemini-3.5-flash", contextWindow: 128_000 },
-          { provider: "antigravity", id: "gemini-3.5-flash-extra-low", contextWindow: 1_000_000 },
-          { provider: "openai-codex", id: "gpt-5.4-mini", contextWindow: 300_000 },
-        ],
-      },
+      modelRegistry: makeRegistry([
+        { provider: "google", id: "gemini-3.5-flash", contextWindow: 128_000 },
+        { provider: "antigravity", id: "gemini-3.5-flash-extra-low", contextWindow: 1_000_000 },
+        { provider: "openai-codex", id: "gpt-5.4-mini", contextWindow: 300_000 },
+      ]),
     };
     const result = await tool.execute("c", { query: "find foo" }, undefined, undefined, ctx);
     assert.equal(calls.length, 1);
@@ -534,12 +487,10 @@ describe("finder execute() seam", () => {
     const tool = createFinderTool({ runWorker });
     const ctx = {
       cwd: "/tmp",
-      modelRegistry: {
-        getAvailable: () => [
-          { provider: "openai", id: "gpt-5.5" },
-          { provider: "claude-subscription", id: "claude-haiku-4-5" },
-        ],
-      },
+      modelRegistry: makeRegistry([
+        { provider: "openai", id: "gpt-5.5" },
+        { provider: "claude-subscription", id: "claude-haiku-4-5" },
+      ]),
     };
     await tool.execute("c", { query: "x" }, undefined, undefined, ctx);
     assert.equal(calls[0].model, "claude-subscription/claude-haiku-4-5");
@@ -923,20 +874,21 @@ describe("finder execute() seam", () => {
           },
         };
       },
-      // Provide an availableModels list that includes the settings
-      // override under its canonical form so the loose match succeeds.
-      listAvailableModels: () => [
-        "openai-codex/gpt-5.4-mini",
-        "google/gemini-3.5-flash",
-        "gemini-3.5-flash",
-      ],
     });
     await tool.execute(
       "c1",
       { query: "x" },
       undefined,
       undefined,
-      { cwd: "/tmp/repo" },
+      {
+        cwd: "/tmp/repo",
+        // Registry includes the settings override (google/gemini-3.5-flash)
+        // so the resolver picks it over the profile default.
+        modelRegistry: makeRegistry([
+          { provider: "openai-codex", id: "gpt-5.4-mini" },
+          { provider: "google", id: "gemini-3.5-flash" },
+        ]),
+      },
     );
     assert.equal(loadCalls, 1, "finder must read settings exactly once per execute");
     assert.equal(captured[0], "/tmp/repo", "settings loader must be called with ctx.cwd");
@@ -965,5 +917,56 @@ describe("finder execute() seam", () => {
     const tool = createFinderTool({ runWorker });
     const result = await tool.execute("c", { query: "x" }, undefined, undefined, { cwd: "/tmp" });
     assert.equal(result.details.spawnError, "spawn ENOENT");
+  });
+});
+
+describe("finder parent↔child route agreement", () => {
+  // Proves the production unification (issue-#1 "Option A"): the parent
+  // finder tool and the child Pi process both resolve the worker route
+  // through the SAME `selectMmrModelRoute` resolver, so they can never
+  // disagree on the `--model`. The parent route string the tool would pass
+  // must equal the child's `resolveMmrSubagentInvocation(...).modelArg`,
+  // and passing that route back as an explicit `--model` must not trip the
+  // child's model.mismatch guard.
+  it("parent route equals the child's resolved modelArg for the finder profile", async () => {
+    const { selectMmrModelRoute } = await importSource(MODEL_RESOLVER_MODULE);
+    const { resolveMmrSubagentInvocation } = await importSource(SUBAGENT_RESOLVER_MODULE);
+    const { getMmrSubagentProfile } = await importSource(PROFILES_MODULE);
+    const profile = getMmrSubagentProfile("finder");
+    // Registry includes the profile's provider-pinned primary plus both
+    // fallbacks so the resolver has a real route to pick.
+    const registry = makeRegistry([
+      { provider: "antigravity", id: "gemini-3.5-flash-extra-low" },
+      { provider: "openai-codex", id: "gpt-5.4-mini" },
+      { provider: "claude-subscription", id: "claude-haiku-4-5" },
+    ]);
+
+    // Parent route: exactly what finder.execute() forms as --model.
+    const parentSelected = selectMmrModelRoute({
+      modelPreferences: profile.modelPreferences,
+      modeThinkingLevel: profile.thinkingLevel,
+      registry,
+    }).selected;
+    assert.ok(parentSelected, "parent must resolve a route");
+    const parentModelArg = `${parentSelected.provider}/${parentSelected.model}`;
+
+    // Child resolution: same profile + registry through the per-invocation resolver.
+    const child = resolveMmrSubagentInvocation({
+      profile,
+      registry,
+      registeredTools: [...profile.tools],
+    });
+    assert.equal(child.ok, true, "child resolution must succeed");
+    assert.equal(child.modelArg, parentModelArg, "parent and child must resolve the same route");
+
+    // When the parent passes that --model explicitly, child resolution must not mismatch.
+    const childWithExplicit = resolveMmrSubagentInvocation({
+      profile,
+      registry,
+      registeredTools: [...profile.tools],
+      explicitModel: parentModelArg,
+    });
+    assert.equal(childWithExplicit.ok, true, "explicit parent --model must agree with the child route");
+    assert.equal(childWithExplicit.modelArg, parentModelArg);
   });
 });

@@ -51,6 +51,18 @@ function makeRunnerSpy(result = makeWorkerResult()) {
   return { runWorker, calls };
 }
 
+// Registry stub matching the shape `selectMmrModelRoute` consumes, plus the
+// `getAvailable()` the advisor context-window lookup reads.
+function makeRegistry(models) {
+  return {
+    getAll: () => models,
+    find: (provider, id) => models.find((m) => m.provider === provider && m.id === id),
+    hasConfiguredAuth: () => true,
+    isUsingOAuth: (model) => model.provider.endsWith("subscription") || model.provider.endsWith("codex"),
+    getAvailable: () => models,
+  };
+}
+
 describe("cthulu subagent profile", () => {
   it("is a standalone profile pinned to opus-4-8 at xhigh with a 128k output cap", async () => {
     const { getMmrSubagentProfile } = await importSource(PROFILES_MODULE);
@@ -143,7 +155,6 @@ describe("cthulu tool definition", () => {
     const { runWorker, calls } = makeRunnerSpy();
     const tool = createCthuluTool({
       runWorker,
-      listAvailableModels: () => ["claude-subscription/claude-opus-4-8"],
       buildSystemPrompt: (cwd) => `RITE for ${cwd}`,
     });
     const result = await tool.execute(
@@ -151,7 +162,7 @@ describe("cthulu tool definition", () => {
       { task: "Optimal fix for the deadlock." },
       undefined,
       undefined,
-      { cwd: "/abs/project" },
+      { cwd: "/abs/project", modelRegistry: makeRegistry([{ provider: "claude-subscription", id: "claude-opus-4-8" }]) },
     );
     assert.equal(calls.length, 1);
     assert.equal(calls[0].profileName, "cthulu");

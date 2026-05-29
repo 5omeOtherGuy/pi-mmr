@@ -376,9 +376,10 @@ export function listMmrSubagentProfiles(): readonly string[] {
  * Expand an ordered `MmrModelPreference[]` (e.g. a profile's
  * `modelPreferences` or a settings-level
  * `subagentModelPreferences[<profileName>]` override) into the flat
- * `string[]` shape consumed by the loose-match helpers used by
- * concrete subagent tools (`selectFinderWorkerModel`,
- * `selectOracleWorkerModel`, `selectHistoryReaderWorkerModel`).
+ * `string[]` shape consumed by the loose-match helper used by the
+ * `selectHistoryReaderWorkerModel` subagent tool. (Finder and oracle
+ * resolve their route through the registry-aware `selectMmrModelRoute`
+ * instead and no longer use the loose-match path.)
  *
  * For each preference, the resulting list emits canonical
  * `provider/model` entries using the preference's explicit `providers`
@@ -443,9 +444,10 @@ export interface SelectFirstMatchingAvailableModelOptions {
  * matching route for, walking `preferences` in order. Returns `undefined` when
  * none match or no models are available.
  *
- * Shared matching core for the subagent worker model selectors
- * (`selectFinderWorkerModel`, `selectOracleWorkerModel`,
- * `selectHistoryReaderWorkerModel`). Each public selector keeps its own
+ * Shared matching core for the `selectHistoryReaderWorkerModel` worker
+ * model selector. (Finder and oracle now resolve their route through the
+ * registry-aware `selectMmrModelRoute` and no longer use this path.)
+ * The selector keeps its own
  * profile-specific default preference list and chooses the matching policy via
  * {@link SelectFirstMatchingAvailableModelOptions}; this helper owns only the
  * common scan: trim and drop empty available entries, then for each preference

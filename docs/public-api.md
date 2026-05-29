@@ -181,8 +181,8 @@ changes.
 | `createMmrSubagentsToolProvider` | function | MMR tool provider for the four owned tool names. |
 | `createMmrSubagentsFeatureGateProvider` | function | Feature-gate provider for `mmr-subagents`. |
 | `MMR_SUBAGENTS_FEATURE_GATE`, `MMR_SUBAGENTS_OWNED_TOOLS`, `MMR_SUBAGENTS_PROVIDER_NAME` | constants | Stable identifiers. |
-| `createFinderTool`, `registerFinderTool`, `selectFinderWorkerModel`, `buildFinderWorkerSystemPrompt` | functions | Finder worker surface. |
-| `createOracleTool`, `registerOracleTool`, `selectOracleWorkerModel`, `buildOracleWorkerSystemPrompt` | functions | Oracle worker surface. |
+| `createFinderTool`, `registerFinderTool`, `buildFinderWorkerSystemPrompt` | functions | Finder worker surface. |
+| `createOracleTool`, `registerOracleTool`, `buildOracleWorkerSystemPrompt` | functions | Oracle worker surface. |
 | `createLibrarianTool`, `registerLibrarianTool`, `buildLibrarianWorkerSystemPrompt`, `isLibrarianGithubToolPrerequisiteRegistered`, `MmrLibrarianContextWindowError`, `LIBRARIAN_SUBAGENT_PROFILE_NAME`, `LIBRARIAN_GATING_REASON` | functions/values | Librarian worker surface and gating helpers (gated on `mmr-github` tools). |
 | `createTaskTool`, `registerTaskTool`, `buildTaskWorkerSystemPrompt`, `classifyTaskOutcome`, `coerceTaskParams`, `hasUsableTaskFinalText`, `TaskParamsError`, `TASK_SUBAGENT_PROFILE` | functions/values | Task worker surface. |
 | `*_TOOL_NAME`, `*_DESCRIPTION`, `*_PARAMETERS_SCHEMA`, `*_PROGRESS_PLACEHOLDER`, `*_PROMPT_GUIDELINES`, `*_PROMPT_SNIPPET`, `*_WORKER_TOOLS`, `*_DEFAULT_MODEL_PREFERENCES` | constants | Per-worker metadata. Tested directly. |

@@ -18,9 +18,9 @@ import {
 import {
   expandMmrModelPreferencesToStrings,
   getMmrSubagentProfile,
-  selectFirstMatchingAvailableModel,
   type MmrSubagentProfile,
 } from "../mmr-core/subagent-profiles.js";
+import { selectMmrModelRoute } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildOracleWorkerSystemPrompt as buildOracleWorkerSystemPromptFromPrompts } from "./prompts.js";
@@ -31,7 +31,7 @@ import {
 } from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import {
-  listAvailableMmrWorkerModelsFromCtx,
+  resolveCtxMmrModelRegistry,
   resolveMmrWorkerModelContextWindowFromCtx,
 } from "./worker-model-metadata.js";
 import {
@@ -246,23 +246,6 @@ export function buildOracleWorkerSystemPrompt(cwd: string): string {
   return buildOracleWorkerSystemPromptFromPrompts(cwd);
 }
 
-/**
- * Pick the first preferred worker model the parent Pi process actually
- * has a matching route for. Same matching semantics as
- * `selectFinderWorkerModel`: a `provider/model-id` preference matches
- * by suffix; a bare `model-id` matches any entry whose tail (after the
- * last `/`) equals it. Returns `undefined` when none match.
- *
- * Shared by the oracle and the hidden cthulu advisor; the default
- * preference list differs by profile but the matching logic is identical.
- */
-export function selectOracleWorkerModel(
-  availableModels: readonly string[],
-  preferences: readonly string[] = ORACLE_DEFAULT_MODEL_PREFERENCES,
-): string | undefined {
-  return selectFirstMatchingAvailableModel(availableModels, preferences);
-}
-
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".png",
   ".jpg",
@@ -436,16 +419,15 @@ export interface OracleToolDeps {
    * wins and a one-line console warning is emitted.
    */
   runWorker?: typeof runMmrSubagentWorker;
-  /** Resolve the available model id list. Defaults to `ctx.modelRegistry.getAvailable()`. */
-  listAvailableModels?: () => readonly string[];
   /**
    * Override the ordered worker-model preference list. When set, this
    * value wins over both the settings-driven
    * `subagentModelPreferences.<profile>` block and the profile
    * defaults; useful for tests and host integrations that want to pin a
-   * preference without touching `.pi/settings.json`.
+   * preference without touching `.pi/settings.json`. Fed straight into
+   * the shared `selectMmrModelRoute` registry resolver.
    */
-  modelPreferences?: readonly string[];
+  modelPreferences?: readonly MmrModelPreference[];
   /**
    * Settings-driven override: when present, expanded via
    * `expandMmrModelPreferencesToStrings` and used as the preference
@@ -484,19 +466,20 @@ function resolveCwd(ctx: ExtensionContext | undefined): string {
  * parent on every execute. Precedence (top wins):
  *  1. `deps.modelPreferences` — explicit programmatic override.
  *  2. `subagentModelPreferences.<profile>` from settings — user-driven
- *     `/mmr-config` override; expanded via
- *     `expandMmrModelPreferencesToStrings`.
- *  3. The profile's default preferences.
+ *     `/mmr-config` override.
+ *  3. The profile's `modelPreferences` defaults.
  *
- * Settings are re-read on every invocation so a `/mmr-config` update
- * takes effect on the next call without a process restart.
+ * Returns `MmrModelPreference[]` fed straight into the shared
+ * `selectMmrModelRoute` registry resolver — the same path the child Pi
+ * process uses at activation, so parent and child can never disagree on
+ * the route. Settings are re-read on every invocation so a `/mmr-config`
+ * update takes effect on the next call without a process restart.
  */
 function resolveAdvisorModelPreferences(
   profileName: string,
-  defaultPreferences: readonly string[],
   cwd: string,
   deps: OracleToolDeps,
-): readonly string[] {
+): readonly MmrModelPreference[] {
   if (deps.modelPreferences && deps.modelPreferences.length > 0) {
     return deps.modelPreferences;
   }
@@ -515,10 +498,9 @@ function resolveAdvisorModelPreferences(
     }
   }
   if (settingsBlock && settingsBlock.length > 0) {
-    const expanded = expandMmrModelPreferencesToStrings(settingsBlock);
-    if (expanded.length > 0) return expanded;
+    return settingsBlock;
   }
-  return defaultPreferences;
+  return requireMmrAdvisorProfile(profileName).modelPreferences;
 }
 
 function progressContent(snapshot: MmrWorkerProgressSnapshot, placeholder: string): string {
@@ -661,8 +643,13 @@ export interface MmrAdvisorToolConfig {
   outputLabel: string;
   /** Profile-resolved worker tool allowlist (for details reporting). */
   workerTools: readonly string[];
-  /** Default ordered worker-model preference strings. */
-  defaultModelPreferences: readonly string[];
+  /**
+   * @deprecated Retained for compatibility only and no longer used for
+   * route selection. The advisor parent now resolves its route through
+   * the shared `selectMmrModelRoute` registry resolver using the
+   * profile's `modelPreferences` (see `resolveAdvisorModelPreferences`).
+   */
+  defaultModelPreferences?: readonly string[];
   /** Default per-file inline byte cap. */
   defaultPerFileByteLimit: number;
   /** Render the streaming call component. */
@@ -719,16 +706,13 @@ export function createMmrAdvisorTool(
         resolveOracleAttachment(entry, cwd, perFileByteLimit),
       );
       const userPrompt = buildOracleUserPrompt(params, attachments);
-      const availableModels = deps.listAvailableModels
-        ? deps.listAvailableModels()
-        : listAvailableMmrWorkerModelsFromCtx(ctx);
       const basePreferences = resolveAdvisorModelPreferences(
         config.profileName,
-        config.defaultModelPreferences,
         cwd,
         deps,
       );
       const profile = requireMmrAdvisorProfile(config.profileName);
+      const registry = resolveCtxMmrModelRegistry(ctx);
       const effectiveRunner = deps.runner
         ? deps.runner
         : deps.runWorker
@@ -743,10 +727,15 @@ export function createMmrAdvisorTool(
       const runWorkerOnce = async (
         runArgs: { override?: readonly MmrModelPreference[] },
       ): Promise<{ result: Awaited<ReturnType<typeof effectiveRunner.run>>; route: string | undefined }> => {
-        const preferences = runArgs.override
-          ? expandMmrModelPreferencesToStrings(runArgs.override)
-          : basePreferences;
-        const model = selectOracleWorkerModel(availableModels, preferences);
+        const preferences = runArgs.override ?? basePreferences;
+        const route = registry
+          ? selectMmrModelRoute({
+              modelPreferences: preferences,
+              modeThinkingLevel: profile.thinkingLevel,
+              registry,
+            }).selected
+          : undefined;
+        const model = route ? `${route.provider}/${route.model}` : undefined;
         const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
         const runnerOptions: MmrSubagentRunOptions = {
           profileName: config.profileName,
