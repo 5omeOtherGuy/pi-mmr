@@ -3,6 +3,20 @@ import { LIBRARIAN_GATING_REASON } from "./librarian.js";
 
 export const MMR_SUBAGENTS_PROVIDER_NAME = "mmr-subagents";
 export const MMR_SUBAGENTS_FEATURE_GATE = "mmr-subagents";
+/**
+ * Distinct feature gate for the async background task tools
+ * (`start_task` / `task_poll` / `task_wait` / `task_cancel`). They ship
+ * behind their own gate so they are credited and documented separately
+ * from the blocking worker tools.
+ */
+export const MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE = "mmr-subagents.async-tasks";
+
+/** Async background task tool names owned by this extension. */
+export const MMR_SUBAGENTS_ASYNC_TASK_TOOLS: ReadonlyArray<
+  "start_task" | "task_poll" | "task_wait" | "task_cancel"
+> = ["start_task", "task_poll", "task_wait", "task_cancel"];
+
+const ASYNC_TASK_TOOLS_SET: ReadonlySet<string> = new Set<string>(MMR_SUBAGENTS_ASYNC_TASK_TOOLS);
 
 /**
  * Logical tool names owned by `mmr-subagents`. Mirrors the deferred entries
@@ -10,12 +24,26 @@ export const MMR_SUBAGENTS_FEATURE_GATE = "mmr-subagents";
  * the provider returns `undefined` for any other logical name and never
  * shadows unrelated providers.
  */
-export const MMR_SUBAGENTS_OWNED_TOOLS: ReadonlyArray<"Task" | "finder" | "oracle" | "cthulu" | "librarian"> = [
+export const MMR_SUBAGENTS_OWNED_TOOLS: ReadonlyArray<
+  | "Task"
+  | "finder"
+  | "oracle"
+  | "cthulu"
+  | "librarian"
+  | "start_task"
+  | "task_poll"
+  | "task_wait"
+  | "task_cancel"
+> = [
   "Task",
   "finder",
   "oracle",
   "cthulu",
   "librarian",
+  "start_task",
+  "task_poll",
+  "task_wait",
+  "task_cancel",
 ];
 
 const OWNED_TOOLS_SET: ReadonlySet<string> = new Set<string>(MMR_SUBAGENTS_OWNED_TOOLS);
@@ -37,6 +65,8 @@ export interface MmrSubagentsCapabilities {
   cthulu?: MmrSubagentsCapability;
   Task?: MmrSubagentsCapability;
   librarian?: MmrSubagentsCapability;
+  /** Gates all four async background task tools together. */
+  asyncTasks?: MmrSubagentsCapability;
 }
 
 function readCapability(value: MmrSubagentsCapability | undefined): boolean {
@@ -51,6 +81,7 @@ function readCapability(value: MmrSubagentsCapability | undefined): boolean {
 }
 
 function isCapabilityActive(capabilities: MmrSubagentsCapabilities, name: string): boolean {
+  if (ASYNC_TASK_TOOLS_SET.has(name)) return readCapability(capabilities.asyncTasks);
   switch (name) {
     case "finder":
       return readCapability(capabilities.finder);
@@ -68,9 +99,7 @@ function isCapabilityActive(capabilities: MmrSubagentsCapabilities, name: string
 }
 
 function formatActiveCapabilities(capabilities: MmrSubagentsCapabilities): string {
-  const active = (["finder", "oracle", "cthulu", "Task", "librarian"] as const).filter((name) =>
-    isCapabilityActive(capabilities, name),
-  );
+  const active = MMR_SUBAGENTS_OWNED_TOOLS.filter((name) => isCapabilityActive(capabilities, name));
   return active.length === 0 ? "" : active.join(", ");
 }
 
@@ -88,6 +117,20 @@ export function createMmrSubagentsFeatureGateProvider(
   return {
     name: MMR_SUBAGENTS_PROVIDER_NAME,
     evaluate(gate) {
+      if (gate === MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE) {
+        const enabled = readCapability(capabilities.asyncTasks);
+        return enabled
+          ? {
+              gate,
+              status: "enabled",
+              reason: `mmr-subagents async background task tools available: ${MMR_SUBAGENTS_ASYNC_TASK_TOOLS.join(", ")}.`,
+            }
+          : {
+              gate,
+              status: "disabled",
+              reason: "mmr-subagents async background task tools are not enabled.",
+            };
+      }
       if (gate !== MMR_SUBAGENTS_FEATURE_GATE) return undefined;
       const active = formatActiveCapabilities(capabilities);
       if (active.length === 0) {
@@ -128,6 +171,13 @@ export function createMmrSubagentsToolProvider(
       if (!OWNED_TOOLS_SET.has(toolName)) return undefined;
       if (isCapabilityActive(capabilities, toolName)) {
         return { kind: "active" };
+      }
+      if (ASYNC_TASK_TOOLS_SET.has(toolName)) {
+        return {
+          kind: "gated",
+          gate: MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE,
+          reason: `${toolName}: async background task tools are not enabled.`,
+        };
       }
       return {
         kind: "gated",

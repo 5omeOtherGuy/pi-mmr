@@ -119,7 +119,7 @@ describe("task-subagent profile", () => {
     assert.ok(Array.isArray(profile.denyTools), "task-subagent must declare an explicit denyTools list");
     assert.deepEqual(
       [...profile.denyTools].sort(),
-      ["Task", "handoff", "librarian", "oracle"],
+      ["Task", "handoff", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
     );
     for (const recursive of ["Task", "oracle", "librarian", "handoff"]) {
       assert.equal(profile.tools.includes(recursive), false, `${recursive} must not be in the task worker allowlist`);

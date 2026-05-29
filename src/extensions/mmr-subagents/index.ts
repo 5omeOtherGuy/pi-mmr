@@ -9,6 +9,8 @@ import { type MmrAdvisorToolDeps, registerOracleTool } from "./oracle.js";
 import { registerCthuluTool } from "./cthulu.js";
 import { registerMmrSubagentsPromptBuilders } from "./prompts.js";
 import { type TaskToolDeps, registerTaskParentPromptCapture, registerTaskTool } from "./task.js";
+import { type AsyncTaskToolDeps, registerAsyncTaskTools } from "./async-task-tools.js";
+import { getMmrAsyncTaskRegistry } from "./async-task-registry.js";
 import {
   createMmrSubagentsFeatureGateProvider,
   createMmrSubagentsToolProvider,
@@ -39,6 +41,7 @@ export interface MmrSubagentsFactoryOverrides {
   cthulu?: MmrAdvisorToolDeps;
   task?: TaskToolDeps;
   librarian?: LibrarianToolDeps;
+  asyncTasks?: AsyncTaskToolDeps;
 }
 
 /**
@@ -64,7 +67,14 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
     registerTaskParentPromptCapture(pi);
     registerTaskTool(pi, overrides.task ?? {});
     registerLibrarianTool(pi, overrides.librarian ?? {});
+    registerAsyncTaskTools(pi, overrides.asyncTasks ?? {});
     pi.on("tool_result", maybeNumberFinderReadToolResult);
+    // Tear down background tasks when the session ends: abort active
+    // worker controllers and clear all session-scoped records. The
+    // registry is in-memory and process-local; nothing survives here.
+    pi.on("session_shutdown", () => {
+      getMmrAsyncTaskRegistry().shutdownSession(undefined, "session_shutdown");
+    });
     // Clear session-scoped worker-model fallback state at session
     // boundaries so one session's failure counts and stored overrides can
     // never leak into another (including the degenerate undefined-session
@@ -84,6 +94,7 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
       cthulu: true,
       Task: true,
       librarian: () => isLibrarianGithubToolPrerequisiteRegistered(pi),
+      asyncTasks: true,
     };
     registerMmrFeatureGateProvider(createMmrSubagentsFeatureGateProvider(capabilities));
     registerMmrToolProvider(createMmrSubagentsToolProvider(capabilities));

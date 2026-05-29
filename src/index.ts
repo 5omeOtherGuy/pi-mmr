@@ -299,6 +299,8 @@ export { createMmrGithubExtension } from "./extensions/mmr-github/index.js";
 export type { MmrGithubFactoryOverrides } from "./extensions/mmr-github/index.js";
 
 export {
+  MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE,
+  MMR_SUBAGENTS_ASYNC_TASK_TOOLS,
   MMR_SUBAGENTS_FEATURE_GATE,
   MMR_SUBAGENTS_OWNED_TOOLS,
   MMR_SUBAGENTS_PROVIDER_NAME,
@@ -406,21 +408,71 @@ export {
   TASK_TOOL_NAME,
   TASK_WORKER_TOOLS,
   TaskParamsError,
+  buildTaskFinalResult,
+  buildTaskProgressResult,
+  buildTaskRunnerThrowResult,
   buildTaskWorkerSystemPrompt,
   classifyTaskOutcome,
   coerceTaskParams,
   createTaskTool,
   hasUsableTaskFinalText,
+  prepareTaskRun,
   registerTaskTool,
+  resolveTaskRunner,
 } from "./extensions/mmr-subagents/task.js";
 export type {
+  PrepareTaskRunResult,
+  PreparedTaskRun,
   ResolveTaskInvocationInput,
   TaskDetails,
+  TaskDetailsContext,
   TaskOutcomeInput,
   TaskParams,
   TaskToolDeps,
   TaskWorkerSystemPromptInput,
 } from "./extensions/mmr-subagents/task.js";
+export {
+  ASYNC_TASK_TOOL_NAMES,
+  START_TASK_TOOL_NAME,
+  TASK_CANCEL_TOOL_NAME,
+  TASK_POLL_TOOL_NAME,
+  TASK_WAIT_TOOL_NAME,
+  createStartTaskTool,
+  createTaskCancelTool,
+  createTaskPollTool,
+  createTaskWaitTool,
+  registerAsyncTaskTools,
+} from "./extensions/mmr-subagents/async-task-tools.js";
+export type {
+  AsyncTaskToolDeps,
+  AsyncTaskToolDetails,
+} from "./extensions/mmr-subagents/async-task-tools.js";
+export {
+  ASYNC_TASK_CANCEL_DEAD_AFTER_MS,
+  ASYNC_TASK_MAX_RUNTIME_MS,
+  ASYNC_TASK_OBSERVED_TERMINAL_TTL_MS,
+  ASYNC_TASK_STALLED_AFTER_MS,
+  ASYNC_TASK_TERMINAL_TTL_MS,
+  DEFAULT_ASYNC_TASK_MAX_RUNNING_PER_SESSION,
+  DEFAULT_TASK_WAIT_TIMEOUT_MS,
+  MAX_TASK_WAIT_TIMEOUT_MS,
+  createMmrAsyncTaskRegistry,
+  getMmrAsyncTaskRegistry,
+  toPublicAsyncTaskSnapshot,
+} from "./extensions/mmr-subagents/async-task-registry.js";
+export type {
+  MmrAsyncTaskBoard,
+  MmrAsyncTaskBoardEntry,
+  MmrAsyncTaskFreshness,
+  MmrAsyncTaskInternalSnapshot,
+  MmrAsyncTaskRegistry,
+  MmrAsyncTaskRegistryDeps,
+  MmrAsyncTaskSnapshot,
+  MmrAsyncTaskStatus,
+  StartAsyncTaskArgs,
+  StartAsyncTaskResult,
+  WaitForAsyncTaskResult,
+} from "./extensions/mmr-subagents/async-task-registry.js";
 export {
   DEFAULT_MMR_WORKER_KILL_TIMEOUT_MS,
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,

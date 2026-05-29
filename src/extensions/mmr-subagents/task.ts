@@ -362,7 +362,7 @@ function progressContent(snapshot: MmrWorkerProgressSnapshot): string {
   return progressTextOrPlaceholder(snapshot, TASK_PROGRESS_PLACEHOLDER);
 }
 
-interface TaskDetailsContext {
+export interface TaskDetailsContext {
   prompt: string;
   description: string;
   cwd: string;
@@ -726,6 +726,274 @@ function buildResolverFailureContent(invocation: MmrSubagentInvocation): string 
   }
 }
 
+/**
+ * Result of {@link prepareTaskRun}: either a fully prepared run ready to
+ * hand to a {@link MmrSubagentRunner}, or a pre-spawn failure already
+ * shaped as a Pi `AgentToolResult` (validation or resolver error).
+ */
+export interface PreparedTaskRun {
+  params: TaskParams;
+  cwd: string;
+  detailsContext: TaskDetailsContext;
+  /** Runner options minus the per-call `signal`/`onProgress` seams. */
+  runnerOptionsBase: Omit<MmrSubagentRunOptions, "signal" | "onProgress">;
+  /** Effective runner resolved from {@link TaskToolDeps}. */
+  runner: MmrSubagentRunner;
+  /** Successful invocation (model + tool route) for this run. */
+  invocation: MmrSubagentInvocation;
+  /** Parent mode snapshot used to resolve the route (fallback scope key + candidate ranking, issue #9). */
+  parentMode: MmrModeKey | undefined;
+  /** Registered-tool intersection seam, forwarded when re-resolving under a fallback override. */
+  registeredTools?: readonly string[];
+  /** Per-invocation resolver, reused to re-resolve the route under a fallback override (issue #9). */
+  resolveInvocation: (input: ResolveTaskInvocationInput) => MmrSubagentInvocation;
+}
+
+export type PrepareTaskRunResult =
+  | { ok: true; prepared: PreparedTaskRun }
+  | { ok: false; result: AgentToolResult<TaskDetails> };
+
+/**
+ * Resolve the effective {@link MmrSubagentRunner} from the Task deps,
+ * mirroring the historical per-execute precedence: explicit `runner`
+ * wins, then a `runWorker` adapter (with optional `runnerDeps`), then a
+ * child-CLI runner (with optional `runnerDeps`), otherwise a default
+ * child-CLI runner.
+ */
+export function resolveTaskRunner(deps: TaskToolDeps): MmrSubagentRunner {
+  if (deps.runner) return deps.runner;
+  if (deps.runWorker) return createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps);
+  if (deps.runnerDeps) return createChildCliMmrSubagentRunner(deps.runnerDeps);
+  return createChildCliMmrSubagentRunner();
+}
+
+/**
+ * Shared Task preparation path: validate params, resolve the invocation
+ * (model + tool route), assemble the worker prompt, and build the runner
+ * option base. Used by both the blocking `Task` tool and the async
+ * `start_task` companion so they share one validation/routing surface
+ * (issue #23). On any pre-spawn failure this returns a complete
+ * `AgentToolResult<TaskDetails>` with the correct {@link TaskStatus}.
+ *
+ * Spec §3 + §9.4 rule 1: parameter validation runs before any spawn or
+ * resolver call; deterministic error strings flow into details.
+ */
+export function prepareTaskRun(
+  rawParams: unknown,
+  ctx: ExtensionContext | undefined,
+  deps: TaskToolDeps = {},
+): PrepareTaskRunResult {
+  let params: TaskParams;
+  try {
+    params = coerceTaskParams(rawParams);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      result: makeFailureResult({
+        status: "validation-error",
+        prompt: typeof (rawParams as { prompt?: unknown })?.prompt === "string"
+          ? (rawParams as { prompt: string }).prompt
+          : "",
+        description: typeof (rawParams as { description?: unknown })?.description === "string"
+          ? (rawParams as { description: string }).description
+          : "",
+        cwd: resolveCwd(ctx),
+        workerTools: TASK_WORKER_TOOLS,
+        content: `Task: invalid parameters: ${message}`,
+        errorMessage: message,
+      }),
+    };
+  }
+  const cwd = resolveCwd(ctx);
+  const parentMode = resolveParentMode();
+  const registeredTools = resolveRegisteredTools(deps.pi);
+  // F5: parent and child must read `subagentModelPreferences` through
+  // the same code path. Resolve the effective override on every
+  // execute so a `/mmr-config` change takes effect on the next
+  // invocation without restarting the host.
+  const settingsOverride = resolveTaskModelPreferencesOverride(cwd, deps);
+  const resolverInput: ResolveTaskInvocationInput = {
+    ctx,
+    parentMode,
+  };
+  if (registeredTools !== undefined) resolverInput.registeredTools = registeredTools;
+  if (settingsOverride !== undefined) resolverInput.modelPreferencesOverride = settingsOverride;
+  const resolveInvocation = deps.resolveInvocation ?? defaultResolveTaskInvocation;
+  const invocation = resolveInvocation(resolverInput);
+
+  const detailsCtx: TaskDetailsContext = {
+    prompt: params.prompt,
+    description: params.description,
+    cwd,
+    workerTools: invocation.workerTools,
+  };
+  if (invocation.ok) {
+    detailsCtx.resolvedModel = invocation.modelArg;
+    detailsCtx.contextWindow = readMmrModelContextWindow(invocation.selected?.registeredModel);
+  }
+
+  // Fail closed when the resolver could not produce a model/tool route.
+  // Pi's AgentToolResult has no top-level isError flag; the parent agent
+  // infers failure from the Task-prefixed content text plus the
+  // status/errorMessage/subagentActivationError fields in details.
+  if (!invocation.ok) {
+    const status: TaskStatus = invocation.code === "prompt-base.unresolved"
+      || invocation.code === "tools.empty"
+      ? "worker-error"
+      : invocation.code === "model.no-route"
+        ? "worker-error"
+        : "activation-error";
+    return {
+      ok: false,
+      result: makeFailureResult({
+        status,
+        prompt: params.prompt,
+        description: params.description,
+        cwd,
+        workerTools: invocation.workerTools,
+        content: buildResolverFailureContent(invocation),
+        errorMessage: invocation.message,
+      }),
+    };
+  }
+
+  // After the resolver succeeds, `invocation.promptBaseMode` is
+  // guaranteed to be defined for mode-derived profiles (Task is
+  // always mode-derived `from-parent`); fall back to the parent
+  // mode snapshot when present, otherwise pin `smart` so prompt
+  // assembly always sees a concrete mode key for assembly. The
+  // fail-closed path above prevents reaching this with neither.
+  const promptParentMode: MmrModeKey =
+    invocation.promptBaseMode ?? parentMode ?? "smart";
+  const promptInput: TaskWorkerSystemPromptInput = {
+    cwd,
+    parentMode: promptParentMode,
+    activeToolManifest: buildWorkerToolManifest(deps.pi, invocation.workerTools),
+    baseSystemPrompt: deps.getBaseSystemPrompt?.() ?? getTaskParentSystemPrompt() ?? "",
+    // Forward the resolver's deny-aware, registered-tool intersection
+    // so the assembled worker prompt's `Available tools:` block lists
+    // exactly the tools the worker will have, not the broader parent
+    // active tool set or the profile's intent allowlist.
+    workerTools: invocation.workerTools,
+  };
+  const runnerParentMode = invocation.parentMode ?? parentMode;
+  const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
+  const runnerOptionsBase: Omit<MmrSubagentRunOptions, "signal" | "onProgress"> = {
+    profileName: TASK_SUBAGENT_PROFILE,
+    prompt: params.prompt,
+    cwd,
+    tools: invocation.workerTools,
+    model: invocation.modelArg,
+    ...(runnerParentMode !== undefined ? { parentMode: runnerParentMode } : {}),
+    systemPrompt: deps.buildSystemPrompt
+      ? deps.buildSystemPrompt(promptInput)
+      : buildTaskWorkerSystemPrompt(promptInput),
+    // Task uses exact system-prompt replacement so the assembled worker
+    // prompt is the only model-visible system prompt (no duplicate
+    // Available tools: block, no inherited coding-assistant head).
+    systemPromptDelivery: "replace",
+    outputByteLimit,
+  };
+  return {
+    ok: true,
+    prepared: {
+      params,
+      cwd,
+      detailsContext: detailsCtx,
+      runnerOptionsBase,
+      runner: resolveTaskRunner(deps),
+      invocation,
+      parentMode,
+      ...(registeredTools !== undefined ? { registeredTools } : {}),
+      resolveInvocation,
+    },
+  };
+}
+
+/** Build the streaming-progress `AgentToolResult` for a Task worker snapshot. */
+export function buildTaskProgressResult(
+  snapshot: MmrWorkerProgressSnapshot,
+  ctx: TaskDetailsContext,
+): AgentToolResult<TaskDetails> {
+  return {
+    content: [{ type: "text", text: progressContent(snapshot) }],
+    details: buildProgressDetails(snapshot, ctx),
+  };
+}
+
+/** Build the final `AgentToolResult` from a completed worker run. */
+export function buildTaskFinalResult(
+  result: MmrWorkerResult,
+  ctx: TaskDetailsContext,
+): AgentToolResult<TaskDetails> {
+  return {
+    content: [{ type: "text", text: buildFinalContent(result) }],
+    details: buildDetails(result, ctx),
+  };
+}
+
+/**
+ * Map a runner `run()` throw (spawn failure) to a `spawn-error`
+ * `AgentToolResult` (spec §9.4 rule 2).
+ */
+/**
+ * Build a synthetic {@link MmrWorkerResult} for a runner `run()` throw
+ * (spawn failure). Used by the async `start_task` path so a background
+ * worker that fails to spawn finalizes into the SAME `spawn-error`
+ * {@link TaskStatus} and final shaping as the blocking `Task` tool,
+ * rather than a generic registry error. The `spawnError` discriminator
+ * drives `classifyTaskOutcome` deterministically.
+ */
+export function buildSpawnErrorWorkerResult(
+  err: unknown,
+  ctx: { prompt: string; cwd: string },
+): MmrWorkerResult {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    messages: [],
+    finalOutput: "",
+    truncatedFinalOutput: "",
+    exitCode: null,
+    signal: null,
+    aborted: false,
+    outputTruncated: false,
+    ignoredJsonLines: 0,
+    agentStarted: false,
+    usage: emptyMmrWorkerUsageStats(),
+    stderr: "",
+    command: "",
+    args: [],
+    prompt: ctx.prompt,
+    cwd: ctx.cwd,
+    trail: [],
+    errorMessage: message,
+    spawnError: message,
+  };
+}
+
+export function buildTaskRunnerThrowResult(
+  err: unknown,
+  prepared: PreparedTaskRun,
+): AgentToolResult<TaskDetails> {
+  const message = err instanceof Error ? err.message : String(err);
+  return makeFailureResult({
+    status: "spawn-error",
+    prompt: prepared.params.prompt,
+    description: prepared.params.description,
+    cwd: prepared.cwd,
+    workerTools: prepared.detailsContext.workerTools,
+    content: `Task: worker failed to spawn: ${message}`,
+    errorMessage: message,
+    ...(prepared.detailsContext.resolvedModel !== undefined
+      ? { resolvedModel: prepared.detailsContext.resolvedModel }
+      : {}),
+    ...(prepared.detailsContext.contextWindow !== undefined
+      ? { contextWindow: prepared.detailsContext.contextWindow }
+      : {}),
+  });
+}
+
 export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
   if (deps.runner && deps.runWorker) {
     // eslint-disable-next-line no-console
@@ -733,12 +1001,6 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
       "createTaskTool: both runner and runWorker were provided; the runner takes precedence and runWorker is ignored.",
     );
   }
-  const runner: MmrSubagentRunner = deps.runner
-    ?? (deps.runWorker
-      ? createMmrSubagentRunnerFromRunWorker(deps.runWorker)
-      : createChildCliMmrSubagentRunner());
-  const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
-  const resolveInvocation = deps.resolveInvocation ?? defaultResolveTaskInvocation;
   return {
     name: TASK_TOOL_NAME,
     label: TASK_TOOL_NAME,
@@ -766,129 +1028,17 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
       onUpdate,
       ctx,
     ): Promise<AgentToolResult<TaskDetails>> {
-      // Spec §3 + §9.4 rule 1: parameter validation runs before any spawn
-      // or resolver call; deterministic error strings flow into details.
-      let params: TaskParams;
-      try {
-        params = coerceTaskParams(rawParams);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return makeFailureResult({
-          status: "validation-error",
-          prompt: typeof (rawParams as { prompt?: unknown })?.prompt === "string"
-            ? (rawParams as { prompt: string }).prompt
-            : "",
-          description: typeof (rawParams as { description?: unknown })?.description === "string"
-            ? (rawParams as { description: string }).description
-            : "",
-          cwd: resolveCwd(ctx),
-          workerTools: TASK_WORKER_TOOLS,
-          content: `Task: invalid parameters: ${message}`,
-          errorMessage: message,
-        });
-      }
-      const cwd = resolveCwd(ctx);
-      const parentMode = resolveParentMode();
-      const registeredTools = resolveRegisteredTools(deps.pi);
-      // F5: parent and child must read `subagentModelPreferences` through
-      // the same code path. Resolve the effective override on every
-      // execute so a `/mmr-config` change takes effect on the next
-      // invocation without restarting the host.
-      const settingsOverride = resolveTaskModelPreferencesOverride(cwd, deps);
-      const resolverInput: ResolveTaskInvocationInput = {
-        ctx,
-        parentMode,
-      };
-      if (registeredTools !== undefined) resolverInput.registeredTools = registeredTools;
-      if (settingsOverride !== undefined) resolverInput.modelPreferencesOverride = settingsOverride;
-      const invocation = resolveInvocation(resolverInput);
-
-      const detailsCtx: TaskDetailsContext = {
-        prompt: params.prompt,
-        description: params.description,
-        cwd,
-        workerTools: invocation.workerTools,
-      };
-      if (invocation.ok) {
-        detailsCtx.resolvedModel = invocation.modelArg;
-        detailsCtx.contextWindow = readMmrModelContextWindow(invocation.selected?.registeredModel);
-      }
-
-      // Fail closed when the resolver could not produce a model/tool route.
-      // Pi's AgentToolResult has no top-level isError flag; the parent agent
-      // infers failure from the Task-prefixed content text plus the
-      // status/errorMessage/subagentActivationError fields in details.
-      if (!invocation.ok) {
-        const status: TaskStatus = invocation.code === "prompt-base.unresolved"
-          || invocation.code === "tools.empty"
-          ? "worker-error"
-          : invocation.code === "model.no-route"
-            ? "worker-error"
-            : "activation-error";
-        return makeFailureResult({
-          status,
-          prompt: params.prompt,
-          description: params.description,
-          cwd,
-          workerTools: invocation.workerTools,
-          content: buildResolverFailureContent(invocation),
-          errorMessage: invocation.message,
-        });
-      }
-
-      // After the resolver succeeds, `invocation.promptBaseMode` is
-      // guaranteed to be defined for mode-derived profiles (Task is
-      // always mode-derived `from-parent`); fall back to the parent
-      // mode snapshot when present, otherwise pin `smart` so prompt
-      // assembly always sees a concrete mode key for assembly. The
-      // fail-closed path above prevents reaching this with neither.
-      const promptParentMode: MmrModeKey =
-        invocation.promptBaseMode ?? parentMode ?? "smart";
-      const promptInput: TaskWorkerSystemPromptInput = {
-        cwd,
-        parentMode: promptParentMode,
-        activeToolManifest: buildWorkerToolManifest(deps.pi, invocation.workerTools),
-        baseSystemPrompt: deps.getBaseSystemPrompt?.() ?? getTaskParentSystemPrompt() ?? "",
-        // Forward the resolver's deny-aware, registered-tool intersection
-        // so the assembled worker prompt's `Available tools:` block lists
-        // exactly the tools the worker will have, not the broader parent
-        // active tool set or the profile's intent allowlist.
-        workerTools: invocation.workerTools,
-      };
-      const runnerParentMode = invocation.parentMode ?? parentMode;
+      const prep = prepareTaskRun(rawParams, ctx, deps);
+      if (!prep.ok) return prep.result;
+      const { detailsContext, runnerOptionsBase, runner, invocation, parentMode, registeredTools, resolveInvocation } = prep.prepared;
       const runnerOptions: MmrSubagentRunOptions = {
-        profileName: TASK_SUBAGENT_PROFILE,
-        prompt: params.prompt,
-        cwd,
-        tools: invocation.workerTools,
-        model: invocation.modelArg,
-        ...(runnerParentMode !== undefined ? { parentMode: runnerParentMode } : {}),
-        systemPrompt: deps.buildSystemPrompt
-          ? deps.buildSystemPrompt(promptInput)
-          : buildTaskWorkerSystemPrompt(promptInput),
-        // Task uses exact system-prompt replacement so the assembled worker
-        // prompt is the only model-visible system prompt (no duplicate
-        // Available tools: block, no inherited coding-assistant head).
-        systemPromptDelivery: "replace",
+        ...runnerOptionsBase,
         signal,
-        outputByteLimit,
         onProgress: onUpdate
-          ? (snapshot) => {
-              onUpdate({
-                content: [{ type: "text", text: progressContent(snapshot) }],
-                details: buildProgressDetails(snapshot, detailsCtx),
-              });
-            }
+          ? (snapshot) => onUpdate(buildTaskProgressResult(snapshot, detailsContext))
           : undefined,
       };
 
-      const effectiveRunner = deps.runner
-        ? deps.runner
-        : deps.runWorker
-          ? createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps)
-          : deps.runnerDeps
-            ? createChildCliMmrSubagentRunner(deps.runnerDeps)
-            : runner;
       // Session-scoped model fallback (issue #9). The closure re-resolves
       // the route under an applied override so parent spawn and child
       // activation agree, and forwards the override to the child via the
@@ -918,7 +1068,7 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
           // forwarding the override env, so parent --model and child
           // activation still agree rather than guaranteeing a mismatch.
         }
-        const runResult = await effectiveRunner.run(options);
+        const runResult = await runner.run(options);
         return { result: runResult, route };
       };
 
@@ -943,26 +1093,11 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
           run: runWorkerOnce,
         });
         result = outcome.result;
-        if (outcome.route !== undefined) detailsCtx.resolvedModel = outcome.route;
+        if (outcome.route !== undefined) detailsContext.resolvedModel = outcome.route;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const failureDetails = makeFailureResult({
-          status: "spawn-error",
-          prompt: params.prompt,
-          description: params.description,
-          cwd,
-          workerTools: invocation.workerTools,
-          content: `Task: worker failed to spawn: ${message}`,
-          errorMessage: message,
-          resolvedModel: invocation.modelArg,
-          contextWindow: detailsCtx.contextWindow,
-        });
-        return failureDetails;
+        return buildTaskRunnerThrowResult(err, prep.prepared);
       }
-      return {
-        content: [{ type: "text", text: buildFinalContent(result) }],
-        details: buildDetails(result, detailsCtx),
-      };
+      return buildTaskFinalResult(result, detailsContext);
     },
   } satisfies ToolDefinition;
 }

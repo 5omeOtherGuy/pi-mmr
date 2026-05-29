@@ -102,7 +102,25 @@ describe("mmr-subagents package wiring", () => {
     assert.equal(typeof root.buildMmrWorkerArgs, "function");
     assert.equal(root.MMR_SUBAGENTS_PROVIDER_NAME, "mmr-subagents");
     assert.equal(root.MMR_SUBAGENTS_FEATURE_GATE, "mmr-subagents");
-    assert.deepEqual([...root.MMR_SUBAGENTS_OWNED_TOOLS].sort(), ["Task", "cthulu", "finder", "librarian", "oracle"]);
+    assert.deepEqual(
+      [...root.MMR_SUBAGENTS_OWNED_TOOLS].sort(),
+      ["Task", "cthulu", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+    );
+    assert.equal(root.MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE, "mmr-subagents.async-tasks");
+    assert.deepEqual(
+      [...root.MMR_SUBAGENTS_ASYNC_TASK_TOOLS],
+      ["start_task", "task_poll", "task_wait", "task_cancel"],
+    );
+    assert.equal(typeof root.createStartTaskTool, "function");
+    assert.equal(typeof root.createTaskPollTool, "function");
+    assert.equal(typeof root.createTaskWaitTool, "function");
+    assert.equal(typeof root.createTaskCancelTool, "function");
+    assert.equal(typeof root.registerAsyncTaskTools, "function");
+    assert.equal(typeof root.getMmrAsyncTaskRegistry, "function");
+    assert.equal(typeof root.createMmrAsyncTaskRegistry, "function");
+    assert.equal(typeof root.toPublicAsyncTaskSnapshot, "function");
+    assert.equal(typeof root.prepareTaskRun, "function");
+    assert.equal(root.START_TASK_TOOL_NAME, "start_task");
     // Finder, oracle, Task, and librarian ship in this slice; their public surfaces
     // must be reachable from the package root so consumers can build the tools with
     // a different runner injected (tests, alt hosts).
@@ -185,11 +203,12 @@ describe("mmr-subagents extension factory", () => {
     const names = tools.map((tool) => tool.name).sort();
     assert.deepEqual(
       names,
-      ["Task", "cthulu", "finder", "librarian", "oracle"],
-      "this slice registers exactly the shipped mmr-subagents Pi tools",
+      ["Task", "cthulu", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+      "this slice registers the shipped mmr-subagents Pi tools plus the async background task tools",
     );
     assert.equal(typeof handlers.get("tool_result"), "function", "finder installs a read-result normalizer");
     assert.equal(typeof handlers.get("before_agent_start"), "function", "Task captures the parent prompt for mode-derived workers");
+    assert.equal(typeof handlers.get("session_shutdown"), "function", "async tasks install a session_shutdown cleanup");
     assert.equal(typeof handlers.get("session_start"), "function", "clears session-scoped worker-fallback state on new/fork sessions");
   });
 
