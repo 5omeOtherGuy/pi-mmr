@@ -5,7 +5,7 @@ import type {
   MmrToolRule,
 } from "./types.js";
 
-const CORE_OWNER = "mmr-core";
+export const CORE_OWNER = "mmr-core";
 
 /**
  * Exact-name status catalog for tools owned by mmr extensions that may not

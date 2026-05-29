@@ -174,3 +174,108 @@ describe("mmr-core settings", () => {
     }
   });
 });
+
+describe("mmr-core settings - lockedModeExtraTools", () => {
+  it("parses all + per-mode buckets and merges global/project additively", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-extra-settings-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      writeFileSync(
+        path.join(home, ".pi/agent/settings.json"),
+        JSON.stringify({ mmr: { core: { lockedModeExtraTools: { all: ["g1"], deep: ["d1"] } } } }),
+      );
+      writeFileSync(
+        path.join(project, ".pi/settings.json"),
+        JSON.stringify({ mmrCore: { lockedModeExtraTools: { all: ["g2", "g1"], smart: ["s1"] } } }),
+      );
+
+      const { loadMmrCoreSettings } = await importSource("extensions/mmr-core/settings.ts");
+      const loaded = loadMmrCoreSettings(project, home);
+
+      assert.deepEqual(loaded.settings.lockedModeExtraTools, {
+        all: ["g1", "g2"],
+        deep: ["d1"],
+        smart: ["s1"],
+      });
+      assert.deepEqual(loaded.warnings, []);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores the free key and unknown keys with warnings, and trims/dedupes names", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-extra-settings-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      writeFileSync(
+        path.join(home, ".pi/agent/settings.json"),
+        JSON.stringify({ mmrCore: { defaultMode: "smart" } }),
+      );
+      writeFileSync(
+        path.join(project, ".pi/settings.json"),
+        JSON.stringify({
+          mmrCore: {
+            lockedModeExtraTools: {
+              free: ["nope"],
+              bogus: ["nope"],
+              rush: ["  a  ", "a", "b"],
+            },
+          },
+        }),
+      );
+
+      const { loadMmrCoreSettings } = await importSource("extensions/mmr-core/settings.ts");
+      const loaded = loadMmrCoreSettings(project, home);
+
+      assert.deepEqual(loaded.settings.lockedModeExtraTools, { rush: ["a", "b"] });
+      assert.ok(
+        loaded.warnings.some((w) => w.includes("lockedModeExtraTools.free") && w.includes("not configurable")),
+        `expected a free-key warning, got ${JSON.stringify(loaded.warnings)}`,
+      );
+      assert.ok(
+        loaded.warnings.some((w) => w.includes("lockedModeExtraTools.bogus")),
+        `expected a bogus-key warning, got ${JSON.stringify(loaded.warnings)}`,
+      );
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("warns and skips when lockedModeExtraTools is not an object", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-extra-settings-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      writeFileSync(
+        path.join(home, ".pi/agent/settings.json"),
+        JSON.stringify({ mmrCore: { defaultMode: "smart" } }),
+      );
+      writeFileSync(
+        path.join(project, ".pi/settings.json"),
+        JSON.stringify({ mmrCore: { lockedModeExtraTools: ["read"] } }),
+      );
+
+      const { loadMmrCoreSettings } = await importSource("extensions/mmr-core/settings.ts");
+      const loaded = loadMmrCoreSettings(project, home);
+
+      assert.equal(loaded.settings.lockedModeExtraTools, undefined);
+      assert.ok(
+        loaded.warnings.some((w) => w.includes("lockedModeExtraTools")),
+        `expected a shape warning, got ${JSON.stringify(loaded.warnings)}`,
+      );
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});

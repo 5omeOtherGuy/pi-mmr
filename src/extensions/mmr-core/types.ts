@@ -2,6 +2,12 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 export type MmrModeKey = "smart" | "smartGPT" | "rush" | "large" | "deep" | "free";
 
+/**
+ * Locked mode keys (every mode except `free`). Used by settings that only
+ * apply while a locked mode is active, such as `lockedModeExtraTools`.
+ */
+export type MmrLockedModeKey = Exclude<MmrModeKey, "free">;
+
 export type MmrPromptRoute = "default" | "rush" | "deep";
 
 export type MmrModeSelectionSource = "flag" | "command" | "session" | "settings" | "default" | "native";
@@ -394,6 +400,19 @@ export interface MmrCoreSettings {
    * `modelPreferences`.
    */
   subagentModelPreferences?: Record<string, MmrModelPreference[]>;
+  /**
+   * Additive, exact-name tool allowlist extensions for locked modes. Each
+   * value is a list of concrete Pi tool names (e.g. user/third-party or MCP
+   * tools) that should remain callable while the keyed locked mode is active,
+   * on top of the mode's built-in allowlist.
+   *
+   * The `all` bucket applies to every locked mode; a per-mode key applies to
+   * that mode only. Names resolve by exact identity against Pi's live tool
+   * inventory (no aliases). Extra tools never satisfy the fail-closed
+   * zero-active-tools activation check, and a missing extra tool is a
+   * non-fatal no-op. `free` is not configurable here.
+   */
+  lockedModeExtraTools?: Partial<Record<MmrLockedModeKey | "all", string[]>>;
 }
 
 /**
