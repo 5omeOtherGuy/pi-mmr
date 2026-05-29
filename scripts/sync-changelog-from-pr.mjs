@@ -353,11 +353,8 @@ function buildBulletLines(bullet, blankSeparated, isFirstAppendedInBlock, hasPri
   if (blankSeparated && hasPriorBulletInBlock) {
     return ["", ...bulletLines];
   }
-  if (!blankSeparated && hasPriorBulletInBlock) {
-    return bulletLines;
-  }
-  // No prior bullet in block (shouldn't happen for "existing heading" path,
-  // but be defensive).
+  // Otherwise (dense block, or no prior bullet) the bullet is appended with no
+  // extra separating blank line.
   void isFirstAppendedInBlock;
   return bulletLines;
 }

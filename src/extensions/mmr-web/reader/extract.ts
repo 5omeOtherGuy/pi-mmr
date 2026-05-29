@@ -73,10 +73,25 @@ export interface ConvertOptions {
   maxBytes: number;
 }
 
+/** True for URL schemes that can carry executable code in a link target. */
+function hasUnsafeUrlScheme(href: string): boolean {
+  const trimmed = href.trim();
+  const colon = trimmed.indexOf(":");
+  if (colon <= 0) return false;
+  const scheme = trimmed.slice(0, colon).toLowerCase();
+  return scheme === "javascript" || scheme === "data" || scheme === "vbscript";
+}
+
 export function htmlToMarkdown(rawHtml: string, options: ConvertOptions): string {
   let html = rawHtml;
   // Strip top-level junk that never contributes to readable content.
-  html = html.replace(/<!--[\s\S]*?-->/g, "");
+  // Repeat the comment strip until stable so a comment that only forms after
+  // an inner comment is removed (e.g. `<!--<!-- -->-->`) cannot survive.
+  let prevHtml: string;
+  do {
+    prevHtml = html;
+    html = html.replace(/<!--[\s\S]*?-->/g, "");
+  } while (html !== prevHtml);
   html = html.replace(/<!DOCTYPE[^>]*>/gi, "");
   html = stripBlock(html, "script");
   html = stripBlock(html, "style");
@@ -221,7 +236,7 @@ export function htmlToMarkdown(rawHtml: string, options: ConvertOptions): string
         } else {
           const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
           const href = hrefMatch ? (hrefMatch[1] ?? hrefMatch[2] ?? hrefMatch[3] ?? "") : "";
-          if (href && !href.startsWith("javascript:")) {
+          if (href && !hasUnsafeUrlScheme(href)) {
             currentHref = href;
             if (!push("[")) break;
           }

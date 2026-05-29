@@ -138,7 +138,7 @@ describe("mmr-toolbox task_list — no workspace task-store side effects on sess
   });
 
   it("session_start does NOT create <agentDir>/data/pi-mmr/task-list/", async () => {
-    const { pi, handlers, session } = await loadToolboxLinked();
+    const { handlers, session } = await loadToolboxLinked();
     // Drive the session_start handler that the extension may register.
     const sessionStart = handlers.get("session_start");
     if (sessionStart) {
@@ -164,7 +164,7 @@ describe("mmr-toolbox task_list — no workspace task-store side effects on sess
   });
 
   it("session_start does NOT install a directory watcher and does NOT call setWidget when no list exists", async () => {
-    const { pi, handlers, session } = await loadToolboxLinked();
+    const { handlers, session } = await loadToolboxLinked();
     const setWidgetCalls = [];
     const ctx = makeCtx(session, {
       cwd: workdir,

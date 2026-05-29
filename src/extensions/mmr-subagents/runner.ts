@@ -578,7 +578,7 @@ export async function runMmrSubagentWorker(
   let promptFile: PromptFileHandle | undefined;
   let userPromptFile: PromptFileHandle | undefined;
   let args: string[] = [];
-  let command = "pi";
+  let command: string;
 
   const emitUpdate = () => {
     options.onUpdate?.(makeSnapshot(messages, usage, workerTrail.snapshot(), outputByteLimit, { model, stopReason, errorMessage }));

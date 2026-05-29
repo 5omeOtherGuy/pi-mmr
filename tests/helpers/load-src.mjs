@@ -1,5 +1,4 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -68,11 +67,9 @@ export function getPreparedSourceRoot() {
     // prepared root. Use atomic `mkdir` on a lock directory to elect a single
     // copier; everyone else spins on the `.ready` sentinel.
     const lockDir = path.join(preparedRoot, ".lock");
-    let copier = false;
     try {
       mkdirSync(preparedRoot, { recursive: true });
       mkdirSync(lockDir);
-      copier = true;
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
       // Another worker won the race; wait until they publish .ready.
@@ -82,7 +79,8 @@ export function getPreparedSourceRoot() {
       }
       return preparedSourceRoot;
     }
-    if (!copier) return preparedSourceRoot;
+    // Reaching here means this worker won the lock and is the elected copier;
+    // fall through to copy the source tree and publish the .ready marker.
   } else {
     preparedRoot = mkdtempSync(path.join(baseDir, "run-"));
     preparedSourceRoot = path.join(preparedRoot, "src");

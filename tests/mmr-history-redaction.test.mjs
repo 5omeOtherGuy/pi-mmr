@@ -11,7 +11,7 @@ describe("mmr-history redaction — path family", () => {
     const { redactText, REDACTION_PI_SESSION } = await importSource(REDACTION_MODULE);
     const input = "open ~/.pi/agent/sessions/encoded-cwd/S-123.jsonl now";
     const out = redactText(input, { user: "" });
-    assert.match(out, new RegExp(REDACTION_PI_SESSION.replace(/[[\]]/g, "\\$&")));
+    assert.match(out, new RegExp(REDACTION_PI_SESSION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.ok(!out.includes("S-123.jsonl"));
     assert.ok(!out.includes("encoded-cwd"));
   });
@@ -336,7 +336,7 @@ describe("mmr-history redaction — Slack webhooks", () => {
       { user: "" },
     );
     assert.ok(out.includes(REDACTION_TOKEN));
-    assert.ok(!out.includes("hooks.slack.com"));
+    assert.doesNotMatch(out, /hooks\.slack\.com/);
     assert.ok(!out.includes("abcXYZsecret"));
   });
 
@@ -361,7 +361,7 @@ describe("mmr-history redaction — email addresses", () => {
     const out = redactText("send to bob+tag@sub.example.co.uk now", { user: "" });
     assert.ok(out.includes(REDACTION_EMAIL));
     assert.ok(!out.includes("bob+tag"));
-    assert.ok(!out.includes("sub.example.co.uk"));
+    assert.doesNotMatch(out, /sub\.example\.co\.uk/);
   });
 
   it("does NOT eat the URL_USERINFO [redacted] marker", async () => {

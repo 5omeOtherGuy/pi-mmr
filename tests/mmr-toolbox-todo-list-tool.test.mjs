@@ -18,7 +18,7 @@
 // rewired to register the new tool in place of the old one.
 
 import assert from "node:assert/strict";
-import { after, beforeEach, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 import { createMockPi } from "./helpers/pi-stub.mjs";
 

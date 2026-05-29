@@ -64,8 +64,15 @@ function parsePositiveInt(value: string | undefined): number | undefined {
   return Math.floor(n);
 }
 
+/** Remove trailing `/` characters without an unanchored-quantifier regex. */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end--;
+  return value.slice(0, end);
+}
+
 function normalizeApiBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "");
+  return stripTrailingSlashes(value.trim());
 }
 
 interface ExtractedMmrGithubSettings {

@@ -34,7 +34,7 @@
 import { execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { setTimeout as wait } from "node:timers/promises";
 import { cleanupLoadedSource, importSource } from "../helpers/load-src.mjs";
@@ -52,9 +52,13 @@ function resolvePiBundledCodingAgent() {
   ];
   for (const candidate of candidates) {
     if (!candidate) continue;
+    // Resolve symlinks with Node's realpathSync rather than shelling out to
+    // `readlink -f "${candidate}"`: interpolating an env-derived path into a
+    // shell command is an indirect command-line injection. realpathSync uses
+    // no shell and falls back to the raw candidate when the path is missing.
     const real = (() => {
       try {
-        return execSync(`readlink -f "${candidate}"`, { encoding: "utf8" }).trim();
+        return realpathSync(candidate);
       } catch {
         return candidate;
       }

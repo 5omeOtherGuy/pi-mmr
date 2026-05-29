@@ -244,11 +244,12 @@ function getFinderFileLineCount(absolutePath: string): number | undefined {
   if (finderLineCountCache.has(key)) return finderLineCountCache.get(key);
   let lineCount: number | undefined;
   try {
-    const stat = fs.statSync(key);
-    if (stat.isFile()) {
-      const content = fs.readFileSync(key, "utf8");
-      lineCount = content.length === 0 ? 0 : content.split("\n").length;
-    }
+    // Read directly rather than statSync()-then-readFileSync(): the latter
+    // is a file-system race (the path could change between the two calls).
+    // A directory read throws EISDIR and a missing path throws ENOENT;
+    // both are caught below and leave the line count undefined (no clamp).
+    const content = fs.readFileSync(key, "utf8");
+    lineCount = content.length === 0 ? 0 : content.split("\n").length;
   } catch {
     lineCount = undefined;
   }

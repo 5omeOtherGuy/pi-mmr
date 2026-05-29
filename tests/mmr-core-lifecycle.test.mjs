@@ -106,8 +106,8 @@ describe("mmr-core lifecycle smoke", () => {
       await commands.get("mmr-status").handler("", ctx);
       const status = notifications.at(-1)?.message ?? "";
 
-      assert.match(status, new RegExp(`Settings files read:.*${homeSettingsPath.replace(/[.\/]/g, "\\$&")}`));
-      assert.match(status, new RegExp(`Settings files read:.*${projectSettingsPath.replace(/[.\/]/g, "\\$&")}`));
+      assert.match(status, new RegExp(`Settings files read:.*${homeSettingsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.match(status, new RegExp(`Settings files read:.*${projectSettingsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
       assert.match(status, /Settings warnings:/);
       assert.match(status, /toolAliases/);
     } finally {

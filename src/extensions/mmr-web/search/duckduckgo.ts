@@ -125,8 +125,10 @@ function writeCache(state: DuckDuckGoState, key: string, response: DuckDuckGoSea
 }
 
 function decodeHtmlEntities(text: string): string {
+  // The `&amp;` -> `&` step must run LAST so a double-encoded sequence such as
+  // `&amp;lt;` decodes to the literal text `&lt;` rather than being unescaped
+  // twice into `<`.
   return text
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
@@ -136,11 +138,20 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#(\d+);/g, (_, d) => {
       const code = Number(d);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
-    });
+    })
+    .replace(/&amp;/g, "&");
 }
 
 function stripTags(text: string): string {
-  return text.replace(/<[^>]*>/g, "");
+  // Repeat until stable so a tag that only appears after an inner match is
+  // removed (e.g. `<scr<script>ipt>`) cannot survive a single pass.
+  let out = text;
+  let prev: string;
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, "");
+  } while (out !== prev);
+  return out;
 }
 
 /**

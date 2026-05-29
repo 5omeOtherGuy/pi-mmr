@@ -320,12 +320,12 @@ export function unifiedDiffToEditRenderableDiff(diff: string): string {
   const lines = diff.split("\n");
   let maxLineNum = 1;
   for (const line of lines) {
-    const m = line.match(/^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/);
+    const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (m) {
       const oldStart = Number(m[1]);
-      const oldCount = m[2] === "" ? 1 : Number(m[2]);
+      const oldCount = m[2] ? Number(m[2]) : 1;
       const newStart = Number(m[3]);
-      const newCount = m[4] === "" ? 1 : Number(m[4]);
+      const newCount = m[4] ? Number(m[4]) : 1;
       maxLineNum = Math.max(maxLineNum, oldStart + Math.max(0, oldCount - 1), newStart + Math.max(0, newCount - 1));
     }
   }
@@ -341,7 +341,7 @@ export function unifiedDiffToEditRenderableDiff(diff: string): string {
 
   for (const line of lines) {
     if (line.startsWith("--- ") || line.startsWith("+++ ")) continue;
-    const m = line.match(/^@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+    const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (m) {
       if (!firstHunk) out.push(` ${padBlank} ...`);
       oldLine = Number(m[1]);

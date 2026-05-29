@@ -902,7 +902,7 @@ describe("Task tool", () => {
       },
       resolveInvocation: (input) => {
         observedOverride = input.modelPreferencesOverride;
-        return stubTaskInvocation()(input);
+        return stubTaskInvocation()();
       },
       runner: { async run() { return makeWorkerResult(); } },
     });
