@@ -49,6 +49,29 @@ Exact-name resolution against Pi's live tool inventory through the tool-provider
 
 The status catalog covers `apply_patch`, `task_list`, `web_search`, `read_web_page`, `Task`, `finder`, `oracle`, `librarian`, `find_session`, `read_session`, `handoff`, `chart`, `read_mcp_resource`, `skill` so `/mmr-status` credits the owning extension when a tool is deferred. Sibling extensions claim exact names via `registerMmrToolProvider(...)`; latest-registered wins. Active-tool allowlist enforcement and `tool_call` blocking apply while locked.
 
+### Locked-mode extra tools
+
+Locked modes ship a fixed allowlist, so a user's own extension tools, third-party tools, or MCP tools are blocked while a locked mode is active. The `mmrCore.lockedModeExtraTools` setting opts specific exact tool names back in without releasing to `free`:
+
+```jsonc
+{
+  "mmrCore": {
+    "lockedModeExtraTools": {
+      "all": ["my_tool", "mcp__server__search"], // every locked mode
+      "deep": ["deep_only_tool"]                  // deep only
+    }
+  }
+}
+```
+
+- Keys: `all` plus any locked mode (`smart`, `smartGPT`, `rush`, `large`, `deep`). `free` and unknown keys are ignored with a warning.
+- Exact-name only (no aliases); names trim/dedupe; global and project settings merge additively per key.
+- Extras merge into the active set *after* the base allowlist and are credited to a `user-allowlist` owner in `/mmr-status` when they resolve by plain identity.
+- Fail-closed is preserved: extras never satisfy the zero-active-tools activation abort (only a mode's own tools can), and a missing extra is a non-fatal no-op surfaced as `missing`.
+- Parent session only — extras never apply to subagent workers, which keep their profile allowlists.
+
+Project `.pi/settings.json` is a trust boundary: it can re-enable exact tool names in locked modes. See [`../../../docs/extension-compatibility.md`](../../../docs/extension-compatibility.md) for the full stance on user extensions, tools, providers, and MCP.
+
 ### Free mode and source-aware ownership
 
 Free mode disables all MMR enforcement and restores the baseline captured before the locked mode. Source-aware ownership filtering: each MMR extension records its absolute path via `registerMmrOwnedExtensionPath(...)`, and Free mode only drops a tool when the active registration's `ToolInfo.sourceInfo.path` matches one of those paths. Same-named third-party tools are preserved. When Pi does not surface a source path, Free falls back to the name registry.

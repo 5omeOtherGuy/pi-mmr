@@ -6,6 +6,51 @@ import { isRecord } from "./internal/json.js";
 import { isMmrModeKey } from "./modes.js";
 import type { MmrCoreSettings, MmrModelPreference } from "./types.js";
 
+/** Locked mode keys plus the `all` bucket accepted by `lockedModeExtraTools`. */
+function isLockedModeExtraToolsKey(key: string): boolean {
+  return key === "all" || (isMmrModeKey(key) && key !== "free");
+}
+
+function readToolNameList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (trimmed.length > 0) seen.add(trimmed);
+  }
+  return [...seen];
+}
+
+function readLockedModeExtraTools(
+  value: unknown,
+  context: { filePath: string; settingPath: string; warnings: string[] },
+): MmrCoreSettings["lockedModeExtraTools"] | undefined {
+  if (!isRecord(value)) {
+    context.warnings.push(
+      `Ignoring ${context.settingPath} in ${context.filePath}: expected an object mapping locked mode keys (or "all") to arrays of tool names.`,
+    );
+    return undefined;
+  }
+  // Keys are validated against a fixed allowlist below, so prototype-polluting
+  // keys ("__proto__", "constructor") never reach assignment; a plain object
+  // is safe here.
+  const result: Partial<Record<string, string[]>> = {};
+  for (const [key, names] of Object.entries(value)) {
+    if (!isLockedModeExtraToolsKey(key)) {
+      context.warnings.push(
+        `Ignoring ${context.settingPath}.${key} in ${context.filePath}: expected "all" or a locked mode key (smart, smartGPT, rush, large, deep). "free" is not configurable.`,
+      );
+      continue;
+    }
+    const list = readToolNameList(names);
+    if (list.length > 0) result[key] = list;
+  }
+  return Object.keys(result).length > 0
+    ? (result as MmrCoreSettings["lockedModeExtraTools"])
+    : undefined;
+}
+
 export interface LoadedMmrCoreSettings {
   settings: MmrCoreSettings;
   filesRead: string[];
@@ -168,6 +213,15 @@ function extractMmrCoreSettings(
     if (subagentModelPreferences) settings.subagentModelPreferences = subagentModelPreferences;
   }
 
+  if ("lockedModeExtraTools" in raw) {
+    const lockedModeExtraTools = readLockedModeExtraTools(raw.lockedModeExtraTools, {
+      filePath: context.filePath,
+      settingPath: `${rootKey}.lockedModeExtraTools`,
+      warnings: context.warnings,
+    });
+    if (lockedModeExtraTools) settings.lockedModeExtraTools = lockedModeExtraTools;
+  }
+
   return settings;
 }
 
@@ -182,6 +236,19 @@ function mergeSettings(base: MmrCoreSettings, override: MmrCoreSettings): MmrCor
       ...(base.subagentModelPreferences ?? {}),
       ...(override.subagentModelPreferences ?? {}),
     };
+  }
+  if (base.lockedModeExtraTools || override.lockedModeExtraTools) {
+    // Additive per key: project entries extend (not replace) global entries,
+    // matching the additive intent of the setting. Values are deduped.
+    const mergedExtra: Partial<Record<string, string[]>> = {};
+    for (const source of [base.lockedModeExtraTools, override.lockedModeExtraTools]) {
+      if (!source) continue;
+      for (const [key, names] of Object.entries(source)) {
+        if (!names) continue;
+        mergedExtra[key] = [...new Set([...(mergedExtra[key] ?? []), ...names])];
+      }
+    }
+    merged.lockedModeExtraTools = mergedExtra as MmrCoreSettings["lockedModeExtraTools"];
   }
 
   return merged;

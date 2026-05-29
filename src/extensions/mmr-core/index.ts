@@ -42,10 +42,12 @@ import {
   setMmrSubagentState,
 } from "./runtime.js";
 import { applyMmrSubagentProfile } from "./subagent-activation.js";
+import { mergeToolResolutions, relabelExtraOwners, selectExtraToolNames } from "./extra-tools.js";
+import { resolveMmrTools as resolveMmrToolNames } from "./tool-registry.js";
 import { loadMmrCoreSettings } from "./settings.js";
 import { createMmrModeState, findLatestPersistedModeState, MMR_MODE_STATE_ENTRY, toPersistedModeState } from "./state.js";
 import { formatMmrStatus, updateMmrStatus } from "./status.js";
-import type { MmrModeKey, MmrModeSelectionSource, MmrModeState, MmrModelPreference, MmrRejectedModeSource, MmrSessionIdentity } from "./types.js";
+import type { MmrCoreSettings, MmrLockedModeKey, MmrModeKey, MmrModeSelectionSource, MmrModeState, MmrModelPreference, MmrRejectedModeSource, MmrSessionIdentity } from "./types.js";
 
 const CYCLABLE_MMR_MODE_KEYS: MmrModeKey[] = MMR_MODE_KEYS.filter((mode) => mode !== "free");
 const MMR_MODE_PICKER_SHORTCUTS = ["ctrl+shift+s", "alt+m"] as const;
@@ -113,6 +115,7 @@ export default function mmrCoreExtension(pi: ExtensionAPI): void {
 
   let configuredModelPreferences: Partial<Record<MmrModeKey, MmrModelPreference[]>> = {};
   let configuredSubagentModelPreferences: Record<string, MmrModelPreference[]> = {};
+  let configuredLockedModeExtraTools: MmrCoreSettings["lockedModeExtraTools"] = {};
   let settingsFilesRead: string[] = [];
   let settingsWarnings: string[] = [];
   let baseline: MmrBaseline | undefined;
@@ -300,12 +303,24 @@ export default function mmrCoreExtension(pi: ExtensionAPI): void {
     const previousState = getMmrModeState();
 
     const availableTools = pi.getAllTools().map((tool) => tool.name);
-    const toolResolution = resolveMmrTools(mode.key, availableTools);
-    if (mode.tools.length > 0 && toolResolution.activeTools.length === 0) {
-      if (options.notify) ctx.ui.notify(formatZeroToolActivationFailure(mode, toolResolution, previousState), "error");
+    // Base resolution drives the fail-closed activation check: only the mode's
+    // own allowlist may satisfy (or fail) activation. User extras are merged
+    // afterward so a typo'd or missing extra can never abort, nor mask a mode
+    // that resolved zero of its own tools.
+    const baseResolution = resolveMmrTools(mode.key, availableTools);
+    if (mode.tools.length > 0 && baseResolution.activeTools.length === 0) {
+      if (options.notify) ctx.ui.notify(formatZeroToolActivationFailure(mode, baseResolution, previousState), "error");
       updateMmrStatus(ctx, previousState);
       return previousState;
     }
+    const extraToolNames = selectExtraToolNames(
+      mode.key as MmrLockedModeKey,
+      configuredLockedModeExtraTools,
+      mode.tools,
+    );
+    const toolResolution = extraToolNames.length > 0
+      ? mergeToolResolutions(baseResolution, relabelExtraOwners(resolveMmrToolNames(extraToolNames, availableTools)))
+      : baseResolution;
 
     applyingMmrMode = true;
     try {
@@ -397,6 +412,7 @@ export default function mmrCoreExtension(pi: ExtensionAPI): void {
     const loadedSettings = loadMmrCoreSettings(ctx.cwd);
     configuredModelPreferences = loadedSettings.settings.modelPreferences ?? {};
     configuredSubagentModelPreferences = loadedSettings.settings.subagentModelPreferences ?? {};
+    configuredLockedModeExtraTools = loadedSettings.settings.lockedModeExtraTools ?? {};
     settingsFilesRead = [...loadedSettings.filesRead];
     settingsWarnings = [...loadedSettings.warnings];
     notifyWarnings(ctx, loadedSettings.warnings);
