@@ -1,4 +1,5 @@
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export const MMR_CUSTOM_SUBAGENT_TOOL_PREFIX = "sa__";
@@ -329,15 +330,28 @@ export async function discoverMmrCustomSubagents(
       // (avoid loading a multi-megabyte Markdown blob), confirm it is
       // still a regular file, and contain any per-file read or parse
       // failure so one bad file does not reject the entire discovery.
-      let markdown: string;
+      //
+      // Open one descriptor with O_NOFOLLOW, then fstat and read from that
+      // same handle. This removes the lstat()-then-readFile() file-system
+      // race (the bytes we size-check are the bytes we parse) and refuses a
+      // final-component symlink swapped in after the walk, instead of
+      // following it. O_NOFOLLOW is POSIX-only; on platforms that lack it
+      // the flag is 0 and the walk-time symlink skip remains the guard.
+      let markdown: string | undefined;
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
       try {
-        const stat = await lstat(filePath);
-        if (stat.isSymbolicLink() || !stat.isFile()) continue;
-        if (stat.size > MMR_CUSTOM_SUBAGENT_MAX_FILE_BYTES) continue;
-        markdown = await readFile(filePath, "utf8");
+        handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+        const stat = await handle.stat();
+        if (stat.isFile() && stat.size <= MMR_CUSTOM_SUBAGENT_MAX_FILE_BYTES) {
+          markdown = await handle.readFile("utf8");
+        }
       } catch {
-        continue;
+        // Missing file, swapped-in symlink (ELOOP via O_NOFOLLOW), or read
+        // error: leave markdown undefined and skip this entry below.
+      } finally {
+        await handle?.close();
       }
+      if (markdown === undefined) continue;
       let definition: MmrCustomSubagentDefinition | undefined;
       try {
         definition = parseMmrCustomSubagentMarkdown({

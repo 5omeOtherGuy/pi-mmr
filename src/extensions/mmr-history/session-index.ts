@@ -65,6 +65,13 @@ function stripLeadingDot(value: string): string {
   return value.replace(/^(?:\.\/)+/, "");
 }
 
+/** Remove trailing `/` characters without an unanchored-quantifier regex. */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end--;
+  return value.slice(0, end);
+}
+
 /**
  * Normalize a raw path argument seen in a tool call to a cwd-relative POSIX
  * string suitable for case-insensitive substring matching. Returns undefined
@@ -75,7 +82,7 @@ export function normalizeTouchedPath(raw: unknown, cwd: string): string | undefi
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
   const posix = toPosix(trimmed);
-  const cwdPosix = toPosix(cwd).replace(/\/+$/, "");
+  const cwdPosix = stripTrailingSlashes(toPosix(cwd));
   // Absolute path: must be inside session cwd to count as a touched file.
   if (/^([a-zA-Z]:)?\//.test(posix)) {
     if (!cwdPosix) return undefined;

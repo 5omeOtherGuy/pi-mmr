@@ -90,10 +90,6 @@ function hasChildType(component, typeName) {
   return childTypes(component).includes(typeName);
 }
 
-function countChildType(component, typeName) {
-  return childTypes(component).filter((name) => name === typeName).length;
-}
-
 function firstTextColumn(lines, snippet) {
   const line = lines.map(stripAnsi).find((candidate) => candidate.includes(snippet));
   assert.ok(line, `expected rendered output to include ${JSON.stringify(snippet)} in:\n${lines.map(stripAnsi).join("\n")}`);

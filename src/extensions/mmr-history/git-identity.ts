@@ -112,18 +112,23 @@ async function readGitDir(cwd: string): Promise<string | undefined> {
   for (let depth = 0; depth < 32; depth++) {
     const candidate = path.join(current, ".git");
     try {
-      const stat = await fs.stat(candidate);
-      if (stat.isDirectory()) return candidate;
-      if (stat.isFile()) {
-        const text = await fs.readFile(candidate, "utf8");
-        const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
-        if (m && m[1]) {
-          const gitdir = m[1];
-          return path.isAbsolute(gitdir) ? gitdir : path.resolve(current, gitdir);
-        }
+      // Read `.git` directly instead of stat()-then-readFile(), which is a
+      // file-system race. A regular `.git` file holds a `gitdir:` pointer
+      // (worktrees/submodules); a `.git` directory reads back as EISDIR and
+      // is the gitdir itself.
+      const text = await fs.readFile(candidate, "utf8");
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+      if (m && m[1]) {
+        const gitdir = m[1];
+        return path.isAbsolute(gitdir) ? gitdir : path.resolve(current, gitdir);
       }
-    } catch {
-      // not present at this level; keep walking
+      // A `.git` file without a gitdir pointer is not a usable git dir here;
+      // keep walking upward.
+    } catch (error) {
+      // EISDIR means `.git` is a directory — the common repo layout — so it
+      // is the git dir. ENOENT and other errors mean `.git` is absent or
+      // unreadable at this level; keep walking.
+      if ((error as NodeJS.ErrnoException).code === "EISDIR") return candidate;
     }
     const parent = path.dirname(current);
     if (parent === current) return undefined;

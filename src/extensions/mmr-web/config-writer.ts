@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isRecord } from "../mmr-core/internal/json.js";
 import { isMmrWebBackend, type MmrWebBackend } from "./config.js";
@@ -183,9 +183,18 @@ export function applyMmrWebConfigUpdate(
  */
 export function writeMmrWebConfigFile(filePath: string, update: MmrWebConfigUpdate): string {
   let existing: unknown = {};
-  if (existsSync(filePath)) {
+  // Read directly and treat a missing file as an empty object instead of
+  // an existsSync()-then-read sequence, which is a file-system race: the
+  // file could be created or removed between the check and the read.
+  let raw: string | undefined;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (raw !== undefined) {
     try {
-      existing = JSON.parse(readFileSync(filePath, "utf8"));
+      existing = JSON.parse(raw);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Refusing to overwrite ${filePath}: contents are not valid JSON (${message}).`);

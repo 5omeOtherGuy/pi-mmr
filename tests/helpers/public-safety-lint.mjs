@@ -54,7 +54,7 @@ const FORBIDDEN_RULES = [
   },
   {
     id: "absolute-home-path",
-    pattern: new RegExp(LOCAL_HOME_PATH.replace(/\//g, "\\/"), "i"),
+    pattern: new RegExp(LOCAL_HOME_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
     message: "private local home path",
   },
   {

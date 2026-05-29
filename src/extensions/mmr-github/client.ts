@@ -331,13 +331,20 @@ function commitFromSearchOrRest(value: Record<string, unknown>): GithubCommitSum
   return { sha, message, author: authorName, authorEmail, date: authorDate, htmlUrl };
 }
 
+/** Remove trailing `/` characters without an unanchored-quantifier regex. */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end--;
+  return value.slice(0, end);
+}
+
 export function createGithubClient(options: GithubClientOptions): GithubClient {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") {
     throw new Error("mmr-github: no fetch implementation available in this runtime.");
   }
   const userAgent = options.userAgent ?? DEFAULT_GITHUB_USER_AGENT;
-  const apiBaseUrl = options.apiBaseUrl.replace(/\/+$/, "");
+  const apiBaseUrl = stripTrailingSlashes(options.apiBaseUrl);
 
   async function request<T>(init: GithubRequestInit, parse: (json: unknown) => T): Promise<T> {
     const url = new URL(`${apiBaseUrl}${init.path}`);

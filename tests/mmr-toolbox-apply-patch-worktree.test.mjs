@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, realpathSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, mkdirSync, rmSync, realpathSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";

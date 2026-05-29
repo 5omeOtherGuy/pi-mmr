@@ -87,6 +87,13 @@ interface SidecarState {
   /** Child process from the most recent start command, if it is still tracked. */
   child?: ChildProcess;
   startPromise?: Promise<void>;
+  /**
+   * Monotonic token identifying the in-flight start. Captured locally when a
+   * start claims ownership of `startPromise` so the finally block can clear
+   * `startPromise` only when no newer start (or a `stop()`/new `ensureRunning`)
+   * has replaced it, without comparing promise references directly.
+   */
+  startGeneration: number;
   idleTimer?: unknown;
   /** Settings snapshot from the last ensureRunning() call. */
   settings?: SidecarSettings;
@@ -97,7 +104,7 @@ interface SidecarState {
   stopped: boolean;
 }
 
-const state: SidecarState = { started: false, stopped: false };
+const state: SidecarState = { started: false, stopped: false, startGeneration: 0 };
 
 /** Reset the per-process singleton. Test seam only. */
 export function __resetSearxngSidecarStateForTests(): void {
@@ -279,12 +286,16 @@ export async function ensureSearxngSidecarRunning(
     }
   })();
 
+  const startGeneration = (state.startGeneration += 1);
   state.startPromise = startPromise;
   try {
     await startPromise;
     scheduleIdleStop(settings, options);
   } finally {
-    if (state.startPromise === startPromise) state.startPromise = undefined;
+    // Clear only if this start still owns `startPromise`; a concurrent stop()
+    // or a newer ensureRunning() bumps `startGeneration`, so a stale finally
+    // must not clobber the replacement.
+    if (state.startGeneration === startGeneration) state.startPromise = undefined;
   }
 }
 

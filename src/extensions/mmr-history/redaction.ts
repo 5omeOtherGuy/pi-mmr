@@ -297,13 +297,20 @@ export function redactText(input: string, opts?: RedactOptions): string {
   return out;
 }
 
+/** Remove trailing `/` characters without an unanchored-quantifier regex. */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end--;
+  return value.slice(0, end);
+}
+
 /**
  * Stable 8-character hex reference for a project working directory.
  * Used as the opaque `projectRef` in `find_session` results so callers
  * can group matches by project without learning the raw cwd.
  */
 export function projectRefFromCwd(cwd: string): string {
-  const canonical = typeof cwd === "string" ? cwd.replace(/\\/g, "/").replace(/\/+$/, "") : "";
+  const canonical = typeof cwd === "string" ? stripTrailingSlashes(cwd.replace(/\\/g, "/")) : "";
   const hash = createHash("sha256");
   hash.update(canonical);
   return hash.digest("hex").slice(0, PROJECT_REF_HEX_LENGTH);

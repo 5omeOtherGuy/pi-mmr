@@ -543,7 +543,7 @@ describe("mmr-web custom reader", () => {
       ]);
       await assert.rejects(
         () => braveReader({ url: "https://example.com/", maxResultBytes: 10000 }, { fetchImpl, lookup: PUBLIC_DNS_STUB }),
-        new RegExp(`Content-Type "${type.replace(/[.+]/g, "\\$&")}"`),
+        new RegExp(`Content-Type "${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`),
         `expected ${type} to be refused`,
       );
     }

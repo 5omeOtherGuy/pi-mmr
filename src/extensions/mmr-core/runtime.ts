@@ -87,7 +87,7 @@ function cloneMmrSessionIdentity(identity: MmrSessionIdentity): MmrSessionIdenti
 }
 
 function looksLikeMmrSessionIdentity(value: unknown): value is MmrSessionIdentity {
-  if (typeof value !== "object" || value === null) return false;
+  if (value === null || typeof value !== "object") return false;
   const candidate = value as Partial<MmrSessionIdentity>;
   return candidate.version === 1 && typeof candidate.source === "string";
 }
@@ -137,7 +137,7 @@ function looksLikeMmrModeState(value: unknown): value is MmrModeState {
   // with the discriminating `mode` field the snapshot always carries; that
   // is enough to reject unrelated emissions (strings, numbers, arrays) before
   // they reach JSON.stringify in the clone path.
-  if (typeof value !== "object" || value === null) return false;
+  if (value === null || typeof value !== "object") return false;
   return typeof (value as Partial<MmrModeState>).mode === "string";
 }
 
