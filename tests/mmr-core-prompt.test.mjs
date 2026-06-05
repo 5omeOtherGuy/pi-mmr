@@ -196,13 +196,21 @@ describe("mmr-core prompt layer", () => {
     }
   });
 
-  it("instructs raw diagram output without diagram code fences", async () => {
+  it("instructs raw diagram output without diagram code fences (rush omits the diagrams fragment)", async () => {
     const { buildMmrPromptLayer } = await importSource("extensions/mmr-core/prompt.ts");
+    const diagramSentence =
+      "When a picture beats prose for architecture, flow, state, or relationships, output the raw box-drawing diagram only.";
 
     for (const mode of MODES) {
       const state = createState({ mode });
       const result = buildMmrPromptLayer({ state, baseSystemPrompt: BASE_PROMPT });
-      assert.equal(result.includes("When a picture beats prose for architecture, flow, state, or relationships, output the raw box-drawing diagram only."), true);
+      if (mode === "rush") {
+        // Rush trims the diagrams fragment for token economy.
+        assert.equal(result.includes(diagramSentence), false, `${mode}: rush recipe drops the diagrams fragment`);
+        assert.equal(result.includes("## Diagrams"), false, `${mode}: rush must not render the diagrams section`);
+      } else {
+        assert.equal(result.includes(diagramSentence), true, `${mode}: diagrams fragment must render`);
+      }
       assert.equal(result.includes("```diagram"), false, `${mode}: must not force diagram code fences`);
     }
   });

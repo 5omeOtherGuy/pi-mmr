@@ -132,21 +132,6 @@ Local, reversible actions — proceed. Confirm before:
 
 No destructive shortcuts: don't bypass safety checks or discard unfamiliar files.
 
-## Diagrams
-
-When a picture beats prose for architecture, flow, state, or relationships, output the raw box-drawing diagram only. Do not wrap diagrams in a code fence unless the user explicitly asks for one.
-
-No Mermaid: do not write `graph TD`, `sequenceDiagram`, or `mermaid` fences.
-
-   ╭─────────╮     ╭───────────╮     ╭──────╮
-   │ Extract │────▶│ Transform │────▶│ Load │
-   ╰────┬────╯     ╰─────┬─────╯     ╰──────╯
-        │                │
-        │                ▼
-        │            ╭───────╮
-        ╰───────────▶│ Audit │
-                     ╰───────╯
-
 ## File links
 
 When referencing code, use fluent Markdown links when the interface supports file links — `[display text](file:///absolute/path#L10-L20)`. Never show a raw `file://` URL as visible text.

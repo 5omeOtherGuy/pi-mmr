@@ -13,11 +13,22 @@ const EXPECTED_SEQUENCE = [
   "builtin-tool-guidance",
   "pi-docs",
   "shared-tool-guidance",
-  "shared-coding-guidance",
+  "autonomy",
+  "discovery-discipline",
+  "pragmatism",
+  "verification",
+  "careful-actions",
+  "diagrams",
+  "file-links",
+  "collaboration",
   "mode-posture",
   "response-style",
   "preserved-tail",
 ];
+
+// Shared coding guidance is split into named fragments so each mode recipe can
+// include only the sections it needs. Rush drops the diagrams fragment.
+const EXPECTED_RUSH_SEQUENCE = EXPECTED_SEQUENCE.filter((id) => id !== "diagrams");
 
 describe("mmr-core prompt registry", () => {
   let registry;
@@ -64,7 +75,8 @@ describe("mmr-core prompt registry", () => {
       const recipe = MMR_MODE_PROMPT_RECIPES[mode];
       assert.equal(recipe.mode, mode);
       assert.equal(recipe.basePromptId, "pi-native-default-v1");
-      assert.deepEqual(recipe.fragments, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE, `${mode}: canonical fragment sequence`);
+      const expectedFragments = mode === "rush" ? EXPECTED_RUSH_SEQUENCE : MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE;
+      assert.deepEqual(recipe.fragments, expectedFragments, `${mode}: expected fragment sequence`);
       assert.equal(recipe.tag, mode);
       assert.equal(typeof recipe.intro, "string");
       assert.ok(recipe.intro.length > 20, `${mode}: intro must be substantive`);
@@ -90,6 +102,67 @@ describe("mmr-core prompt registry", () => {
         assert.ok(fragments.includes(required), `${mode}: must include required fragment ${required}`);
       }
     }
+  });
+
+  it("lets a mode recipe drop a shared coding fragment (rush omits diagrams)", () => {
+    const { MMR_MODE_PROMPT_RECIPES, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE } = registry;
+    assert.equal(MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE.includes("diagrams"), false, "rush sequence must omit diagrams");
+    assert.deepEqual(
+      MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE,
+      MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.filter((id) => id !== "diagrams"),
+      "rush must keep every default fragment except diagrams",
+    );
+    assert.deepEqual(MMR_MODE_PROMPT_RECIPES.rush.fragments, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE);
+    for (const mode of ["smart", "smartGPT", "large", "deep"]) {
+      assert.equal(
+        MMR_MODE_PROMPT_RECIPES[mode].fragments.includes("diagrams"),
+        true,
+        `${mode}: non-rush modes keep the diagrams fragment`,
+      );
+    }
+  });
+
+  it("keeps shared coding fragment ids, text map, and registry metadata aligned", async () => {
+    const modules = await importSource("extensions/mmr-core/prompt-modules.ts");
+    const { MMR_PROMPT_FRAGMENTS, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE } = registry;
+    const codingIds = [
+      "autonomy",
+      "discovery-discipline",
+      "pragmatism",
+      "verification",
+      "careful-actions",
+      "diagrams",
+      "file-links",
+      "collaboration",
+    ];
+    // The canonical id tuple and the text-map keys match the expected coding
+    // ids, in order — this is the single source of truth shared with the registry.
+    assert.deepEqual([...modules.SHARED_CODING_GUIDANCE_FRAGMENT_IDS], codingIds);
+    assert.deepEqual(Object.keys(modules.SHARED_CODING_GUIDANCE_FRAGMENTS), codingIds);
+    // The default sequence embeds the coding ids contiguously, in canonical order.
+    const start = MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("autonomy");
+    assert.deepEqual(
+      MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.slice(start, start + codingIds.length),
+      codingIds,
+    );
+    // Every registry entry keeps key === id === blockKind.
+    for (const [key, def] of Object.entries(MMR_PROMPT_FRAGMENTS)) {
+      assert.equal(def.id, key, `${key}: fragment id must equal its key`);
+      assert.equal(def.blockKind, key, `${key}: blockKind must equal its key`);
+    }
+    // Each coding fragment text starts with its own Markdown heading.
+    for (const id of codingIds) {
+      assert.equal(typeof modules.SHARED_CODING_GUIDANCE_FRAGMENTS[id], "string");
+      assert.ok(
+        modules.SHARED_CODING_GUIDANCE_FRAGMENTS[id].startsWith("## "),
+        `${id}: fragment text must start with a Markdown heading`,
+      );
+    }
+    // The derived byte-reference equals the in-order join of the fragment texts.
+    assert.equal(
+      modules.SHARED_CODING_GUIDANCE,
+      codingIds.map((id) => modules.SHARED_CODING_GUIDANCE_FRAGMENTS[id]).join("\n\n"),
+    );
   });
 
   it("keeps the compatibility template export derived from recipes", () => {

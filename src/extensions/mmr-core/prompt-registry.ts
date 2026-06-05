@@ -3,6 +3,7 @@ import {
   MMR_MODE_PROMPT_TEMPLATES as LEGACY_MODE_PROMPT_TEMPLATES,
   type MmrModeBlockTemplate,
 } from "./prompt-templates.js";
+import { SHARED_CODING_GUIDANCE_FRAGMENT_IDS } from "./prompt-modules.js";
 
 export const MMR_IDENTITY_LINE =
   "You are an expert coding assistant operating inside pi, a coding agent harness.";
@@ -46,7 +47,14 @@ export type MmrPromptFragmentId =
   | "builtin-tool-guidance"
   | "pi-docs"
   | "shared-tool-guidance"
-  | "shared-coding-guidance"
+  | "autonomy"
+  | "discovery-discipline"
+  | "pragmatism"
+  | "verification"
+  | "careful-actions"
+  | "diagrams"
+  | "file-links"
+  | "collaboration"
   | "mode-posture"
   | "response-style"
   | "preserved-tail";
@@ -90,11 +98,36 @@ export const MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE = [
   "builtin-tool-guidance",
   "pi-docs",
   "shared-tool-guidance",
-  "shared-coding-guidance",
+  ...SHARED_CODING_GUIDANCE_FRAGMENT_IDS,
   "mode-posture",
   "response-style",
   "preserved-tail",
 ] as const satisfies readonly MmrPromptFragmentId[];
+
+/**
+ * Rush trims the diagrams fragment from the shared coding guidance. Rush
+ * optimizes for latency and token economy with terse output, so the
+ * multi-line box-drawing example is the lowest-value shared section for it.
+ * Every other shared coding fragment (autonomy, discovery, pragmatism,
+ * verification, careful actions, file links, collaboration) is retained, and
+ * all other modes keep the full default sequence.
+ */
+export const MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE = MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.filter(
+  (fragmentId) => fragmentId !== "diagrams",
+) as readonly MmrPromptFragmentId[];
+
+/**
+ * Forces every registry entry to keep its key, `id`, and `blockKind` identical,
+ * so the duplicated fragment-id vocabulary across `prompt-modules.ts`,
+ * `prompt-registry.ts`, `types.ts`, and `prompt-assembly.ts` cannot drift
+ * silently (a mismatched key/id/blockKind fails `tsc`).
+ */
+type MmrPromptFragmentDefinitionMap = {
+  [K in MmrPromptFragmentId]: Omit<MmrPromptFragmentDefinition, "id" | "blockKind"> & {
+    id: K;
+    blockKind: Extract<MmrPromptBlockKind, K>;
+  };
+};
 
 export const MMR_PROMPT_FRAGMENTS = {
   identity: {
@@ -143,11 +176,53 @@ export const MMR_PROMPT_FRAGMENTS = {
     source: "mmr-core",
     summary: "Shared pi-mmr tool-execution policy for all prompted locked modes.",
   },
-  "shared-coding-guidance": {
-    id: "shared-coding-guidance",
-    blockKind: "shared-coding-guidance",
+  autonomy: {
+    id: "autonomy",
+    blockKind: "autonomy",
     source: "mmr-core",
-    summary: "Shared pi-mmr coding, verification, diagrams, file links, and user-collaboration guidance.",
+    summary: "Shared autonomy-and-persistence guidance: definition of done, default-to-action, leave others' changes alone.",
+  },
+  "discovery-discipline": {
+    id: "discovery-discipline",
+    blockKind: "discovery-discipline",
+    source: "mmr-core",
+    summary: "Shared discovery-discipline guidance: read to resolve a specific uncertainty, then stop.",
+  },
+  pragmatism: {
+    id: "pragmatism",
+    blockKind: "pragmatism",
+    source: "mmr-core",
+    summary: "Shared pragmatism-and-scope guidance: smallest correct change, avoid one-use abstractions.",
+  },
+  verification: {
+    id: "verification",
+    blockKind: "verification",
+    source: "mmr-core",
+    summary: "Shared verification guidance: scale checks to risk, report honestly, never fake green.",
+  },
+  "careful-actions": {
+    id: "careful-actions",
+    blockKind: "careful-actions",
+    source: "mmr-core",
+    summary: "Shared careful-actions guidance: confirm before destructive, hard-to-reverse, or externally visible actions.",
+  },
+  diagrams: {
+    id: "diagrams",
+    blockKind: "diagrams",
+    source: "mmr-core",
+    summary: "Shared diagrams guidance: raw box-drawing diagrams, no Mermaid, no diagram code fences.",
+  },
+  "file-links": {
+    id: "file-links",
+    blockKind: "file-links",
+    source: "mmr-core",
+    summary: "Shared file-links guidance: fluent Markdown file:// links, URL-encode specials.",
+  },
+  collaboration: {
+    id: "collaboration",
+    blockKind: "collaboration",
+    source: "mmr-core",
+    summary: "Shared working-with-the-user guidance: newest message refines the spec, honor non-conflicting requests.",
   },
   "mode-posture": {
     id: "mode-posture",
@@ -168,9 +243,12 @@ export const MMR_PROMPT_FRAGMENTS = {
     piNative: true,
     summary: "Everything after the replaced Pi head: append prompt tail, project context, skills, date, cwd, and later extension content.",
   },
-} satisfies Record<MmrPromptFragmentId, MmrPromptFragmentDefinition>;
+} satisfies MmrPromptFragmentDefinitionMap;
 
-function recipe(mode: PromptedMmrModeKey): MmrModePromptRecipe {
+function recipe(
+  mode: PromptedMmrModeKey,
+  fragments: readonly MmrPromptFragmentId[] = MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE,
+): MmrModePromptRecipe {
   const template = LEGACY_MODE_PROMPT_TEMPLATES[mode];
   return {
     mode,
@@ -179,14 +257,14 @@ function recipe(mode: PromptedMmrModeKey): MmrModePromptRecipe {
     intro: template.intro,
     postureSections: template.postureSections,
     closingLine: template.closingLine,
-    fragments: MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE,
+    fragments,
   };
 }
 
 export const MMR_MODE_PROMPT_RECIPES = {
   smart: recipe("smart"),
   smartGPT: recipe("smartGPT"),
-  rush: recipe("rush"),
+  rush: recipe("rush", MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE),
   large: recipe("large"),
   deep: recipe("deep"),
 } satisfies Record<PromptedMmrModeKey, MmrModePromptRecipe>;

@@ -2,10 +2,11 @@ import {
   buildBuiltinToolGuidance,
   extractActiveBuiltinToolNames,
 } from "./builtin-tool-guidance.js";
-import { SHARED_CODING_GUIDANCE, SHARED_TOOL_GUIDANCE } from "./prompt-modules.js";
+import { SHARED_CODING_GUIDANCE_FRAGMENTS, SHARED_TOOL_GUIDANCE } from "./prompt-modules.js";
 import {
   getMmrModePromptRecipe,
   getMmrPromptBase,
+  MMR_MODE_PROMPT_RECIPES,
   MMR_MODE_PROMPT_TEMPLATES,
   MMR_RESPONSE_STYLE_HEADING,
   MMR_TOOL_USE_HEADING,
@@ -50,9 +51,14 @@ const MMR_TAIL_SEPARATOR = "\n\n";
  * prompt fed into a re-assembly may have been produced for a different mode
  * (e.g. a `deep` parent aliased to a `smart` Task base).
  */
-const PREVIOUS_MMR_TAILS: readonly string[] = Object.values(MMR_MODE_PROMPT_TEMPLATES).map(
-  (previousTemplate) =>
-    `${SHARED_TOOL_GUIDANCE}\n\n${SHARED_CODING_GUIDANCE}\n\n${previousTemplate.postureSections}\n\n${MMR_RESPONSE_STYLE_HEADING}\n\n${previousTemplate.closingLine}`,
+const PREVIOUS_MMR_TAILS: readonly string[] = Object.values(MMR_MODE_PROMPT_RECIPES).map(
+  (previousRecipe) => {
+    const codingGuidance = previousRecipe.fragments
+      .filter((fragmentId) => Object.hasOwn(SHARED_CODING_GUIDANCE_FRAGMENTS, fragmentId))
+      .map((fragmentId) => SHARED_CODING_GUIDANCE_FRAGMENTS[fragmentId as keyof typeof SHARED_CODING_GUIDANCE_FRAGMENTS])
+      .join("\n\n");
+    return `${SHARED_TOOL_GUIDANCE}\n\n${codingGuidance}\n\n${previousRecipe.postureSections}\n\n${MMR_RESPONSE_STYLE_HEADING}\n\n${previousRecipe.closingLine}`;
+  },
 );
 
 /**
@@ -260,11 +266,18 @@ export function assembleActiveSurface(
           text: `${SHARED_TOOL_GUIDANCE}\n\n`,
           source: "mmr-core",
         };
-      case "shared-coding-guidance":
+      case "autonomy":
+      case "discovery-discipline":
+      case "pragmatism":
+      case "verification":
+      case "careful-actions":
+      case "diagrams":
+      case "file-links":
+      case "collaboration":
         return {
-          id: "shared-coding-guidance",
-          kind: "shared-coding-guidance",
-          text: `${SHARED_CODING_GUIDANCE}\n\n`,
+          id: fragmentId,
+          kind: fragmentId,
+          text: `${SHARED_CODING_GUIDANCE_FRAGMENTS[fragmentId]}\n\n`,
           source: "mmr-core",
         };
       case "mode-posture":

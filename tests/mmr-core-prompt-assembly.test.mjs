@@ -115,60 +115,29 @@ describe("Phase D: assembleActiveSurface() public API", () => {
       );
     });
 
-    it(`emits blocks in the expected logical order for ${mode}`, () => {
+    it(`emits rendered block kinds equal to the active recipe fragment list for ${mode}`, async () => {
+      const { MMR_MODE_PROMPT_RECIPES } = await importSource("extensions/mmr-core/prompt-registry.ts");
       const result = assembleActiveSurface({
         state: createState(mode),
         baseSystemPrompt: BASE_PROMPT,
         activeToolManifest: [],
       });
       const kinds = result.blocks.map((b) => b.kind);
-      // Identity must appear first; preserved-tail last. The middle is a
-      // splice of Pi-authored + mmr-authored blocks whose exact internal
-      // ordering is a Phase D implementation detail, but every prompted
-      // mode must include at least these block kinds.
       assert.equal(kinds[0], "identity", `mode ${mode}: first block must be identity`);
       assert.equal(
         kinds[kinds.length - 1],
         "preserved-tail",
         `mode ${mode}: last block must be preserved-tail`,
       );
-      for (const required of [
-        "tool-lead-in",
-        "active-tools",
-        "active-guidelines",
-        "builtin-tool-guidance",
-        "pi-docs",
-        "shared-tool-guidance",
-        "shared-coding-guidance",
-        "mode-posture",
-        "response-style",
-      ]) {
-        assert.ok(
-          kinds.includes(required),
-          `mode ${mode}: blocks must include kind "${required}" (got ${JSON.stringify(kinds)})`,
-        );
-      }
-      // Indices must be in the canonical order.
-      const orderedKinds = [
-        "identity",
-        "tool-lead-in",
-        "active-tools",
-        "active-guidelines",
-        "builtin-tool-guidance",
-        "pi-docs",
-        "shared-tool-guidance",
-        "shared-coding-guidance",
-        "mode-posture",
-        "response-style",
-        "preserved-tail",
-      ];
-      const indices = orderedKinds.map((k) => kinds.indexOf(k));
-      for (let i = 1; i < indices.length; i += 1) {
-        assert.ok(
-          indices[i - 1] < indices[i],
-          `mode ${mode}: kind ${orderedKinds[i - 1]} must come before ${orderedKinds[i]}; got indices ${JSON.stringify(indices)}`,
-        );
-      }
+      // BASE_PROMPT carries Pi built-ins, so the optional builtin-tool-guidance
+      // fragment is rendered. The rendered block kinds must therefore equal the
+      // active recipe's fragment list exactly — this is what makes per-mode
+      // fragment selection (e.g. rush dropping diagrams) observable.
+      assert.deepEqual(
+        kinds,
+        [...MMR_MODE_PROMPT_RECIPES[mode].fragments],
+        `mode ${mode}: rendered block kinds must equal the recipe fragment list`,
+      );
     });
 
     it(`emits shared guidance blocks exactly once after Pi docs and before mode posture for ${mode}`, () => {
@@ -178,19 +147,47 @@ describe("Phase D: assembleActiveSurface() public API", () => {
         activeToolManifest: [],
       });
       const kinds = result.blocks.map((b) => b.kind);
+      // The shared coding guidance is split into named fragments. Every mode
+      // keeps these always-present coding fragments; rush is the only mode that
+      // drops `diagrams`, so it is asserted separately, not here.
+      const alwaysPresentCodingKinds = [
+        "autonomy",
+        "discovery-discipline",
+        "pragmatism",
+        "verification",
+        "careful-actions",
+        "file-links",
+        "collaboration",
+      ];
       assert.equal(kinds.filter((k) => k === "shared-tool-guidance").length, 1);
-      assert.equal(kinds.filter((k) => k === "shared-coding-guidance").length, 1);
+      for (const codingKind of alwaysPresentCodingKinds) {
+        assert.equal(
+          kinds.filter((k) => k === codingKind).length,
+          1,
+          `mode ${mode}: coding fragment ${codingKind} must appear exactly once`,
+        );
+      }
+      // Diagrams is the one mode-gated coding fragment: present once everywhere
+      // except rush, which drops it.
+      assert.equal(
+        kinds.filter((k) => k === "diagrams").length,
+        mode === "rush" ? 0 : 1,
+        `mode ${mode}: diagrams fragment count`,
+      );
       const piDocsIdx = kinds.indexOf("pi-docs");
       const sharedToolIdx = kinds.indexOf("shared-tool-guidance");
-      const sharedCodingIdx = kinds.indexOf("shared-coding-guidance");
+      const autonomyIdx = kinds.indexOf("autonomy");
+      const collaborationIdx = kinds.indexOf("collaboration");
       const modePostureIdx = kinds.indexOf("mode-posture");
       const responseStyleIdx = kinds.indexOf("response-style");
       assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool guidance`);
-      assert.ok(sharedToolIdx < sharedCodingIdx, `mode ${mode}: shared tool guidance must precede shared coding guidance`);
-      assert.ok(sharedCodingIdx < modePostureIdx, `mode ${mode}: shared coding guidance must precede mode posture`);
+      assert.ok(sharedToolIdx < autonomyIdx, `mode ${mode}: shared tool guidance must precede shared coding guidance`);
+      assert.ok(autonomyIdx < collaborationIdx, `mode ${mode}: coding fragments must stay in order`);
+      assert.ok(collaborationIdx < modePostureIdx, `mode ${mode}: shared coding guidance must precede mode posture`);
       assert.ok(modePostureIdx < responseStyleIdx, `mode ${mode}: mode posture must precede response style`);
       assert.match(result.blocks[sharedToolIdx].text, /## Tool execution policy/);
-      assert.match(result.blocks[sharedCodingIdx].text, /## Autonomy and persistence/);
+      assert.match(result.blocks[autonomyIdx].text, /## Autonomy and persistence/);
+      assert.match(result.blocks[collaborationIdx].text, /## Working with the user/);
       assert.match(result.blocks[responseStyleIdx].text, /## Response style/);
     });
 
@@ -232,10 +229,20 @@ describe("Phase D: assembleActiveSurface() public API", () => {
         baseSystemPrompt: BASE_PROMPT,
         activeToolManifest: [],
       });
-      const sharedBlocks = result.blocks.filter((b) =>
-        b.kind === "shared-tool-guidance" || b.kind === "shared-coding-guidance",
-      );
-      assert.equal(sharedBlocks.length, 2, `${mode}: must emit both shared guidance blocks`);
+      const sharedGuidanceKinds = new Set([
+        "shared-tool-guidance",
+        "autonomy",
+        "discovery-discipline",
+        "pragmatism",
+        "verification",
+        "careful-actions",
+        "diagrams",
+        "file-links",
+        "collaboration",
+      ]);
+      const sharedBlocks = result.blocks.filter((b) => sharedGuidanceKinds.has(b.kind));
+      // 1 tool-guidance block + 8 coding fragments, minus diagrams for rush.
+      assert.equal(sharedBlocks.length, mode === "rush" ? 8 : 9, `${mode}: must emit all shared guidance blocks`);
       const sharedText = sharedBlocks.map((b) => b.text).join("\n");
       for (const entry of MMR_PLANNED_TOOL_CATALOG) {
         const namePattern = new RegExp(`\\b${entry.name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\b`);
