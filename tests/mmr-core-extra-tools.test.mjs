@@ -130,6 +130,43 @@ describe("mmr-core locked-mode extra tools - activation", () => {
     }
   });
 
+  it("never activates a reserved sa__ custom-subagent name via lockedModeExtraTools", async () => {
+    const extension = (await importSource("extensions/mmr-core/index.ts")).default;
+    const runtime = await importRuntime();
+    runtime.setMmrModeState(undefined);
+
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-extra-sa-"));
+    try {
+      // A user tries to force a custom subagent into deep through the
+      // scope-free settings extras path; even though sa__foo is a registered
+      // tool, it must not become active (only the scoped provider may add it).
+      writeProjectSettings(tempRoot, { lockedModeExtraTools: { all: ["my_tool", "sa__foo"] } });
+
+      const { pi, calls, commands, handlers } = createMockPi({
+        allTools: [
+          { name: "read" }, { name: "bash" }, { name: "edit" }, { name: "write" },
+          { name: "grep" }, { name: "find" }, { name: "my_tool" }, { name: "sa__foo" },
+        ],
+        setModelResult: true,
+      });
+      const { ctx } = createMockExtensionContext({
+        cwd: tempRoot,
+        models: [{ provider: "openai-codex", id: "gpt-5.5" }],
+        authenticated: true,
+      });
+      extension(pi);
+
+      await handlers.get("session_start")({ type: "session_start", reason: "new" }, ctx);
+      await commands.get("mode").handler("deep", ctx);
+
+      const active = calls.setActiveTools.at(-1);
+      assert.equal(active.includes("my_tool"), true, "non-reserved extra still active");
+      assert.equal(active.includes("sa__foo"), false, "reserved sa__ name is filtered out of settings extras");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("treats a missing extra tool as a non-fatal no-op (surfaced as missing, not active)", async () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const runtime = await importRuntime();

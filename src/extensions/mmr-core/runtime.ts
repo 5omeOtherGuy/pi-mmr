@@ -7,6 +7,8 @@ import type {
   MmrFeatureGateDecision,
   MmrFeatureGateProvider,
   MmrFeatureGateRegistry,
+  MmrLockedModeKey,
+  MmrModeExtraToolProvider,
   MmrModeKey,
   MmrModeState,
   MmrModelResolution,
@@ -261,6 +263,8 @@ export interface MmrCoreRuntime {
   isToolAllowed(toolName: string): boolean;
   registerToolProvider(provider: MmrToolProvider): void;
   getToolRegistry(): MmrToolRegistry;
+  registerModeExtraToolProvider(provider: MmrModeExtraToolProvider): void;
+  resolveModeExtraTools(modeKey: MmrLockedModeKey, cwd: string): string[];
   registerFeatureGateProvider(provider: MmrFeatureGateProvider): void;
   resolveFeatureGates(gates: readonly string[]): MmrFeatureGateDecision[];
   getFeatureGateRegistry(): MmrFeatureGateRegistry;
@@ -277,6 +281,7 @@ export function createMmrCoreRuntime(
   let activeIdentity: MmrSessionIdentity | undefined;
   let activeManagedModelOverride: MmrManagedModelOverrideState | undefined;
   let managedModelUpdateDepth = 0;
+  const modeExtraToolProviders: MmrModeExtraToolProvider[] = [];
 
   return {
     getMmrSubagentState() {
@@ -359,6 +364,34 @@ export function createMmrCoreRuntime(
       return toolRegistry;
     },
 
+    registerModeExtraToolProvider(provider) {
+      // De-dup by name so an in-process extension reload replaces rather than
+      // stacks duplicate providers.
+      const existingIndex = modeExtraToolProviders.findIndex((entry) => entry.name === provider.name);
+      if (existingIndex >= 0) modeExtraToolProviders[existingIndex] = provider;
+      else modeExtraToolProviders.push(provider);
+    },
+
+    resolveModeExtraTools(modeKey, cwd) {
+      const seen = new Set<string>();
+      const result: string[] = [];
+      for (const provider of modeExtraToolProviders) {
+        let names: readonly string[];
+        try {
+          names = provider.getExtraTools({ modeKey, cwd });
+        } catch {
+          names = [];
+        }
+        for (const name of names) {
+          const trimmed = typeof name === "string" ? name.trim() : "";
+          if (trimmed.length === 0 || seen.has(trimmed)) continue;
+          seen.add(trimmed);
+          result.push(trimmed);
+        }
+      }
+      return result;
+    },
+
     registerFeatureGateProvider(provider) {
       featureGateRegistry.registerProvider(provider);
     },
@@ -422,6 +455,8 @@ const REQUIRED_RUNTIME_METHODS = [
   "isToolAllowed",
   "registerToolProvider",
   "getToolRegistry",
+  "registerModeExtraToolProvider",
+  "resolveModeExtraTools",
   "registerFeatureGateProvider",
   "resolveFeatureGates",
   "getFeatureGateRegistry",
@@ -574,6 +609,20 @@ export function registerMmrToolProvider(provider: MmrToolProvider): void {
 
 export function getMmrToolRegistry(): MmrToolRegistry {
   return runtime.getToolRegistry();
+}
+
+/**
+ * Register a provider that contributes extra concrete tool names to locked
+ * modes at activation time (e.g. mmr-subagents enabled custom `sa__*`
+ * subagents). Providers are de-duped by `name`.
+ */
+export function registerMmrModeExtraToolProvider(provider: MmrModeExtraToolProvider): void {
+  runtime.registerModeExtraToolProvider(provider);
+}
+
+/** Resolve all provider-contributed extra tool names for a locked mode + cwd. */
+export function resolveMmrModeExtraTools(modeKey: MmrLockedModeKey, cwd: string): string[] {
+  return runtime.resolveModeExtraTools(modeKey, cwd);
 }
 
 export function registerMmrFeatureGateProvider(provider: MmrFeatureGateProvider): void {

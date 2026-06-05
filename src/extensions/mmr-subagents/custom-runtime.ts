@@ -9,7 +9,8 @@ import type {
 import { Type, type Static } from "typebox";
 import { isRecord } from "../mmr-core/internal/json.js";
 import { registerMmrOwnedTool } from "../mmr-core/owned-tools.js";
-import { getMmrModeStateSnapshot } from "../mmr-core/runtime.js";
+import { getMmrModeStateSnapshot, registerMmrModeExtraToolProvider } from "../mmr-core/runtime.js";
+import type { MmrLockedModeKey } from "../mmr-core/types.js";
 import { registerMmrSubagentPromptBuilder } from "../mmr-core/subagent-prompt-assembly.js";
 import {
   registerMmrSubagentProfile,
@@ -20,10 +21,20 @@ import type { MmrModelPreference } from "../mmr-core/types.js";
 import {
   type MmrCustomSubagentDefinition,
   MMR_CUSTOM_SUBAGENT_DEFAULT_TOOLS,
+  MMR_CUSTOM_SUBAGENT_MAX_FILE_BYTES,
   MMR_CUSTOM_SUBAGENT_TOOL_PREFIX,
   discoverMmrCustomSubagentsSync,
   isUnsafeMmrCustomSubagentToolPattern,
+  normalizeMmrCustomSubagentToolPatterns,
+  parseMmrCustomSubagentMarkdown,
 } from "./custom-loader.js";
+import {
+  type MmrCustomSubagentRecord,
+  type ResolvedMmrCustomSubagentRecord,
+  getPiOwnedSubagentRoots,
+  resolveEnabledMmrCustomSubagents,
+} from "./custom-config.js";
+import fs, { constants as fsConstants } from "node:fs";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
@@ -84,18 +95,160 @@ export interface CustomSubagentToolDeps {
 }
 
 export interface RegisterMmrCustomSubagentToolsOptions extends CustomSubagentToolDeps {
-  roots?: readonly string[];
   cwd?: string;
   homeDir?: string;
-  definitions?: readonly MmrCustomSubagentDefinition[];
+  /**
+   * Test seam: explicit enabled+in-scope records to register, bypassing the
+   * on-disk config + Markdown load. Each entry must carry the record and the
+   * already-parsed definition (or a resolvable source `filePath`).
+   */
+  resolvedRecords?: readonly ResolvedMmrCustomSubagentRecord[];
 }
 
-function defaultCustomSubagentRoots(cwd: string, home = homedir()): string[] {
+/** Registered custom subagent tool paired with its config record. */
+export interface RegisteredMmrCustomSubagent {
+  tool: ToolDefinition;
+  record: MmrCustomSubagentRecord;
+}
+
+/**
+ * Legacy external-harness roots scanned for *import candidates only*. These
+ * are never auto-registered; pi-mmr discovers them so the setup/import flow
+ * can offer to port selected agents into a Pi-owned root + config record.
+ */
+export function getLegacyClaudeSubagentRoots(cwd: string, home = homedir()): readonly string[] {
   return [path.join(cwd, ".claude", "agents"), path.join(home, ".claude", "agents")];
 }
 
-export function getDefaultMmrCustomSubagentRoots(cwd: string, homeDir?: string): readonly string[] {
-  return defaultCustomSubagentRoots(cwd, homeDir);
+/**
+ * Count discoverable legacy Claude-style agent candidates. Used to drive the
+ * one-time migration notice: pi-mmr no longer auto-loads `.claude/agents`, so
+ * when candidates exist but nothing is enabled in config we point the user at
+ * setup/import.
+ */
+export function countLegacyClaudeSubagentCandidates(cwd: string, home = homedir()): number {
+  try {
+    return discoverMmrCustomSubagentsSync({ roots: getLegacyClaudeSubagentRoots(cwd, home) }).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Build an effective definition for a configured record by parsing its source
+ * Markdown and overlaying the config record's authoritative `toolName`,
+ * `model`, `thinkingLevel`, and `tools`. Config is the enablement boundary, so
+ * its fields win over the Markdown frontmatter defaults.
+ */
+function definitionFromRecord(
+  parsed: MmrCustomSubagentDefinition,
+  record: MmrCustomSubagentRecord,
+): MmrCustomSubagentDefinition {
+  const toolPatterns = record.tools
+    ? normalizeMmrCustomSubagentToolPatterns([...record.tools])
+    : parsed.toolPatterns;
+  return {
+    ...parsed,
+    toolName: record.toolName,
+    model: record.model,
+    modelDeclared: true,
+    ...(record.thinkingLevel ? { thinkingLevel: record.thinkingLevel } : {}),
+    toolPatterns,
+    toolsDeclared: record.tools !== undefined ? true : parsed.toolsDeclared,
+  };
+}
+
+/** A subagent Markdown candidate discovered on disk (not yet enabled). */
+export interface MmrCustomSubagentCandidate {
+  definition: MmrCustomSubagentDefinition;
+  /** Source kind for display: a Pi-owned root or a legacy external harness root. */
+  sourceKind: "pi-global" | "pi-project" | "claude";
+}
+
+/**
+ * Discover subagent Markdown candidates from the Pi-owned roots and the legacy
+ * Claude roots. Candidates are inert until an enabled config record references
+ * them; the setup/import flow uses this to list what the user can enable or
+ * port.
+ */
+export function discoverMmrCustomSubagentCandidates(
+  cwd: string,
+  home = homedir(),
+): MmrCustomSubagentCandidate[] {
+  const roots = getPiOwnedSubagentRoots(cwd, home);
+  const out: MmrCustomSubagentCandidate[] = [];
+  const groups: { kind: MmrCustomSubagentCandidate["sourceKind"]; root: string }[] = [
+    { kind: "pi-project", root: roots.project },
+    { kind: "pi-global", root: roots.global },
+    ...getLegacyClaudeSubagentRoots(cwd, home).map((root) => ({ kind: "claude" as const, root })),
+  ];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    let definitions: MmrCustomSubagentDefinition[];
+    try {
+      definitions = discoverMmrCustomSubagentsSync({ roots: [group.root] });
+    } catch {
+      definitions = [];
+    }
+    for (const definition of definitions) {
+      if (seen.has(definition.filePath)) continue;
+      seen.add(definition.filePath);
+      out.push({ definition, sourceKind: group.kind });
+    }
+  }
+  return out;
+}
+
+/** Whether `target` is the same path as, or nested inside, `root`. */
+function isInsideRoot(target: string, root: string): boolean {
+  const rel = path.relative(root, target);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * Read and parse an enabled record's source Markdown with the same filesystem
+ * hardening the discovery walker uses: open the final component with
+ * `O_NOFOLLOW` (refuse a symlink swapped in for the source file), bound the
+ * size from the same descriptor we read, and verify the file's realpath stays
+ * inside the Pi-owned root. An enabled record must never let a project point
+ * `.pi/subagents/foo.md` at a file outside the Pi-owned root via a symlink.
+ */
+function parseRecordSourceFile(filePath: string, rootDir: string): MmrCustomSubagentDefinition | undefined {
+  let markdown: string | undefined;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > MMR_CUSTOM_SUBAGENT_MAX_FILE_BYTES) return undefined;
+    let canonicalRoot: string;
+    let canonicalFile: string;
+    try {
+      canonicalRoot = fs.realpathSync(rootDir);
+      canonicalFile = fs.realpathSync(filePath);
+    } catch {
+      return undefined;
+    }
+    if (!isInsideRoot(canonicalFile, canonicalRoot)) return undefined;
+    markdown = fs.readFileSync(fd, "utf8");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // best-effort descriptor cleanup
+      }
+    }
+  }
+  if (markdown === undefined) return undefined;
+  try {
+    // Records reference Pi-owned files the user explicitly enabled; accept
+    // plain Markdown bodies without subagent frontmatter as well.
+    return parseMmrCustomSubagentMarkdown({ filePath, markdown, allowMissingFrontmatter: true });
+  } catch {
+    return undefined;
+  }
 }
 
 function toModelPreference(model: string): MmrModelPreference | undefined {
@@ -457,15 +610,67 @@ export function registerMmrCustomSubagentDefinition(
   return tool;
 }
 
+/**
+ * Register the enabled, in-scope custom Markdown subagents for the active
+ * project. Config is the enablement boundary: only agents with an enabled
+ * `mmrSubagents.custom.agents` record (global or project) and a valid,
+ * in-scope source file become registered `sa__*` tools. A Markdown file merely
+ * present in a Pi-owned root is a discovered candidate, not a registered tool,
+ * until setup/import writes an enabled record for it.
+ *
+ * Per-mode exposure is handled separately: a mode-extra-tool provider is
+ * registered so each `sa__*` tool only enters a locked mode's active tool set
+ * when that mode is listed in the record's `modes` scope.
+ */
 export function registerMmrCustomSubagentTools(
   pi: ExtensionAPI,
   options: RegisterMmrCustomSubagentToolsOptions = {},
 ): ToolDefinition[] {
   const cwd = options.cwd ?? process.cwd();
-  const roots = options.roots ?? defaultCustomSubagentRoots(cwd, options.homeDir);
-  const definitions = options.definitions ?? discoverMmrCustomSubagentsSync({ roots });
-  return definitions
-    .filter((definition) => definition.toolName.startsWith(MMR_CUSTOM_SUBAGENT_TOOL_PREFIX))
-    .filter((definition) => !definition.toolPatterns.some(isUnsafeMmrCustomSubagentToolPattern))
-    .map((definition) => registerMmrCustomSubagentDefinition(pi, definition, options));
+  const resolved = options.resolvedRecords
+    ?? resolveEnabledMmrCustomSubagents({ cwd, ...(options.homeDir ? { homeDir: options.homeDir } : {}) }).resolved;
+
+  const registered: RegisteredMmrCustomSubagent[] = [];
+  const seen = new Set<string>();
+  for (const { record, filePath, rootDir } of resolved) {
+    if (seen.has(record.toolName)) continue;
+    const parsed = parseRecordSourceFile(filePath, rootDir);
+    if (!parsed) continue;
+    const definition = definitionFromRecord(parsed, record);
+    if (!definition.toolName.startsWith(MMR_CUSTOM_SUBAGENT_TOOL_PREFIX)) continue;
+    if (definition.toolPatterns.some(isUnsafeMmrCustomSubagentToolPattern)) continue;
+    seen.add(record.toolName);
+    const tool = registerMmrCustomSubagentDefinition(pi, definition, options);
+    registered.push({ tool, record });
+  }
+
+  registerCustomSubagentModeExtraProvider(cwd, registered);
+  return registered.map((entry) => entry.tool);
+}
+
+/**
+ * Register a mode-extra-tool provider so each enabled custom subagent only
+ * appears in the locked modes its config record allows. The provider captures
+ * the registration cwd and resolved records; it returns a record's tool name
+ * only when the queried mode is in scope and the queried cwd matches the
+ * project the records were resolved for.
+ */
+function registerCustomSubagentModeExtraProvider(
+  cwd: string,
+  registered: readonly RegisteredMmrCustomSubagent[],
+): void {
+  const resolvedCwd = path.resolve(cwd);
+  const entries = registered.map((entry) => ({ toolName: entry.record.toolName, modes: entry.record.modes }));
+  registerMmrModeExtraToolProvider({
+    name: "mmr-subagents",
+    getExtraTools({ modeKey, cwd: queryCwd }) {
+      if (path.resolve(queryCwd) !== resolvedCwd) return [];
+      const result: string[] = [];
+      for (const entry of entries) {
+        const allowed = entry.modes === "allLocked" || entry.modes.includes(modeKey as MmrLockedModeKey);
+        if (allowed) result.push(entry.toolName);
+      }
+      return result;
+    },
+  });
 }

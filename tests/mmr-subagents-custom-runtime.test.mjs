@@ -52,22 +52,42 @@ function makeWorkerResult(overrides = {}) {
 }
 
 describe("mmr-subagents custom Markdown runtime", () => {
-  it("discovers .claude/agents synchronously, registers sa__ tools, profiles, and prompt builders at extension activation", async () => {
+  it("registers only enabled, in-scope config records as sa__ tools, profiles, and prompt builders (no .claude auto-load)", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "pi-mmr-custom-runtime-"));
     try {
-      const agents = path.join(root, ".claude", "agents");
-      mkdirSync(agents, { recursive: true });
+      // A Pi-owned subagent Markdown file plus an enabled project config record.
+      const piAgents = path.join(root, ".pi", "subagents");
+      mkdirSync(piAgents, { recursive: true });
       writeFileSync(
-        path.join(agents, "reviewer.md"),
-        [
-          "---",
-          "name: Repo Reviewer",
-          "description: Reviews repository changes.",
-          "model: openai-codex/gpt-5.5",
-          "tools: Read, Bash",
-          "---",
-          "Review the repository.",
-        ].join("\n"),
+        path.join(piAgents, "reviewer.md"),
+        ["---", "name: Repo Reviewer", "description: Reviews repository changes.", "---", "Review the repository."].join("\n"),
+      );
+      // A legacy Claude file that must NOT be auto-registered anymore.
+      const claudeAgents = path.join(root, ".claude", "agents");
+      mkdirSync(claudeAgents, { recursive: true });
+      writeFileSync(
+        path.join(claudeAgents, "ignored.md"),
+        ["---", "name: Ignored Claude Agent", "description: Should not auto-load.", "---", "Do not load me."].join("\n"),
+      );
+      mkdirSync(path.join(root, ".pi"), { recursive: true });
+      writeFileSync(
+        path.join(root, ".pi", "settings.json"),
+        JSON.stringify({
+          mmrSubagents: {
+            custom: {
+              agents: {
+                reviewer: {
+                  enabled: true,
+                  source: { root: "project", file: "reviewer.md" },
+                  toolName: "sa__repo_reviewer",
+                  modes: "allLocked",
+                  model: "openai-codex/gpt-5.5",
+                  tools: ["read", "bash"],
+                },
+              },
+            },
+          },
+        }),
       );
 
       const { createMmrSubagentsExtension } = await importSource("extensions/mmr-subagents/index.ts");
@@ -78,8 +98,90 @@ describe("mmr-subagents custom Markdown runtime", () => {
       createMmrSubagentsExtension({ customSubagents: { cwd: root, homeDir: path.join(root, "home") } })(pi);
 
       assert.ok(tools.has("sa__repo_reviewer"));
+      assert.ok(!tools.has("sa__ignored_claude_agent"), "legacy .claude/agents must not auto-register");
       assert.equal(getMmrSubagentProfile("sa__repo_reviewer")?.displayName, "Repo Reviewer");
       assert.equal(getMmrSubagentPromptBuilder("sa__repo_reviewer")?.({ profile: getMmrSubagentProfile("sa__repo_reviewer"), cwd: root, baseSystemPrompt: "" }), "Review the repository.");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes a registered subagent only in its configured modes via the mode-extra provider", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "pi-mmr-custom-modes-"));
+    try {
+      const piAgents = path.join(root, ".pi", "subagents");
+      mkdirSync(piAgents, { recursive: true });
+      writeFileSync(
+        path.join(piAgents, "deeponly.md"),
+        ["---", "name: Deep Only", "description: Deep mode only.", "---", "Body."].join("\n"),
+      );
+      writeFileSync(
+        path.join(root, ".pi", "settings.json"),
+        JSON.stringify({ mmrSubagents: { custom: { agents: {
+          deeponly: { enabled: true, source: { root: "project", file: "deeponly.md" }, toolName: "sa__deep_only", modes: ["deep"], tools: ["read"] },
+        } } } }),
+      );
+      const { createMmrSubagentsExtension } = await importSource("extensions/mmr-subagents/index.ts");
+      const { resolveMmrModeExtraTools } = await importSource("extensions/mmr-core/runtime.ts");
+      const { pi, tools } = createMockPi({ activeTools: ["read"], allTools: ["read"] });
+      createMmrSubagentsExtension({ customSubagents: { cwd: root, homeDir: path.join(root, "home") } })(pi);
+
+      assert.ok(tools.has("sa__deep_only"), "registered regardless of mode");
+      assert.deepEqual(resolveMmrModeExtraTools("deep", root), ["sa__deep_only"]);
+      assert.deepEqual(resolveMmrModeExtraTools("smart", root), [], "absent in non-configured modes");
+      assert.deepEqual(resolveMmrModeExtraTools("deep", "/other/project"), [], "absent for a different cwd");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to register an enabled record whose source file is a symlink escaping the Pi-owned root", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "pi-mmr-custom-symlink-"));
+    try {
+      const piAgents = path.join(root, ".pi", "subagents");
+      mkdirSync(piAgents, { recursive: true });
+      const outside = path.join(root, "outside.md");
+      writeFileSync(
+        outside,
+        ["---", "name: Outside", "description: Outside the root.", "---", "Body."].join("\n"),
+      );
+      // A symlink inside the Pi-owned root pointing at a file outside it.
+      let symlinked = true;
+      try {
+        const { symlinkSync } = await import("node:fs");
+        symlinkSync(outside, path.join(piAgents, "evil.md"));
+      } catch {
+        symlinked = false; // platform without symlink permission
+      }
+      if (!symlinked) return;
+      writeFileSync(
+        path.join(root, ".pi", "settings.json"),
+        JSON.stringify({ mmrSubagents: { custom: { agents: {
+          evil: { enabled: true, source: { root: "project", file: "evil.md" }, toolName: "sa__evil", modes: ["deep"], tools: ["read"] },
+        } } } }),
+      );
+      const { createMmrSubagentsExtension } = await importSource("extensions/mmr-subagents/index.ts");
+      const { pi, tools } = createMockPi({ activeTools: ["read"], allTools: ["read"] });
+      createMmrSubagentsExtension({ customSubagents: { cwd: root, homeDir: path.join(root, "home") } })(pi);
+      assert.ok(!tools.has("sa__evil"), "a symlinked source escaping the root is refused");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not register a discovered Pi-owned candidate without an enabled config record", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "pi-mmr-custom-candidate-"));
+    try {
+      const piAgents = path.join(root, ".pi", "subagents");
+      mkdirSync(piAgents, { recursive: true });
+      writeFileSync(
+        path.join(piAgents, "manual.md"),
+        ["---", "name: Manual Drop", "description: Manually dropped, not enabled.", "---", "Body."].join("\n"),
+      );
+      const { createMmrSubagentsExtension } = await importSource("extensions/mmr-subagents/index.ts");
+      const { pi, tools } = createMockPi({ activeTools: ["read"], allTools: ["read"] });
+      createMmrSubagentsExtension({ customSubagents: { cwd: root, homeDir: path.join(root, "home") } })(pi);
+      assert.ok(!tools.has("sa__manual_drop"), "a manual drop-in is a candidate, not a registered tool");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { runMmrWebConfigFlow } from "../mmr-web/config-flow.js";
+import { runMmrSubagentsConfigFlow } from "../mmr-subagents/config-flow.js";
 import { getProjectMmrSettingsPath, writeMmrCoreConfigFile, type MmrConfigUpdate } from "./config-writer.js";
 import { MMR_MODE_KEYS, getMmrMode, isMmrModeKey } from "./modes.js";
 import { isThinkingLevel } from "./settings.js";
@@ -23,6 +24,8 @@ export interface MmrCoreConfigFlowBindings {
   getConfiguredSubagentModelPreferences(): Record<string, MmrModelPreference[]>;
   setConfiguredModePreferences(mode: MmrModeKey, preferences: MmrModelPreference[] | undefined): void;
   setConfiguredSubagentPreferences(profile: string, preferences: MmrModelPreference[] | undefined): void;
+  /** Registered Pi tool names, forwarded to the subagent setup/import wizard. */
+  getAvailableTools?(): readonly string[];
 }
 
 function describeConfiguredPreferences(
@@ -108,11 +111,21 @@ export async function runMmrConfigFlow(
     return;
   }
 
-  const targetChoice = await ctx.ui.select("MMR config: what do you want to set?", ["mode", "subagent", "web"]);
+  const targetChoice = await ctx.ui.select("MMR config: what do you want to set?", [
+    "mode",
+    "subagent",
+    "subagent (setup/import custom)",
+    "web",
+  ]);
   if (!targetChoice) return;
 
   if (targetChoice === "web") {
     await runMmrWebConfigFlow(ctx);
+    return;
+  }
+
+  if (targetChoice === "subagent (setup/import custom)") {
+    await runMmrSubagentsConfigFlow(ctx, bindings.getAvailableTools ? { getAvailableTools: bindings.getAvailableTools } : {});
     return;
   }
 

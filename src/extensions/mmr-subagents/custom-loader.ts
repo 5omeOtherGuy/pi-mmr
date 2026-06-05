@@ -206,7 +206,11 @@ export const MMR_CUSTOM_SUBAGENT_DENIED_TOOLS: ReadonlySet<string> = new Set([
   "read_mcp_resource",
 ]);
 
-const MMR_CUSTOM_SUBAGENT_TOOL_ALIASES: ReadonlyMap<string, string> = new Map([
+/**
+ * Claude Code tool aliases mapped to the matching Pi tool name. Exported so
+ * the import planner can report which source tokens were rewritten.
+ */
+export const MMR_CUSTOM_SUBAGENT_TOOL_ALIASES: ReadonlyMap<string, string> = new Map([
   ["Read", "read"],
   ["Grep", "grep"],
   ["Glob", "find"],
@@ -252,6 +256,18 @@ export const MMR_CUSTOM_SUBAGENT_DEFAULT_TOOLS: readonly string[] = [
   "grep",
   "web_search",
   "read_web_page",
+];
+
+/**
+ * Least-privilege read-only toolset recommended by the setup/import flow when
+ * a source subagent declares no tools (or declared "all tools"). The importer
+ * recommends these rather than the broader standard default so a freshly
+ * imported subagent starts with the smallest useful surface.
+ */
+export const MMR_CUSTOM_SUBAGENT_RECOMMENDED_READONLY_TOOLS: readonly string[] = [
+  "read",
+  "find",
+  "grep",
 ];
 
 /** Frontmatter keys that declare a custom subagent's thinking/effort level. */

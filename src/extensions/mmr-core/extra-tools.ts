@@ -26,6 +26,28 @@ import type { MmrCoreSettings, MmrLockedModeKey, MmrToolDecision, MmrToolResolut
 export const USER_ALLOWLIST_OWNER = "user-allowlist";
 
 /**
+ * Reserved tool-name prefix for managed custom Markdown subagents. These tools
+ * are exposed to locked modes *exclusively* through the scoped mode-extra-tool
+ * provider (which enforces each subagent's per-mode/per-project record scope).
+ * They must never be enabled through the user-controlled
+ * `mmrCore.lockedModeExtraTools` setting, which has no mode/project scope of
+ * its own — allowing it would let a global `sa__*` entry leak a subagent into
+ * a mode/project its record does not permit.
+ */
+export const MMR_RESERVED_SUBAGENT_TOOL_PREFIX = "sa__";
+
+/**
+ * Drop any reserved `sa__*` names from a user-controlled extra-tool list. The
+ * `mmrCore.lockedModeExtraTools` setting has no per-mode/per-project scope of
+ * its own, so it must never be a second path to enable a managed custom
+ * subagent; those are exposed only through the scope-aware mode-extra-tool
+ * provider.
+ */
+export function excludeReservedSubagentNames(names: readonly string[]): string[] {
+  return names.filter((name) => !name.startsWith(MMR_RESERVED_SUBAGENT_TOOL_PREFIX));
+}
+
+/**
  * Compute the ordered, deduped extra tool names for a locked mode.
  *
  * Combines the `all` bucket with the per-mode bucket and drops any name that

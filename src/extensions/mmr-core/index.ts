@@ -37,13 +37,14 @@ import {
   isMmrManagedModelUpdateActive,
   isToolAllowed,
   resolveMmrFeatureGates,
+  resolveMmrModeExtraTools,
   resolveMmrTools,
   setMmrModeState,
   setMmrSessionIdentity,
   setMmrSubagentState,
 } from "./runtime.js";
 import { applyMmrSubagentProfile } from "./subagent-activation.js";
-import { mergeToolResolutions, relabelExtraOwners, selectExtraToolNames } from "./extra-tools.js";
+import { excludeReservedSubagentNames, mergeToolResolutions, relabelExtraOwners, selectExtraToolNames } from "./extra-tools.js";
 import { resolveMmrTools as resolveMmrToolNames } from "./tool-registry.js";
 import { loadMmrCoreSettings } from "./settings.js";
 import { createMmrModeState, findLatestPersistedModeState, MMR_MODE_STATE_ENTRY, toPersistedModeState } from "./state.js";
@@ -314,11 +315,27 @@ export default function mmrCoreExtension(pi: ExtensionAPI): void {
       updateMmrStatus(ctx, previousState);
       return previousState;
     }
-    const extraToolNames = selectExtraToolNames(
+    const settingsExtraNames = excludeReservedSubagentNames(selectExtraToolNames(
       mode.key as MmrLockedModeKey,
       configuredLockedModeExtraTools,
       mode.tools,
-    );
+    ));
+    // Provider-contributed extras (e.g. mmr-subagents enabled custom `sa__*`
+    // subagents scoped to this mode + project). Merged through the same
+    // additive, fail-closed path as settings extras: they never satisfy the
+    // zero-active-tools activation check and a missing name is a no-op. The
+    // reserved `sa__*` namespace is filtered out of the user-controlled
+    // settings extras above so a custom subagent can only ever enter a mode
+    // through this scope-aware provider.
+    const providerExtraNames = resolveMmrModeExtraTools(mode.key as MmrLockedModeKey, ctx.cwd);
+    const baseToolSet = new Set(mode.tools);
+    const seenExtra = new Set<string>();
+    const extraToolNames: string[] = [];
+    for (const name of [...settingsExtraNames, ...providerExtraNames]) {
+      if (baseToolSet.has(name) || seenExtra.has(name)) continue;
+      seenExtra.add(name);
+      extraToolNames.push(name);
+    }
     const toolResolution = extraToolNames.length > 0
       ? mergeToolResolutions(baseResolution, relabelExtraOwners(resolveMmrToolNames(extraToolNames, availableTools)))
       : baseResolution;
@@ -597,6 +614,7 @@ export default function mmrCoreExtension(pi: ExtensionAPI): void {
           if (preferences) configuredSubagentModelPreferences[profile] = preferences;
           else delete configuredSubagentModelPreferences[profile];
         },
+        getAvailableTools: () => pi.getAllTools().map((tool) => tool.name),
       });
     },
   });

@@ -83,6 +83,27 @@ export interface MmrToolProvider {
   resolve(toolName: string): MmrToolRule | undefined;
 }
 
+/**
+ * Provider that contributes additional concrete Pi tool names to a locked
+ * mode's allowlist at activation time. Extensions register one to expose
+ * their own dynamically-discovered tools (e.g. mmr-subagents custom `sa__*`
+ * subagents) in selected modes without hardcoding them in `modes.ts`.
+ *
+ * Contributed names are merged through the same additive, exact-name,
+ * fail-closed path as `lockedModeExtraTools`: they never satisfy the
+ * zero-active-tools activation check and a missing/unregistered name is a
+ * non-fatal no-op surfaced in diagnostics.
+ */
+export interface MmrModeExtraToolProvider {
+  /** Provider identifier for diagnostics. */
+  name: string;
+  /**
+   * Return extra concrete Pi tool names for the given locked mode and project
+   * cwd. Called at every locked-mode activation; must be cheap and pure.
+   */
+  getExtraTools(args: { modeKey: MmrLockedModeKey; cwd: string }): readonly string[];
+}
+
 export interface MmrToolDecision {
   /** Canonical tool name as requested by the mode. */
   requested: string;
