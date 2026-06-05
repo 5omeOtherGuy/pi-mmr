@@ -70,6 +70,7 @@ edit:
 - `edits[].oldText` MUST exist in the file. Use read to understand the files you are editing before changing them.
 - `edits[].oldText` and `edits[].newText` MUST be different from each other.
 - `edits[].oldText` MUST be unique within the file or the edit will fail. Additional lines of context can be added to make the string more unique.
+- Each `edits[]` item has exactly two keys, `oldText` and `newText`. The schema rejects unknown keys, so never add annotation/comment keys (`newText_comment`, `_unused`, `_x`) or numbered variants (`oldText2`); use separate `edits[]` items instead.
 - If an edit call fails before applying changes with empty arguments or missing required fields, do not retry the identical call; re-read the file, rebuild the input, or switch tools.
 - Prefer write or bash heredoc for large, whole-file, or escape-dense replacements; reserve edit for small targeted replacements.
 - If you need to replace the entire contents of a file, use write instead, since it requires fewer tokens for the same action.

@@ -91,6 +91,22 @@ describe("built-in tool guidance: module", () => {
     assert.match(block, /Prefer write or bash heredoc for large, whole-file, or escape-dense replacements/);
   });
 
+  it("warns that each edit item carries exactly oldText and newText with no extra keys", async () => {
+    const { buildBuiltinToolGuidance } = await importSource("extensions/mmr-core/builtin-tool-guidance.ts");
+    const block = buildBuiltinToolGuidance(["edit"]);
+    assert.ok(block);
+    // Positive shape: exactly two keys per item.
+    assert.match(block, /exactly two keys/);
+    // Negative examples for the annotation/suffix keys the model has emitted.
+    assert.match(block, /newText_comment/);
+    assert.match(block, /oldText2/);
+    // The consequence must be stated so the model self-corrects instead of repeating.
+    assert.match(block, /rejects unknown keys/);
+    // Stay Pi-native: the canonical key names must still be the only real parameters named.
+    assert.equal(block.includes("old_str"), false);
+    assert.equal(block.includes("new_str"), false);
+  });
+
   it("does not require absolute paths (Pi allows relative paths)", async () => {
     const { buildBuiltinToolGuidance } = await importSource("extensions/mmr-core/builtin-tool-guidance.ts");
     const block = buildBuiltinToolGuidance(["read", "write", "edit"]);
