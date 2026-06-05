@@ -58,11 +58,11 @@ function assertNoRepeatedLongSystemPromptLines(name, rendered) {
   assert.deepEqual(duplicates, [], `${name}: subagent system prompt must not duplicate long instruction lines`);
 }
 
-function makePiToolManifestEntry(name, description, schema) {
+function makePiToolManifestEntry(name, description, schema, promptGuidelines = []) {
   return {
     name,
     owner: "pi",
-    promptGuidelines: [],
+    promptGuidelines: [...promptGuidelines],
     description,
     schema,
   };
@@ -174,56 +174,106 @@ function buildLibrarianActiveManifest() {
   ];
 }
 
+// Representative built-in `promptGuidelines` mirroring Pi's per-tool strings
+// (copied from tests/fixtures/mmr-core-prompts/base.md `Guidelines:`). At
+// runtime these come from Pi's `getAllTools()` via `buildWorkerToolManifest`;
+// the fixture hand-builds synthetic entries, so without these the rebuilt
+// worker `Guidelines:` block would drop read/edit/write bullets and be
+// unrepresentative. Worker-only tools (web_search/read_web_page/finder/
+// task_list) carry short representative bullets the parent prompt lacks.
 function buildTaskActiveManifest() {
   return [
-    makePiToolManifestEntry("read", "Read file contents.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { path: { type: "string" } },
-      required: ["path"],
-    }),
+    makePiToolManifestEntry(
+      "read",
+      "Read file contents.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+      [
+        "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)",
+        "Use read to examine files instead of cat or sed.",
+      ],
+    ),
     makePiToolManifestEntry("bash", "Run shell commands.", {
       type: "object",
       additionalProperties: false,
       properties: { command: { type: "string" } },
       required: ["command"],
     }),
-    makePiToolManifestEntry("edit", "Edit existing files.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { path: { type: "string" }, oldText: { type: "string" }, newText: { type: "string" } },
-      required: ["path", "oldText", "newText"],
-    }),
-    makePiToolManifestEntry("write", "Create or overwrite files.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { path: { type: "string" }, content: { type: "string" } },
-      required: ["path", "content"],
-    }),
-    makePiToolManifestEntry("web_search", "Search the web for a topic.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { objective: { type: "string" } },
-      required: ["objective"],
-    }),
-    makePiToolManifestEntry("read_web_page", "Fetch and convert a web page to Markdown.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { url: { type: "string" } },
-      required: ["url"],
-    }),
-    makePiToolManifestEntry("finder", "Search code by behavior or concept.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { query: { type: "string" } },
-      required: ["query"],
-    }),
-    makePiToolManifestEntry("task_list", "Manage the session-local todo list.", {
-      type: "object",
-      additionalProperties: false,
-      properties: { tasks: { type: "array" } },
-      required: ["tasks"],
-    }),
+    makePiToolManifestEntry(
+      "edit",
+      "Edit existing files.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { path: { type: "string" }, oldText: { type: "string" }, newText: { type: "string" } },
+        required: ["path", "oldText", "newText"],
+      },
+      [
+        "Use edit for precise changes (edits[].oldText must match exactly)",
+        "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+        "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+        "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+      ],
+    ),
+    makePiToolManifestEntry(
+      "write",
+      "Create or overwrite files.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { path: { type: "string" }, content: { type: "string" } },
+        required: ["path", "content"],
+      },
+      ["Use write only for new files or complete rewrites."],
+    ),
+    makePiToolManifestEntry(
+      "web_search",
+      "Search the web for a topic.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { objective: { type: "string" } },
+        required: ["objective"],
+      },
+      ["Use web_search only for public, non-sensitive research; never include secrets or private data in queries."],
+    ),
+    makePiToolManifestEntry(
+      "read_web_page",
+      "Fetch and convert a web page to Markdown.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { url: { type: "string" } },
+        required: ["url"],
+      },
+      ["Use read_web_page only for public http(s) URLs; pass forceRefetch when the latest contents are required."],
+    ),
+    makePiToolManifestEntry(
+      "finder",
+      "Search code by behavior or concept.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      ["Use finder for multi-step, concept-level code search instead of chaining greps."],
+    ),
+    makePiToolManifestEntry(
+      "task_list",
+      "Manage the session-local todo list.",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { tasks: { type: "array" } },
+        required: ["tasks"],
+      },
+      ["Submit the full task_list every call (whole-list replacement); keep at most one item in_progress."],
+    ),
     // Deliberately include recursive/advisory tools the Task profile
     // does NOT allow so the fixture pins deny-list filtering.
     makePiToolManifestEntry("Task", "Spawn another worker.", {

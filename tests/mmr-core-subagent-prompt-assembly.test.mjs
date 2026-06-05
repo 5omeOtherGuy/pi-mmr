@@ -118,6 +118,18 @@ function makeFinderManifest() {
   ];
 }
 
+// Slice the rebuilt worker `Guidelines:` block out of an assembled prompt and
+// return its bullet texts (between `Guidelines:\n` and the next blank line).
+function sliceGuidelineBullets(systemPrompt) {
+  const header = "Guidelines:\n";
+  const start = systemPrompt.indexOf(header);
+  assert.notEqual(start, -1, "expected a Guidelines block in the assembled prompt");
+  const bodyStart = start + header.length;
+  const end = systemPrompt.indexOf("\n\n", bodyStart);
+  const body = systemPrompt.slice(bodyStart, end === -1 ? undefined : end);
+  return [...body.matchAll(/^- (.+)$/gm)].map((m) => m[1]);
+}
+
 function replaceAvailableToolsBlock(basePrompt, toolLines) {
   const replacement = [
     "Available tools:",
@@ -611,6 +623,113 @@ describe("assembleMmrSubagentSurface() mode-derived route", () => {
     const activeToolsBlock = result.blocks.find((block) => block.kind === "active-tools");
     assert.ok(activeToolsBlock, "mode-derived surfaces must keep an active-tools block");
     assert.match(activeToolsBlock.text, /Available tools:\n\(none\)\n/);
+  });
+
+  it("rebuilds the worker Guidelines block from the worker manifest, dropping parent-only tool guidance", () => {
+    registerMmrSubagentPromptBuilder("task", () => "## Worker Role\n");
+    // Parent BASE_PROMPT lists read/bash/edit/write/grep/find guidance, but
+    // this worker resolves only `read`. The rebuilt block must contain read's
+    // own bullets plus the two always-on constants, and none of the
+    // parent-only edit/write/grep/find guidance.
+    const result = assembleMmrSubagentSurface({
+      profile: makeTaskProfile(),
+      baseSystemPrompt: BASE_PROMPT,
+      activeToolManifest: [
+        {
+          name: "read",
+          owner: "pi",
+          promptGuidelines: ["Use read to examine files instead of cat or sed."],
+          description: "Read file contents.",
+          schema: {},
+        },
+      ],
+      cwd: "/abs/repo",
+    });
+    const bullets = sliceGuidelineBullets(result.systemPrompt);
+    assert.deepEqual(bullets, [
+      "Use read to examine files instead of cat or sed.",
+      "Be concise in your responses",
+      "Show file paths clearly when working with files",
+    ]);
+    // Parent-only guidance must not leak.
+    assert.doesNotMatch(result.systemPrompt.slice(0, result.systemPrompt.indexOf("Pi documentation")), /edits\[\]\.oldText/);
+    assert.ok(!bullets.includes("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)"));
+  });
+
+  it("emits the conditional bash-exploration guideline when the worker has bash but no grep/find/ls", () => {
+    registerMmrSubagentPromptBuilder("task", () => "## Worker Role\n");
+    const result = assembleMmrSubagentSurface({
+      profile: makeTaskProfile(),
+      baseSystemPrompt: BASE_PROMPT,
+      activeToolManifest: [
+        { name: "bash", owner: "pi", promptGuidelines: [], description: "Run shell commands.", schema: {} },
+      ],
+      cwd: "/abs/repo",
+    });
+    const bullets = sliceGuidelineBullets(result.systemPrompt);
+    assert.ok(bullets.includes("Use bash for file operations like ls, rg, find"));
+    // It comes first (Pi prepends it before the per-tool loop).
+    assert.equal(bullets[0], "Use bash for file operations like ls, rg, find");
+  });
+
+  it("omits the conditional bash-exploration guideline when the worker also has grep/find/ls", () => {
+    registerMmrSubagentPromptBuilder("task", () => "## Worker Role\n");
+    const result = assembleMmrSubagentSurface({
+      profile: makeTaskProfile(),
+      baseSystemPrompt: BASE_PROMPT,
+      activeToolManifest: [
+        { name: "bash", owner: "pi", promptGuidelines: [], description: "Run shell commands.", schema: {} },
+        { name: "grep", owner: "pi", promptGuidelines: [], description: "Search file contents.", schema: {} },
+      ],
+      cwd: "/abs/repo",
+    });
+    const bullets = sliceGuidelineBullets(result.systemPrompt);
+    assert.ok(!bullets.includes("Use bash for file operations like ls, rg, find"));
+  });
+
+  it("keeps the always-on guidelines exactly once even when a tool already lists one", () => {
+    registerMmrSubagentPromptBuilder("task", () => "## Worker Role\n");
+    const result = assembleMmrSubagentSurface({
+      profile: makeTaskProfile(),
+      baseSystemPrompt: BASE_PROMPT,
+      activeToolManifest: [
+        {
+          name: "read",
+          owner: "pi",
+          promptGuidelines: ["Be concise in your responses", "Use read to examine files instead of cat or sed."],
+          description: "Read file contents.",
+          schema: {},
+        },
+      ],
+      cwd: "/abs/repo",
+    });
+    const bullets = sliceGuidelineBullets(result.systemPrompt);
+    assert.equal(bullets.filter((b) => b === "Be concise in your responses").length, 1);
+    assert.equal(bullets.filter((b) => b === "Show file paths clearly when working with files").length, 1);
+    // The deduped always-on bullet keeps its first-occurrence position.
+    assert.deepEqual(bullets, [
+      "Be concise in your responses",
+      "Use read to examine files instead of cat or sed.",
+      "Show file paths clearly when working with files",
+    ]);
+  });
+
+  it("marks the rebuilt active-guidelines block as mmr-core and preserves byte-for-byte flatten", () => {
+    registerMmrSubagentPromptBuilder("task", () => "## Worker Role\n");
+    const result = assembleMmrSubagentSurface({
+      profile: makeTaskProfile(),
+      baseSystemPrompt: BASE_PROMPT,
+      activeToolManifest: [
+        { name: "read", owner: "pi", promptGuidelines: ["Use read to examine files instead of cat or sed."], description: "Read file contents.", schema: {} },
+      ],
+      cwd: "/abs/repo",
+    });
+    const guidelinesBlock = result.blocks.find((block) => block.kind === "active-guidelines");
+    assert.ok(guidelinesBlock, "mode-derived surfaces must keep an active-guidelines block");
+    assert.equal(guidelinesBlock.source, "mmr-core");
+    assert.ok(guidelinesBlock.text.startsWith("Guidelines:\n"));
+    assert.ok(guidelinesBlock.text.endsWith("\n\n"));
+    assert.equal(result.systemPrompt, result.blocks.map((block) => block.text).join(""));
   });
 
   it("returns mode-derived results deterministically across runs", () => {
