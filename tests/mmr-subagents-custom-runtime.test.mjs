@@ -199,9 +199,8 @@ describe("mmr-subagents custom Markdown runtime", () => {
     assert.deepEqual(runCalls[0].tools, ["read", "bash"], "no tools field defaults to the standard toolset, intersected with active tools");
     assert.deepEqual(result.details.workerTools, ["read", "bash"]);
     assert.ok(typeof result.details.fallbackNotice === "string" && result.details.fallbackNotice.includes("standard toolset"));
-    assert.match(result.content[0].text, /defaulting to the standard toolset/);
-    assert.match(result.content[0].text, /No model selected/);
-    assert.ok(result.content[0].text.includes("custom answer"), "the worker output is preserved after the notice");
+    assert.match(result.details.fallbackNotice, /No model selected/);
+    assert.equal(result.content[0].text, "custom answer", "the fallback notice is details/render-only and never injected into model-consumed content");
   });
 
   it("builds a fallback notice covering model, thinking, and tools states", async () => {

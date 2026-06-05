@@ -43,10 +43,11 @@ export interface MmrCustomSubagentDefinition {
   toolPatterns: readonly string[];
   /**
    * Whether the Markdown frontmatter declared a tools key at all
-   * (`tools`, `allowed-tools`, or `allowedTools`). pi-mmr defaults a
-   * custom subagent to NO tools when none are declared (least
-   * privilege); this flag lets the runtime tell "no tools field" apart
-   * from "explicitly empty tools list" when it surfaces the no-tools
+   * (`tools`, `allowed-tools`, or `allowedTools`). When no tools key is
+   * present the runtime grants the standard default toolset
+   * (`MMR_CUSTOM_SUBAGENT_DEFAULT_TOOLS`); an explicitly empty list runs
+   * with no tools. This flag lets the runtime tell "no tools field" apart
+   * from "explicitly empty tools list" when it surfaces the fallback
    * notice to the user.
    */
   toolsDeclared: boolean;

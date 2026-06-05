@@ -28,8 +28,16 @@ export function buildMmrWorkerArgs(
   if (parentMode) args.push("--mmr-parent-mode", parentMode);
   const model = options.model?.trim();
   if (model) args.push("--model", model);
-  const tools = [...(options.tools ?? [])].map((tool) => tool.trim()).filter(Boolean);
-  if (tools.length > 0) args.push("--tools", tools.join(","));
+  // Emit `--tools` whenever the caller supplied a tools array, including an
+  // empty one: `--tools ""` is the documented contract (see
+  // worker-cli-flags.ts) for "the runner explicitly asked for no tools", so
+  // the child applies an empty ceiling instead of falling back to its own
+  // profile-resolved set. Callers that want the child to self-resolve (e.g.
+  // finder/oracle) omit `tools` entirely (undefined) rather than passing [].
+  if (options.tools !== undefined) {
+    const tools = options.tools.map((tool) => tool.trim()).filter(Boolean);
+    args.push("--tools", tools.join(","));
+  }
   if (promptFilePath) {
     if (options.systemPromptDelivery === "replace") {
       // Exact replacement: Pi loads the file as `customPrompt`, so its

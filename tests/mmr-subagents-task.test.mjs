@@ -1044,4 +1044,23 @@ describe("Task tool", () => {
       "--tools must list workerTools verbatim",
     );
   });
+
+  it("serializes an empty tools array as an explicit `--tools \"\"` ceiling, but omits the flag when tools is undefined", async () => {
+    const { buildMmrWorkerArgs } = await importSource("extensions/mmr-subagents/runner.ts");
+
+    // Empty array: the runner explicitly asked for no tools, so the child
+    // must receive `--tools ""` (an empty ceiling) instead of falling back to
+    // its own profile-resolved set. This closes a least-privilege gap where a
+    // parent-reduced-to-empty tool set would otherwise let the child
+    // self-resolve a broader set.
+    const emptyArgs = buildMmrWorkerArgs({ profileName: "sa__x", prompt: "p", tools: [] });
+    const emptyIndex = emptyArgs.indexOf("--tools");
+    assert.notEqual(emptyIndex, -1, "empty tools array must still emit --tools");
+    assert.equal(emptyArgs[emptyIndex + 1], "", "empty tools array serializes as --tools \"\"");
+
+    // Undefined: caller (e.g. finder/oracle) wants the child to self-resolve;
+    // no --tools flag is emitted.
+    const undefinedArgs = buildMmrWorkerArgs({ profileName: "finder", prompt: "p" });
+    assert.equal(undefinedArgs.includes("--tools"), false, "omitted tools must not emit --tools");
+  });
 });

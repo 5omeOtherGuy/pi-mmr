@@ -103,6 +103,13 @@ interface SubagentProgressDetails {
    * oracle / history-reader today) keep the legacy raw-field path.
    */
   status?: string;
+  /**
+   * User-facing advisory shown only in the rendered result (never placed
+   * in the model-consumed `content`). Custom Markdown subagents set this
+   * when they relied on a fallback for `model`, thinking level, or
+   * `tools`. Other subagents leave it unset.
+   */
+  fallbackNotice?: string;
 }
 
 interface SubagentTheme {
@@ -590,6 +597,13 @@ function addTaskBox(
   const hasDiagnostic = addDiagnostic(box, diagnosticMessage(details, status), status, theme);
   container.addChild(box);
   return hasOperation || hasDiagnostic;
+}
+
+function addFallbackNoticeBlock(container: Container, notice: string | undefined, theme: SubagentTheme): boolean {
+  const body = notice?.trim();
+  if (!body) return false;
+  container.addChild(new Spacer(1));
+  return addMarkdownBlock(container, body, theme, { color: "warning", paddingX: 1 });
 }
 
 function addFinalOutputBox(container: Container, output: string, theme: SubagentTheme): boolean {
@@ -1138,6 +1152,7 @@ export function renderMmrSubagentResult(
   markResultRendered(context);
 
   const hasTaskBody = addTaskBox(container, toolName, details, operation, expanded, status, theme);
+  addFallbackNoticeBlock(container, details?.fallbackNotice, theme);
 
   if (!expanded) {
     if (!isPartial && output) {

@@ -233,10 +233,6 @@ export function buildMmrCustomSubagentFallbackNotice(
   return `Note (${definition.name}):\n${body}\nRecommend setting ${formatHumanList(recommend)} in ${file} for predictable subagent behavior.`;
 }
 
-function prependNotice(notice: string | undefined, text: string): string {
-  return notice ? `${notice}\n\n${text}` : text;
-}
-
 function buildProgressContent(snapshot: MmrWorkerProgressSnapshot, definition: MmrCustomSubagentDefinition): string {
   return progressTextOrPlaceholder(snapshot, `${definition.name}: worker running…`);
 }
@@ -244,18 +240,16 @@ function buildProgressContent(snapshot: MmrWorkerProgressSnapshot, definition: M
 function buildFinalContent(
   result: MmrWorkerResult,
   definition: MmrCustomSubagentDefinition,
-  workerTools: readonly string[],
 ): string {
-  const notice = buildMmrCustomSubagentFallbackNotice(definition, workerTools);
+  // The fallback notice is intentionally NOT prepended here: it is a
+  // user-facing advisory surfaced only via `details.fallbackNotice` and the
+  // result renderer, so it never enters the model-consumed content.
   const status = classifyMmrWorkerOutcome(result, { partialOutputPolicy: "fail-on-nonzero" });
   const text = result.truncatedFinalOutput || result.finalOutput;
   if (status === "success") {
-    return prependNotice(notice, text.trim().length > 0 ? text : `${definition.name}: completed with no output.`);
+    return text.trim().length > 0 ? text : `${definition.name}: completed with no output.`;
   }
-  return prependNotice(
-    notice,
-    `${definition.name}: worker failed (${status}).${result.errorMessage ? ` ${result.errorMessage}` : ""}${text ? `\n\n${text}` : ""}`,
-  );
+  return `${definition.name}: worker failed (${status}).${result.errorMessage ? ` ${result.errorMessage}` : ""}${text ? `\n\n${text}` : ""}`;
 }
 
 function buildProgressDetails(
@@ -439,7 +433,7 @@ export function createMmrCustomSubagentTool(
           : undefined,
       });
       return {
-        content: [{ type: "text", text: buildFinalContent(result, definition, workerTools) }],
+        content: [{ type: "text", text: buildFinalContent(result, definition) }],
         details: buildFinalDetails(result, definition, { cwd, workerTools, model: modelArg, contextWindow, prompt: parsed.value.task }),
       };
     },

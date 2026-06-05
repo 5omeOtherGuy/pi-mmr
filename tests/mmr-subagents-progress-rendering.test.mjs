@@ -258,6 +258,29 @@ describe("renderMmrSubagentResult", () => {
     assert.doesNotMatch(rendered, /partial worker output/);
   });
 
+  it("surfaces details.fallbackNotice in the rendered result alongside the worker output", async () => {
+    const { renderMmrSubagentResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const component = renderMmrSubagentResult(
+      "sa__prompt_only",
+      makeResult({
+        content: [{ type: "text", text: "worker answer body" }],
+        details: {
+          reportedModel: "openai-codex/gpt-5.4-mini",
+          exitCode: 0,
+          signal: null,
+          stopReason: "end_turn",
+          fallbackNotice:
+            "Note (Prompt Only):\n- No tools selected \u2014 defaulting to the standard toolset (read, bash, edit, write, find, grep, web).\nRecommend setting `tools` in prompt-only.md for predictable subagent behavior.",
+        },
+      }),
+      { expanded: false, isPartial: false },
+      fakeTheme,
+    );
+    const rendered = normalize(renderText(component));
+    assert.match(rendered, /defaulting to the standard toolset/);
+    assert.match(rendered, /worker answer body/, "the worker output still renders");
+  });
+
   it("keeps collapsed completed results to one header plus the worker objective", async () => {
     const { renderMmrSubagentResult } = await importSource(PROGRESS_RENDERING_MODULE);
     const query = "Find where pi-mmr handles subagent invocation behavior in the repository.\nSearch under src and tests for Task-like worker calls.";
