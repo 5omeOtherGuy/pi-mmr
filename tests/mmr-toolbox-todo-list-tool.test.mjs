@@ -300,9 +300,9 @@ describe("mmr-toolbox task_list — schema (session-local todo)", () => {
     const result = await callTaskList(tool, { tasks }, ctx);
 
     assert.notEqual(result?.isError, true);
-    assert.match(result.content[0].text, /^◐ Implementing feature$/m);
-    assert.match(result.content[0].text, /^  ├─ ○ Add tests$/m);
-    assert.match(result.content[0].text, /^  └─ ◐ Running checks$/m);
+    assert.match(result.content[0].text, /^⠋ Implementing feature$/m);
+    assert.match(result.content[0].text, /^  ├─ – Add tests$/m);
+    assert.match(result.content[0].text, /^  └─ ⠋ Running checks$/m);
     assert.deepEqual(result.details.newTasks, tasks);
   });
 });
@@ -460,13 +460,13 @@ describe("mmr-toolbox task_list — persistence as mmr-toolbox.todo-state Custom
     const text = result?.content?.[0]?.text ?? "";
     assert.match(text, /1 item\(s\):/,
       "current submitted list should still be visible first");
-    assert.match(text, /○ Gamma/,
+    assert.match(text, /– Gamma/,
       "current submitted item should be visible");
     assert.match(text, /Previous list \(2 item\(s\)\):/,
       "visible output should expose details.oldTasks, not only bury it in details");
-    assert.match(text, /◐ Doing alpha/,
+    assert.match(text, /⠋ Doing alpha/,
       "previous in-progress item should use its activeForm in the visible summary");
-    assert.match(text, /○ Beta/,
+    assert.match(text, /– Beta/,
       "previous pending item should be included in the visible summary");
   });
 
@@ -826,6 +826,193 @@ describe("mmr-toolbox task_list — widget render truncates to TUI width", () =>
       `Infinite width must preserve untrimmed content; got ${JSON.stringify(linesInfinite)}`);
     assert.ok(linesNaN.some((l) => l.includes("Short")),
       `NaN width must preserve untrimmed content; got ${JSON.stringify(linesNaN)}`);
+  });
+});
+
+describe("mmr-toolbox task_list — widget animates in_progress rows", () => {
+  // The pinned widget mirrors Pi's native working indicator: in_progress rows
+  // cycle the braille loader frames via a self-owned interval that calls
+  // tui.requestRender(), and dispose() must clear it.
+
+  function makeAnimCtx(session) {
+    const widgetCalls = [];
+    const ctx = makeCtx(session, {
+      hasUI: true,
+      ui: {
+        notify() {},
+        setWidget(id, factoryOrLines) {
+          widgetCalls.push({ id, factory: factoryOrLines });
+        },
+        theme: { fg: (_n, v) => v, bold: (v) => v },
+      },
+    });
+    return { ctx, widgetCalls };
+  }
+
+  it("renders Pi-native static glyphs for each status in the resting widget", async () => {
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const { ctx, widgetCalls } = makeAnimCtx(session);
+
+    await callTaskList(tool, {
+      tasks: [
+        { content: "Build", activeForm: "Building", status: "in_progress" },
+        { content: "Plan", activeForm: "Planning", status: "pending" },
+        { content: "Spec", activeForm: "Speccing", status: "completed" },
+      ],
+    }, ctx);
+
+    // Passing no tui (legacy/test harness) must not schedule animation and
+    // falls back to the static first loader frame for in_progress.
+    const widget = widgetCalls.at(-1).factory(undefined, ctx.ui.theme);
+    const text = widget.render(80).join("\n");
+    assert.match(text, /⠋ Building/, "in_progress uses the loader glyph");
+    assert.match(text, /– Plan/, "pending uses the en-dash glyph");
+    assert.match(text, /✓ Spec/, "completed uses the check glyph");
+    assert.doesNotMatch(text, /[○◐●]/, "no legacy round glyphs remain");
+  });
+
+  it("advances loader frames on a timer and stops on dispose", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const { ctx, widgetCalls } = makeAnimCtx(session);
+
+    await callTaskList(tool, {
+      tasks: [{ content: "Build", activeForm: "Building", status: "in_progress" }],
+    }, ctx);
+
+    let renders = 0;
+    const tui = { requestRender() { renders += 1; } };
+    const widget = widgetCalls.at(-1).factory(tui, ctx.ui.theme);
+
+    const frame0 = widget.render(80).join("\n");
+    t.mock.timers.tick(80);
+    assert.equal(renders, 1, "each loader tick must request a re-render");
+    const frame1 = widget.render(80).join("\n");
+    assert.notEqual(frame0, frame1, "the animated glyph must change between frames");
+
+    widget.dispose();
+    t.mock.timers.tick(400);
+    assert.equal(renders, 1, "dispose must clear the animation timer");
+  });
+
+  it("does not schedule re-renders when no row is in_progress", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const { ctx, widgetCalls } = makeAnimCtx(session);
+
+    await callTaskList(tool, {
+      tasks: [{ content: "Plan", activeForm: "Planning", status: "pending" }],
+    }, ctx);
+
+    let renders = 0;
+    const widget = widgetCalls.at(-1).factory({ requestRender() { renders += 1; } }, ctx.ui.theme);
+    t.mock.timers.tick(800);
+    assert.equal(renders, 0, "a resting list must not animate");
+    widget.dispose();
+  });
+
+  it("wraps only the status glyph in its color via the recolor path (real ANSI)", async () => {
+    // A real SGR theme (fakeTheme returns text unchanged) so we can assert
+    // exactly which span carries the color after the `.replace(glyph, ...)`.
+    const ANSI_FG = { warning: "33", muted: "90", accent: "36", success: "32", error: "31", dim: "2" };
+    const ansiTheme = {
+      fg(color, text) { return `\u001b[${ANSI_FG[color] ?? "39"}m${text}\u001b[39m`; },
+      bold(text) { return `\u001b[1m${text}\u001b[22m`; },
+    };
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const { ctx, widgetCalls } = makeAnimCtx(session);
+
+    await callTaskList(tool, {
+      tasks: [
+        { content: "Build", activeForm: "Building", status: "in_progress" },
+        { content: "Plan", activeForm: "Planning", status: "pending" },
+        { content: "Spec", activeForm: "Speccing", status: "completed" },
+      ],
+    }, ctx);
+
+    const widget = widgetCalls.at(-1).factory(undefined, ansiTheme);
+    const lines = widget.render(80);
+    const find = (needle) => lines.find((l) => l.includes(needle));
+
+    // in_progress: warning-wrapped glyph only; the label stays outside the span.
+    assert.equal(find("Building"), "\u001b[33m⠋\u001b[39m Building");
+    // pending: muted-wrapped glyph only.
+    assert.equal(find("Plan"), "\u001b[90m–\u001b[39m Plan");
+    // completed: entire row muted-wrapped (the ✓ glyph muted within it).
+    const done = find("Spec");
+    assert.ok(done.startsWith("\u001b[90m"), "completed row is muted-wrapped");
+    assert.match(done, /✓/);
+    // header: accent + bold.
+    assert.equal(lines[0], "\u001b[36m\u001b[1mTasks\u001b[22m\u001b[39m");
+  });
+
+  it("clears the previous widget's animation when Pi replaces it", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+
+    let renders = 0;
+    let disposed = 0;
+    let live;
+    const tui = { requestRender() { renders += 1; } };
+    const theme = { fg: (_n, v) => v, bold: (v) => v };
+    // Model Pi's setExtensionWidget contract: dispose the prior component
+    // before installing/clearing, and instantiate factories with the live tui.
+    const ctx = makeCtx(session, {
+      hasUI: true,
+      ui: {
+        notify() {},
+        theme,
+        setWidget(_id, value) {
+          if (live?.dispose) { live.dispose(); disposed += 1; }
+          live = typeof value === "function" ? value(tui, theme) : undefined;
+        },
+      },
+    });
+
+    await callTaskList(tool, {
+      tasks: [{ content: "Build", activeForm: "Building", status: "in_progress" }],
+    }, ctx);
+    t.mock.timers.tick(80);
+    assert.equal(renders, 1, "the first widget animates while in_progress");
+
+    // Replace with a resting list; Pi disposes the previous component.
+    await callTaskList(tool, {
+      tasks: [{ content: "Plan", activeForm: "Planning", status: "pending" }],
+    }, ctx);
+    assert.ok(disposed >= 1, "Pi disposes the previous component on replacement");
+
+    const before = renders;
+    t.mock.timers.tick(400);
+    assert.equal(renders, before, "the replaced widget's interval must be cleared");
+  });
+
+  it("does not animate when the only in_progress row is hidden beyond the row cap", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const { ctx, widgetCalls } = makeAnimCtx(session);
+
+    // 12 visible pending rows push the only in_progress row past the cap.
+    const tasks = [];
+    for (let i = 0; i < 12; i += 1) {
+      tasks.push({ content: `Pending ${i}`, activeForm: `Doing ${i}`, status: "pending" });
+    }
+    tasks.push({ content: "Hidden work", activeForm: "Hidden working", status: "in_progress" });
+
+    await callTaskList(tool, { tasks }, ctx);
+
+    let renders = 0;
+    const widget = widgetCalls.at(-1).factory({ requestRender() { renders += 1; } }, ctx.ui.theme);
+    const text = widget.render(80).join("\n");
+    assert.match(text, /… 1 more/, "the in_progress row is beyond the visible cap");
+    t.mock.timers.tick(800);
+    assert.equal(renders, 0, "a hidden in_progress row must not schedule animation");
+    widget.dispose();
   });
 });
 

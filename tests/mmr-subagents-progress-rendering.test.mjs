@@ -933,7 +933,8 @@ describe("background task rendering", () => {
     );
     const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder .* background running in background/);
+    assert.match(rendered, /finder .* background ⠋ running/);
+    assert.doesNotMatch(rendered, /in background/);
     assert.match(rendered, /Find async task rendering/);
     assert.doesNotMatch(rendered, /started background worker/);
   });
@@ -961,14 +962,139 @@ describe("background task rendering", () => {
     );
     const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder .* background completed/);
+    assert.match(rendered, /finder .* background ✓ completed/);
     assert.match(rendered, /Find async task rendering/);
     assert.match(rendered, /Final answer/);
     assert.doesNotMatch(rendered, /hidden trail/);
     assert.doesNotMatch(rendered, /task_poll: finder task/);
   });
 
-  it("renders the background-task board as plain text", async () => {
+  it("renders a cancelled background task distinctly from a failure", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      {
+        content: [{ type: "text", text: "task_poll: finder task task_1 cancelled." }],
+        details: {
+          worker: "mmr-subagents.async-task",
+          tool: "task_poll",
+          agent: "finder",
+          taskId: "task_1",
+          status: "cancelled",
+          description: "Find async task rendering",
+          errorMessage: "aborted by watchdog",
+        },
+      },
+      { expanded: true, isPartial: false },
+      fakeTheme,
+      makeContext({ task_id: "task_1" }),
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /finder .* background – cancelled/);
+    assert.doesNotMatch(rendered, /failed/i);
+    assert.doesNotMatch(
+      rendered,
+      /aborted by watchdog/,
+      "a neutral cancel must not surface an error diagnostic",
+    );
+  });
+
+  it("renders a no-id poll as a grouped board with native status glyphs", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      {
+        content: [{ type: "text", text: "task_poll: 1 active, 0 stalled, 1 finished." }],
+        details: {
+          worker: "mmr-subagents.async-task",
+          tool: "task_poll",
+          board: {
+            version: 1,
+            generatedAtMs: 0,
+            counts: { active: 1, stalled: 1, finished: 1 },
+            active: [{
+              taskId: "task_1",
+              status: "running",
+              freshness: "healthy",
+              agent: "finder",
+              description: "Search repo",
+              createdAtMs: 1,
+              startedAtMs: 1,
+              updatedAtMs: 1,
+              runtimeMs: 5,
+            }],
+            stalled: [{
+              taskId: "task_3",
+              status: "running",
+              freshness: "stalled",
+              agent: "Task",
+              description: "Slow build",
+              createdAtMs: 2,
+              startedAtMs: 2,
+              updatedAtMs: 2,
+              runtimeMs: 999,
+            }],
+            finished: [{
+              taskId: "task_2",
+              status: "succeeded",
+              freshness: "terminal",
+              agent: "oracle",
+              description: "Review design",
+              createdAtMs: 0,
+              startedAtMs: 0,
+              updatedAtMs: 0,
+              runtimeMs: 9,
+            }],
+          },
+        },
+      },
+      { expanded: true, isPartial: false },
+      fakeTheme,
+      makeContext({}),
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /background tasks ⠋ 1 active • 1 stalled • 1 finished/);
+    assert.match(rendered, /Active/);
+    assert.match(rendered, /⠋ task_1 finder .*Search repo/);
+    assert.match(rendered, /Stalled/);
+    assert.match(rendered, /⠋ task_3 Task .*\[stalled\]/);
+    assert.match(rendered, /Finished/);
+    assert.match(rendered, /✓ task_2 oracle .*Review design/);
+    assert.doesNotMatch(rendered, /running in background/);
+  });
+
+  it("falls back to text when a board entry is malformed", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      {
+        content: [{ type: "text", text: "task_poll: 1 active, 0 stalled, 0 finished." }],
+        details: {
+          worker: "mmr-subagents.async-task",
+          tool: "task_poll",
+          board: {
+            version: 1,
+            generatedAtMs: 0,
+            counts: { active: 1, stalled: 0, finished: 0 },
+            active: [{ taskId: "task_1" }],
+            stalled: [],
+            finished: [],
+          },
+        },
+      },
+      { expanded: true, isPartial: false },
+      fakeTheme,
+      makeContext({}),
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /task_poll: 1 active/);
+    assert.doesNotMatch(rendered, /Active\b/);
+  });
+
+  it("falls back to text when the board payload is malformed", async () => {
     const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
     const component = renderMmrBackgroundTaskResult(
       "task_poll",
