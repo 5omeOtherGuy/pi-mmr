@@ -608,13 +608,15 @@ function isAllCompleted(tasks: readonly TaskListItem[]): boolean {
   return tasks.length > 0 && tasks.every((t) => t.status === "completed");
 }
 
+const VERIFICATION_TASK_PATTERN = /verif|test|check|lint|typecheck|(?:run|npm run|pnpm run|yarn)\s+build|build\s+check/i;
+
 function taskLooksLikeVerification(task: TaskListItem): boolean {
-  if (/verif|test|check|build|lint|typecheck/i.test(task.content)) return true;
-  if (/verif|test|check|build|lint|typecheck/i.test(task.activeForm)) return true;
+  if (VERIFICATION_TASK_PATTERN.test(task.content)) return true;
+  if (VERIFICATION_TASK_PATTERN.test(task.activeForm)) return true;
   return (task.subtasks ?? []).some((subtask) =>
-    /verif|test|check|build|lint|typecheck/i.test(subtask.content)
+    VERIFICATION_TASK_PATTERN.test(subtask.content)
     || (subtask.activeForm !== undefined
-      && /verif|test|check|build|lint|typecheck/i.test(subtask.activeForm)),
+      && VERIFICATION_TASK_PATTERN.test(subtask.activeForm)),
   );
 }
 

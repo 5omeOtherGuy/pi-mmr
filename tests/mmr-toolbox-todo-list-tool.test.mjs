@@ -595,6 +595,38 @@ describe("mmr-toolbox task_list — persistence as mmr-toolbox.todo-state Custom
     assert.doesNotMatch(result?.content?.[0]?.text ?? "", /without an explicit verification\/check step/i);
   });
 
+  it("still nudges for verification when a completed 3+ item list only says to build a feature", async () => {
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const ctx = makeCtx(session);
+    const tasks = [
+      { content: "Build feature", activeForm: "Building feature", status: "completed" },
+      { content: "Update docs", activeForm: "Updating docs", status: "completed" },
+      { content: "Wire config", activeForm: "Wiring config", status: "completed" },
+    ];
+
+    const result = await callTaskList(tool, { tasks }, ctx);
+
+    assert.equal(result?.details?.verificationNudgeNeeded, true);
+    assert.match(result?.content?.[0]?.text ?? "", /without an explicit verification\/check step/i);
+  });
+
+  it("treats an explicit run-build task as verification", async () => {
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const ctx = makeCtx(session);
+    const tasks = [
+      { content: "Implement alpha", activeForm: "Implementing alpha", status: "completed" },
+      { content: "Update beta", activeForm: "Updating beta", status: "completed" },
+      { content: "Run build", activeForm: "Running build", status: "completed" },
+    ];
+
+    const result = await callTaskList(tool, { tasks }, ctx);
+
+    assert.equal(result?.details?.verificationNudgeNeeded, undefined);
+    assert.doesNotMatch(result?.content?.[0]?.text ?? "", /without an explicit verification\/check step/i);
+  });
+
   it("partial completion does NOT clear the stored list", async () => {
     const { pi, session } = await loadToolboxLinked();
     const tool = getTaskListTool(pi);
