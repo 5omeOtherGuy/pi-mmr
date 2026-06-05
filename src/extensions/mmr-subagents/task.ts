@@ -234,8 +234,10 @@ function readParentPromptOptions(value: unknown): MmrTaskParentPromptOptions | u
   if (!isRecord(value)) return undefined;
   const result: MmrTaskParentPromptOptions = {};
   if (Array.isArray(value.selectedTools)) {
-    const tools = value.selectedTools.filter((name): name is string => typeof name === "string");
-    if (tools.length > 0) result.selectedTools = tools;
+    // Preserve an empty selection (`[]`) as distinct from "not supplied": Pi
+    // explicitly rendering zero tools is meaningful, so callers can tell an
+    // empty selection apart from a missing one.
+    result.selectedTools = value.selectedTools.filter((name): name is string => typeof name === "string");
   }
   if (typeof value.customPrompt === "string" && value.customPrompt.length > 0) {
     result.customPrompt = value.customPrompt;
@@ -262,25 +264,6 @@ export function getTaskParentSystemPrompt(): string | undefined {
 
 export function getTaskParentSystemPromptOptions(): MmrTaskParentPromptOptions | undefined {
   return latestParentSystemPromptOptions;
-}
-
-/** Diagnostic classification of the captured parent prompt options. */
-export interface MmrTaskParentPromptSummary {
-  /** Parent ran with a `--system-prompt`/`SYSTEM.md` custom prompt (so a
-   * mode-derived worker derived from it passes through with no locked-mode
-   * head). */
-  hasCustomPrompt: boolean;
-  /** Number of tools in the parent's rendered selection, when Pi supplied it. */
-  selectedToolCount: number | undefined;
-}
-
-export function summarizeTaskParentPromptOptions(
-  options: MmrTaskParentPromptOptions | undefined,
-): MmrTaskParentPromptSummary {
-  return {
-    hasCustomPrompt: typeof options?.customPrompt === "string" && options.customPrompt.length > 0,
-    selectedToolCount: options?.selectedTools?.length,
-  };
 }
 
 export function registerTaskParentPromptCapture(pi: Pick<ExtensionAPI, "on">): void {

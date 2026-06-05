@@ -36,7 +36,17 @@ describe("Pi Guidelines composition drift guard", () => {
     // Match against the sourcemap's `sourcesContent` (the unminified original,
     // the same source we extracted the algorithm from) so dist minification
     // cannot defeat the check.
-    const map = JSON.parse(readFileSync(mapPath, "utf8"));
+    let raw;
+    try {
+      raw = readFileSync(mapPath, "utf8");
+    } catch (err) {
+      assert.fail(
+        "Pi system-prompt sourcemap not found at " + mapPath + " (" + (err?.code ?? err) + "); " +
+          "the drift guard can no longer verify Pi's constant guidelines — re-evaluate " +
+          "buildWorkerGuidelinesBlock against the installed Pi build.",
+      );
+    }
+    const map = JSON.parse(raw);
     const src = (map.sourcesContent ?? []).join("\n");
     assert.ok(
       src.includes("buildSystemPrompt"),
@@ -53,6 +63,20 @@ describe("Pi Guidelines composition drift guard", () => {
       new Set(literals),
       new Set(PI_CONSTANT_GUIDELINES),
       "Pi's constant Guidelines changed; re-sync buildWorkerGuidelinesBlock (PI_CONSTANT_GUIDELINES constants + the bash-exploration conditional)",
+    );
+
+    // The literal scan ignores ordering and the conditional logic. Pin the
+    // bash-exploration condition and the always-on bullet order too, so a
+    // change to those (without changing the literal strings) still trips.
+    const condensed = src.replace(/\s+/g, " ");
+    assert.ok(
+      condensed.includes("hasBash && !hasGrep && !hasFind && !hasLs"),
+      "Pi changed the bash-exploration conditional; re-sync buildWorkerGuidelinesBlock's tool-name guard",
+    );
+    assert.ok(
+      src.indexOf("Be concise in your responses") <
+        src.indexOf("Show file paths clearly when working with files"),
+      "Pi reordered its always-on guidelines; re-sync PI_ALWAYS_ON_GUIDELINES order",
     );
   });
 });

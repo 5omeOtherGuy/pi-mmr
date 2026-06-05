@@ -17,6 +17,7 @@ Available tools:
 - task_list: Manage the session-local todo list.
 
 In addition to the tools above, you may have access to other custom tools depending on the project.
+
 Guidelines:
 - Use bash for file operations like ls, rg, find
 - Use read to examine files instead of cat or sed.

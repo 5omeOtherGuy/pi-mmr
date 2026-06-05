@@ -7,7 +7,6 @@
 //     change when a non-empty prompt string is seen (never desynced).
 //   - readParentPromptOptions validates the structural view (string-only
 //     selectedTools, non-empty customPrompt; otherwise undefined).
-//   - summarizeTaskParentPromptOptions classifies for diagnostics.
 //   - registerTaskParentPromptCapture wires before_agent_start and skips while
 //     a subagent worker is active.
 
@@ -54,20 +53,10 @@ describe("Task parent-prompt capture (#6)", () => {
     assert.equal(m.getTaskParentSystemPromptOptions(), undefined);
   });
 
-  it("summarizes captured options for diagnostics", async () => {
+  it("preserves an empty selectedTools array as distinct from not-supplied", async () => {
     const m = await importSource(TASK_MODULE);
-    assert.deepEqual(m.summarizeTaskParentPromptOptions(undefined), {
-      hasCustomPrompt: false,
-      selectedToolCount: undefined,
-    });
-    assert.deepEqual(m.summarizeTaskParentPromptOptions({ selectedTools: ["a", "b"] }), {
-      hasCustomPrompt: false,
-      selectedToolCount: 2,
-    });
-    assert.deepEqual(m.summarizeTaskParentPromptOptions({ customPrompt: "x" }), {
-      hasCustomPrompt: true,
-      selectedToolCount: undefined,
-    });
+    m.captureTaskParentPrompt("P", { selectedTools: [] });
+    assert.deepEqual(m.getTaskParentSystemPromptOptions(), { selectedTools: [] });
   });
 
   it("registers a before_agent_start handler that captures, and skips inside a subagent worker", async () => {

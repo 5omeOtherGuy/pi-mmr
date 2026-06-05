@@ -386,3 +386,39 @@ describe("assembleActiveSurface(): built-in guidance source (activeToolNames)", 
     ]);
   });
 });
+
+describe("assembleActiveSurface(): preserves Pi's tools interstitial byte-for-byte", () => {
+  let assembleActiveSurface;
+
+  beforeEach(async () => {
+    const assembly = await importSource("extensions/mmr-core/prompt-assembly.ts");
+    assembleActiveSurface = assembly.assembleActiveSurface;
+  });
+
+  it("emits Pi's own 'In addition to the tools above' sentence, not a local constant", () => {
+    // Pi could change the interstitial sentence; the splice must pass it
+    // through verbatim rather than reconstruct it from MMR_ADDITIONAL_TOOLS_LINE.
+    const sentinel = "In addition to the tools above, SENTINEL custom interstitial text.";
+    const base = BASE_PROMPT.replace(
+      "In addition to the tools above, you may have access to other custom tools depending on the project.",
+      sentinel,
+    );
+    assert.ok(base.includes(sentinel));
+    const result = assembleActiveSurface({
+      state: createState("smart"),
+      baseSystemPrompt: base,
+      activeToolManifest: [],
+    });
+    assert.ok(
+      result.systemPrompt.includes(sentinel),
+      "the splice must preserve Pi's actual interstitial sentence",
+    );
+    assert.ok(
+      !result.systemPrompt.includes("you may have access to other custom tools depending on the project."),
+      "the splice must not re-emit the default MMR_ADDITIONAL_TOOLS_LINE when Pi's text differs",
+    );
+    // The active-tools block stays Pi-sourced and still ends with a blank line
+    // before the Guidelines block.
+    assert.match(result.systemPrompt, new RegExp(`${sentinel.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\n\\nGuidelines:\\n`));
+  });
+});

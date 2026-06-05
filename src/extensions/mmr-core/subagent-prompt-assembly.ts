@@ -287,11 +287,15 @@ function renderWorkerActiveToolsBlock(manifest: readonly MmrActiveToolManifestEn
   }
   // Match Pi's `(none)` placeholder when no worker tool produced a line.
   const body = lines.length > 0 ? lines : ["(none)"];
+  // Trailing blank line so the block ends with "\n\n" (matching Pi's parent
+  // prompt), keeping a blank line between the interstitial and the following
+  // `Guidelines:` block.
   return [
     "Available tools:",
     ...body,
     "",
     MMR_ADDITIONAL_TOOLS_LINE,
+    "",
     "",
   ].join("\n");
 }

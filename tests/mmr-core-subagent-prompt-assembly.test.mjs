@@ -361,6 +361,23 @@ describe("assembleMmrSubagentSurface() mode-derived route", () => {
     assert.deepEqual([...block.matchAll(/^([a-z]+):$/gm)].map((m) => m[1]), ["bash", "read"]);
   });
 
+  it("keeps a blank line between the worker Available tools interstitial and Guidelines", () => {
+    registerMmrSubagentPromptBuilder("task", () => "## Task Worker Role\n");
+    const result = assembleMmrSubagentSurface({
+      profile: makeTaskProfile(),
+      baseSystemPrompt: BASE_PROMPT,
+      activeToolManifest: [
+        { name: "read", owner: "pi", promptGuidelines: [], description: "Read file contents.", schema: {} },
+      ],
+      cwd: "/abs/repo",
+    });
+    assert.match(
+      result.systemPrompt,
+      /In addition to the tools above[^\n]*\n\nGuidelines:\n/,
+      "worker Available tools block must end with a blank line before Guidelines (matching Pi/parent)",
+    );
+  });
+
   it("fails closed when the mode-derived prompt builder is not registered", () => {
     assert.throws(
       () =>

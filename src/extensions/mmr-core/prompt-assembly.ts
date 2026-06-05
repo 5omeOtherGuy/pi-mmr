@@ -152,7 +152,12 @@ export function assembleActiveSurface(
     ? docsEnd
     : previousMmrGateStart + MMR_CTHULU_SUMMON_GATE.length;
 
-  const toolsContent = base.slice(toolsStart, toolsEnd);
+  // Preserve Pi's whole tools block — the `Available tools:` list AND Pi's
+  // "In addition to the tools above..." interstitial sentence — byte-for-byte
+  // (up to the `Guidelines:` header). Reconstructing the interstitial from a
+  // local constant would silently emit stale text (and bypass drift detection)
+  // if Pi ever changes that sentence.
+  const toolsBlockText = base.slice(toolsStart, guidelinesStart);
   const guidelinesContent = base.slice(guidelinesStart, guidelinesEnd);
   const piDocumentationContent = base.slice(piDocsStart, docsEnd);
 
@@ -179,7 +184,7 @@ export function assembleActiveSurface(
   const activeToolsBlock: MmrPromptBlock = {
     id: "active-tools",
     kind: "active-tools",
-    text: `${toolsContent}\n\n${MMR_ADDITIONAL_TOOLS_LINE}\n\n`,
+    text: toolsBlockText,
     source: "pi",
   };
 
@@ -191,7 +196,7 @@ export function assembleActiveSurface(
   };
 
   const builtinToolGuidanceText = buildBuiltinToolGuidance(
-    input.activeToolNames ?? extractActiveBuiltinToolNames(toolsContent),
+    input.activeToolNames ?? extractActiveBuiltinToolNames(toolsBlockText),
   );
   const builtinToolGuidanceBlock: MmrPromptBlock | null = builtinToolGuidanceText
     ? {
