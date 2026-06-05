@@ -19,7 +19,6 @@ Available tools:
 In addition to the tools above, you may have access to other custom tools depending on the project.
 Guidelines:
 - Use bash for file operations like ls, rg, find
-- Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)
 - Use read to examine files instead of cat or sed.
 - Use edit for precise changes (edits[].oldText must match exactly)
 - When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls
@@ -249,7 +248,6 @@ Return a compact result, not a transcript:
 Owner: pi
 
 Prompt guidelines:
-- Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)
 - Use read to examine files instead of cat or sed.
 
 Description:

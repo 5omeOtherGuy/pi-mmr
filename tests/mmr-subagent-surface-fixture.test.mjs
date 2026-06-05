@@ -192,10 +192,11 @@ function buildTaskActiveManifest() {
         properties: { path: { type: "string" } },
         required: ["path"],
       },
-      [
-        "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)",
-        "Use read to examine files instead of cat or sed.",
-      ],
+      // The Task worker has no grep/find/ls tools, so the "Prefer grep/find/ls
+      // over bash" guideline (owned by those tools in real Pi) must not appear
+      // here — otherwise the rebuilt block contradicts the always-on bash
+      // file-operations bullet it also emits.
+      ["Use read to examine files instead of cat or sed."],
     ),
     makePiToolManifestEntry("bash", "Run shell commands.", {
       type: "object",
