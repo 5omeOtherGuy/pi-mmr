@@ -49,13 +49,40 @@ export const TASK_LIST_WIDGET_ID = "pi-mmr-task-list";
 /** Cap the pinned widget so a long backlog does not push the editor off-screen. */
 const TASK_LIST_WIDGET_MAX_ROWS = 12;
 
+/**
+ * Pi's native streaming loader frames (see `@earendil-works/pi-tui` `Loader`).
+ * Mirrored here so the pinned task-list widget animates `in_progress` rows
+ * with the same braille spinner the rest of Pi uses, instead of a static
+ * glyph. Public-safe constant; pi-tui does not export its frame array.
+ */
+const PI_LOADER_FRAMES = [
+  "⠋",
+  "⠙",
+  "⠹",
+  "⠸",
+  "⠼",
+  "⠴",
+  "⠦",
+  "⠧",
+  "⠇",
+  "⠏",
+] as const;
+
+/** Frame interval matching Pi's native loader cadence. */
+const PI_LOADER_INTERVAL_MS = 80;
+
 interface WidgetThemeLike {
   fg(name: string, value: string): string;
   bold(value: string): string;
 }
-type WidgetFactory = (tui: unknown, theme: WidgetThemeLike) => {
+/** Minimal view of the live Pi TUI the widget factory needs to animate. */
+interface WidgetTuiLike {
+  requestRender?(force?: boolean): void;
+}
+type WidgetFactory = (tui: WidgetTuiLike, theme: WidgetThemeLike) => {
   render(width: number): string[];
   invalidate(): void;
+  dispose?(): void;
 };
 
 /**
@@ -111,14 +138,19 @@ export function isTuiWidgetSurface(ctx: WidgetCtxLike | undefined): boolean {
   return ctx.hasUI === true;
 }
 
+// Static, Pi-native status glyphs. `in_progress` resolves to the first loader
+// frame for non-animated surfaces (model-visible tool result text and the
+// resting widget frame); the live widget overrides it with the current
+// braille frame. Aligns the task list with Pi's working indicator instead of
+// the previous checkbox-like round glyphs.
 function widgetStatusGlyph(status: TodoStatus): string {
   switch (status) {
     case "in_progress":
-      return "◐";
+      return PI_LOADER_FRAMES[0];
     case "pending":
-      return "○";
+      return "–";
     case "completed":
-      return "●";
+      return "✓";
   }
 }
 
@@ -135,10 +167,11 @@ function subtaskLabel(subtask: TaskListSubtask): string {
 function renderTaskLines(
   tasks: readonly TaskListItem[],
   formatLine: (status: TodoStatus, text: string) => string,
+  glyphFor: (status: TodoStatus) => string = statusGlyph,
 ): string[] {
   const lines: string[] = [];
   for (const task of tasks) {
-    lines.push(formatLine(task.status, `${statusGlyph(task.status)} ${taskLabel(task)}`));
+    lines.push(formatLine(task.status, `${glyphFor(task.status)} ${taskLabel(task)}`));
     const subtasks = task.subtasks ?? [];
     for (let i = 0; i < subtasks.length; i += 1) {
       const subtask = subtasks[i];
@@ -146,7 +179,7 @@ function renderTaskLines(
       lines.push(
         formatLine(
           subtask.status,
-          `  ${branch} ${statusGlyph(subtask.status)} ${subtaskLabel(subtask)}`,
+          `  ${branch} ${glyphFor(subtask.status)} ${subtaskLabel(subtask)}`,
         ),
       );
     }
@@ -157,6 +190,7 @@ function renderTaskLines(
 function renderTodoWidgetLines(
   tasks: readonly TaskListItem[],
   theme: WidgetThemeLike | undefined,
+  activeFrame?: string,
 ): string[] {
   const safeFg = (name: string, value: string): string => {
     if (!theme) return value;
@@ -176,15 +210,23 @@ function renderTodoWidgetLines(
   };
 
   // Preserve submission order: the model's ordering is the source of truth
-  // for display, and the widget mirrors that.
-  const taskLines = renderTaskLines(tasks, (status, text) => {
-    const glyph = statusGlyph(status);
-    const coloredGlyph = status === "in_progress"
-      ? safeFg("warning", glyph)
-      : safeFg("muted", glyph);
-    const line = text.replace(glyph, coloredGlyph);
-    return status === "completed" ? safeFg("muted", line) : line;
-  });
+  // for display, and the widget mirrors that. While a row is in_progress the
+  // glyph is the live braille loader frame so it matches Pi's working
+  // indicator; resting frames fall back to the static glyph.
+  const glyphFor = (status: TodoStatus): string =>
+    status === "in_progress" && activeFrame ? activeFrame : statusGlyph(status);
+  const taskLines = renderTaskLines(
+    tasks,
+    (status, text) => {
+      const glyph = glyphFor(status);
+      const coloredGlyph = status === "in_progress"
+        ? safeFg("warning", glyph)
+        : safeFg("muted", glyph);
+      const line = text.replace(glyph, coloredGlyph);
+      return status === "completed" ? safeFg("muted", line) : line;
+    },
+    glyphFor,
+  );
   const visible = taskLines.slice(0, TASK_LIST_WIDGET_MAX_ROWS);
   const remaining = taskLines.length - visible.length;
 
@@ -194,6 +236,28 @@ function renderTodoWidgetLines(
     lines.push(safeFg("dim", `… ${remaining} more`));
   }
   return lines;
+}
+
+/**
+ * Whether an in_progress row falls within the first `maxRows` flattened
+ * (task + subtask) lines — i.e. the rows the widget actually shows before the
+ * `… N more` overflow marker. The animation interval is gated on this so an
+ * in_progress row hidden beyond the cap never schedules re-renders that would
+ * not change the visible output. Mirrors `renderTaskLines`' flattening order.
+ */
+function hasVisibleInProgress(tasks: readonly TaskListItem[], maxRows: number): boolean {
+  let row = 0;
+  for (const task of tasks) {
+    if (row >= maxRows) return false;
+    if (task.status === "in_progress") return true;
+    row += 1;
+    for (const subtask of task.subtasks ?? []) {
+      if (row >= maxRows) return false;
+      if (subtask.status === "in_progress") return true;
+      row += 1;
+    }
+  }
+  return false;
 }
 
 export interface RefreshTodoWidgetOptions {
@@ -218,13 +282,58 @@ export function refreshTodoWidget(
       ctx.ui.setWidget(TASK_LIST_WIDGET_ID, undefined);
       return;
     }
-    // Factory form: Pi re-invokes the factory when the active theme
-    // changes so the pinned widget recolors with the rest of the UI.
-    const snapshot = tasks.map((task) => ({ ...task }));
-    ctx.ui.setWidget(TASK_LIST_WIDGET_ID, (_tui, theme) => ({
-      render: (width) => truncateWidgetLines(renderTodoWidgetLines(snapshot, theme), width),
-      invalidate: () => {},
+    // Factory form: the captured `theme` is Pi's live theme singleton, so the
+    // widget recolors on theme change (Pi invalidates + re-renders without
+    // re-invoking the factory). Deep-copy subtasks so later mutations to the
+    // caller's array cannot bleed into the pinned snapshot.
+    const snapshot = tasks.map((task) => ({
+      ...task,
+      subtasks: task.subtasks?.map((subtask) => ({ ...subtask })),
     }));
+    const hasActive = hasVisibleInProgress(snapshot, TASK_LIST_WIDGET_MAX_ROWS);
+    ctx.ui.setWidget(TASK_LIST_WIDGET_ID, (tui, theme) => {
+      // Animate in_progress rows with Pi's loader cadence. The interval only
+      // runs while at least one row is in_progress, so a resting list never
+      // schedules needless re-renders. Pi disposes the previous component on
+      // replacement/clear, which clears this timer.
+      let frame = 0;
+      let timer: ReturnType<typeof setInterval> | undefined;
+      if (hasActive && typeof tui?.requestRender === "function") {
+        timer = setInterval(() => {
+          frame = (frame + 1) % PI_LOADER_FRAMES.length;
+          try {
+            tui.requestRender?.();
+          } catch {
+            // A throwing requestRender must not let an uncaught exception escape
+            // the timer callback; stop animating instead.
+            if (timer !== undefined) {
+              clearInterval(timer);
+              timer = undefined;
+            }
+          }
+        }, PI_LOADER_INTERVAL_MS);
+        // Never keep the Node event loop alive solely for the spinner.
+        (timer as { unref?: () => void }).unref?.();
+      }
+      return {
+        render: (width) =>
+          truncateWidgetLines(
+            renderTodoWidgetLines(
+              snapshot,
+              theme,
+              hasActive ? PI_LOADER_FRAMES[frame] : undefined,
+            ),
+            width,
+          ),
+        invalidate: () => {},
+        dispose: () => {
+          if (timer !== undefined) {
+            clearInterval(timer);
+            timer = undefined;
+          }
+        },
+      };
+    });
   } catch {
     // Best-effort: a render/setWidget failure must never demote a
     // successful tool call to an error result.
@@ -525,6 +634,13 @@ export interface TodoListErrorDetails {
 function statusGlyph(status: TodoStatus): string {
   return widgetStatusGlyph(status);
 }
+
+/**
+ * Canonical static status glyph shared with secondary task-list surfaces
+ * (slash-command output, injected context block) so every place renders the
+ * same Pi-native glyph language.
+ */
+export { statusGlyph as taskStatusGlyph };
 
 function formatTaskVisibleLine(task: TaskListItem): string {
   return renderTaskLines([task], (_status, text) => text).join("\n");

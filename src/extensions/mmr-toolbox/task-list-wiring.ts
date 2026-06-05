@@ -7,6 +7,7 @@ import {
   isTuiWidgetSurface,
   refreshTodoWidget,
   TASK_LIST_WIDGET_ID,
+  taskStatusGlyph,
 } from "./todo-list-tool.js";
 import { findLatestPersistedTodoState, type TaskListItem } from "./todo-list.js";
 
@@ -44,17 +45,6 @@ const TASK_LIST_CONTEXT_LABEL_LIMIT = 120;
 const TASK_LIST_REMINDER_TURNS_SINCE_WRITE = 10;
 const TASK_LIST_REMINDER_TURNS_BETWEEN_REMINDERS = 10;
 
-function taskListStatusGlyph(status: TaskListItem["status"]): string {
-  switch (status) {
-    case "in_progress":
-      return "◐";
-    case "completed":
-      return "●";
-    case "pending":
-      return "○";
-  }
-}
-
 function taskListLabel(task: TaskListItem): string {
   return task.status === "in_progress" ? task.activeForm : task.content;
 }
@@ -70,7 +60,7 @@ function formatTaskListContextBlock(tasks: readonly TaskListItem[]): string | un
   const visible = tasks.slice(0, TASK_LIST_CONTEXT_VISIBLE_LIMIT);
   const remaining = tasks.length - visible.length;
   const rows = visible.map((task) =>
-    `- ${taskListStatusGlyph(task.status)} ${task.status}: ${truncateTaskListContextLabel(taskListLabel(task))}`,
+    `- ${taskStatusGlyph(task.status)} ${task.status}: ${truncateTaskListContextLabel(taskListLabel(task))}`,
   );
   if (remaining > 0) {
     rows.push(`- … ${remaining} more`);
@@ -297,7 +287,7 @@ export function registerTaskListWiring(pi: ExtensionAPI): void {
             return;
           }
           const head = tasks.slice(0, TASK_LIST_VISIBLE_LIMIT).map((t) =>
-            `${taskListStatusGlyph(t.status)} ${taskListLabel(t)}`,
+            `${taskStatusGlyph(t.status)} ${taskListLabel(t)}`,
           );
           const overflow =
             tasks.length > TASK_LIST_VISIBLE_LIMIT

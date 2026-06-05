@@ -14,6 +14,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Markdown, Spacer, Text, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 import { isRecord } from "../mmr-core/internal/json.js";
+import type {
+  MmrAsyncTaskBoard,
+  MmrAsyncTaskBoardEntry,
+} from "./async-task-registry.js";
 import type { MmrWorkerTrailItem, MmrWorkerUsageStats } from "./runner.js";
 import {
   formatMmrWorkerTokens,
@@ -947,22 +951,175 @@ function backgroundTaskRenderStatus(status: string | undefined): RenderStatus | 
   return undefined;
 }
 
+/**
+ * One Pi-native status glyph for background tasks, mirroring the working
+ * indicator / task-list language: a braille loader frame for in-flight work,
+ * `✓` succeeded, `✕` failed, `–` cancelled. Static (result and board rows
+ * are poll snapshots, not animated). Kept as a local constant — pi-tui does
+ * not export its loader frames and cross-extension coupling is unwarranted
+ * for a single glyph.
+ */
+const PI_LOADER_GLYPH = "⠋";
+
+function backgroundStatusGlyph(status: string | undefined): string {
+  if (status === "running" || status === "cancelling") return PI_LOADER_GLYPH;
+  if (status === "succeeded") return "✓";
+  if (status === "failed") return "✕";
+  if (status === "cancelled") return "–";
+  return "•";
+}
+
+function backgroundStatusColor(status: string | undefined): string {
+  if (status === "running" || status === "cancelling") return "warning";
+  if (status === "succeeded") return "success";
+  if (status === "failed") return "error";
+  // cancelled / unknown: neutral. A user-initiated cancel is not an error.
+  return "muted";
+}
+
+function backgroundStatusBgFn(
+  status: string | undefined,
+  theme: SubagentTheme,
+): (text: string) => string {
+  if (status === "succeeded") return (text) => theme.bg?.("toolSuccessBg", text) ?? text;
+  if (status === "failed") return (text) => theme.bg?.("toolErrorBg", text) ?? text;
+  if (status === "running" || status === "cancelling") {
+    return (text) => theme.bg?.("toolPendingBg", text) ?? text;
+  }
+  // cancelled / unknown: neutral background so an intentional cancel never
+  // reads as a hard failure.
+  return (text) => text;
+}
+
 function backgroundTaskStatusLabel(status: string | undefined): string {
-  if (status === "running" || status === "cancelling") return "running in background";
+  // The `background` badge already conveys placement, so the status word does
+  // not repeat it ("running", not "running in background").
+  if (status === "running") return "running";
+  if (status === "cancelling") return "cancelling";
   if (status === "succeeded") return "completed";
   if (status === "cancelled") return "cancelled";
   if (status === "failed") return "failed";
   return status ?? "background";
 }
 
+function backgroundStatusBadge(
+  status: string | undefined,
+  theme: SubagentTheme,
+): string {
+  const color = backgroundStatusColor(status);
+  return `${theme.fg(color, backgroundStatusGlyph(status))} ${theme.fg(color, backgroundTaskStatusLabel(status))}`;
+}
+
 function backgroundTaskHeaderLine(
   details: BackgroundTaskDetails,
-  renderStatus: RenderStatus,
   theme: SubagentTheme,
 ): string {
   const title = formatTitle(details.agent ?? "background task", undefined, theme);
   const badge = theme.fg("muted", "background");
-  return `${title} ${theme.fg("muted", "•")} ${badge}  ${theme.fg(statusColor(renderStatus), backgroundTaskStatusLabel(details.status))}`;
+  return `${title} ${theme.fg("muted", "•")} ${badge}  ${backgroundStatusBadge(details.status, theme)}`;
+}
+
+const BACKGROUND_STATUS_VALUES: ReadonlySet<string> = new Set([
+  "running",
+  "cancelling",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+const BACKGROUND_FRESHNESS_VALUES: ReadonlySet<string> = new Set([
+  "healthy",
+  "stalled",
+  "dead",
+  "terminal",
+]);
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+// Validate only the fields the board renderer reads. The producer always emits
+// the full entry; this localized narrowing keeps a malformed/replayed payload
+// from reaching the row formatter (which would mis-render or throw).
+function isBackgroundTaskBoardEntry(value: unknown): value is MmrAsyncTaskBoardEntry {
+  return (
+    isRecord(value) &&
+    typeof value.taskId === "string" &&
+    typeof value.agent === "string" &&
+    typeof value.description === "string" &&
+    typeof value.status === "string" &&
+    BACKGROUND_STATUS_VALUES.has(value.status) &&
+    typeof value.freshness === "string" &&
+    BACKGROUND_FRESHNESS_VALUES.has(value.freshness)
+  );
+}
+
+function isBackgroundTaskBoard(value: unknown): value is MmrAsyncTaskBoard {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(value.counts)) return false;
+  const counts = value.counts;
+  if (
+    !isFiniteNumber(counts.active) ||
+    !isFiniteNumber(counts.stalled) ||
+    !isFiniteNumber(counts.finished)
+  ) {
+    return false;
+  }
+  return (
+    Array.isArray(value.active) && value.active.every(isBackgroundTaskBoardEntry) &&
+    Array.isArray(value.stalled) && value.stalled.every(isBackgroundTaskBoardEntry) &&
+    Array.isArray(value.finished) && value.finished.every(isBackgroundTaskBoardEntry)
+  );
+}
+
+function backgroundBoardEntryLine(entry: MmrAsyncTaskBoardEntry, theme: SubagentTheme): string {
+  const color = backgroundStatusColor(entry.status);
+  const glyph = theme.fg(color, backgroundStatusGlyph(entry.status));
+  const id = theme.fg("accent", entry.taskId);
+  const agent = theme.fg("muted", entry.agent);
+  const desc = entry.description
+    ? ` ${theme.fg("muted", `"${compactOneLine(entry.description, 60)}"`)}`
+    : "";
+  const fresh = entry.freshness !== "healthy" && entry.freshness !== "terminal"
+    ? ` ${theme.fg(entry.freshness === "dead" ? "error" : "warning", `[${entry.freshness}]`)}`
+    : "";
+  return `  ${glyph} ${id} ${agent}${desc}${fresh}`;
+}
+
+/**
+ * Compact grouped board for `task_poll` with no task id. Renders the same
+ * structured counts/sections the model receives, but as a glyph-led TUI board
+ * instead of a plain-text dump. Returns undefined for malformed/legacy board
+ * payloads so the caller can fall back to the text content.
+ */
+function renderBackgroundTaskBoard(value: unknown, theme: SubagentTheme): Component | undefined {
+  if (!isBackgroundTaskBoard(value)) return undefined;
+  const board = value;
+  const container = new Container();
+  const total = board.counts.active + board.counts.stalled + board.counts.finished;
+  const headGlyph = board.counts.active > 0
+    ? theme.fg("warning", PI_LOADER_GLYPH)
+    : theme.fg("muted", "•");
+  const counts = theme.fg(
+    "muted",
+    `${board.counts.active} active • ${board.counts.stalled} stalled • ${board.counts.finished} finished`,
+  );
+  container.addChild(
+    new Text(`${theme.fg("toolTitle", theme.bold("background tasks"))}  ${headGlyph} ${counts}`, 1, 0),
+  );
+  if (total === 0) {
+    container.addChild(new Text(theme.fg("muted", "No background tasks in this session."), 1, 0));
+    return container;
+  }
+  const section = (title: string, entries: readonly MmrAsyncTaskBoardEntry[]): void => {
+    if (entries.length === 0) return;
+    container.addChild(new Text(theme.fg("dim", title), 1, 0));
+    for (const entry of entries) {
+      container.addChild(new Text(backgroundBoardEntryLine(entry, theme), 1, 0));
+    }
+  };
+  section("Active", board.active);
+  section("Stalled", board.stalled);
+  section("Finished", board.finished);
+  return container;
 }
 
 function addDiagnostic(
@@ -1039,7 +1196,15 @@ export function renderMmrBackgroundTaskResult(
   const details = result.details as BackgroundTaskDetails | undefined;
   const output = textContent(result).trim();
 
-  if (details?.board || details?.worker !== "mmr-subagents.async-task") {
+  if (details?.board !== undefined) {
+    const boardComponent = renderBackgroundTaskBoard(details.board, theme);
+    if (boardComponent) return boardComponent;
+    const container = new Container();
+    addMarkdownBlock(container, output, theme, { paddingX: 1 });
+    return container;
+  }
+
+  if (details?.worker !== "mmr-subagents.async-task") {
     const container = new Container();
     addMarkdownBlock(container, output, theme, { paddingX: 1 });
     return container;
@@ -1053,10 +1218,13 @@ export function renderMmrBackgroundTaskResult(
   }
 
   const container = new Container();
-  const box = new Box(1, 1, statusBgFn(renderStatus, theme));
-  box.addChild(new Text(backgroundTaskHeaderLine(details, renderStatus, theme), 0, 0));
+  const box = new Box(1, 1, backgroundStatusBgFn(details.status, theme));
+  box.addChild(new Text(backgroundTaskHeaderLine(details, theme), 0, 0));
   addMarkdownBlock(box, details.description ?? details.taskId, theme, { paddingX: 1 });
-  if (details.errorMessage && renderStatus === "failed") {
+  // Gate the error diagnostic on the raw status, not the coarse renderStatus
+  // (which folds cancelled into failed). A user-initiated cancel is neutral and
+  // must not surface an error-colored diagnostic.
+  if (details.errorMessage && details.status === "failed") {
     addDiagnostic(box, details.errorMessage, renderStatus, theme);
   }
   container.addChild(box);
@@ -1072,13 +1240,11 @@ export function renderMmrBackgroundTaskResult(
 
 function asyncTaskCompletionHeaderLine(
   details: AsyncTaskCompletionDetails | undefined,
-  renderStatus: RenderStatus,
   theme: SubagentTheme,
 ): string {
   const title = theme.fg("toolTitle", theme.bold("background task"));
   const badge = theme.fg("muted", "finished");
-  const statusText = theme.fg(statusColor(renderStatus), backgroundTaskStatusLabel(details?.status));
-  return `${title} ${theme.fg("muted", "•")} ${badge}  ${statusText}`;
+  return `${title} ${theme.fg("muted", "•")} ${badge}  ${backgroundStatusBadge(details?.status, theme)}`;
 }
 
 /**
@@ -1097,9 +1263,8 @@ export const renderAsyncTaskCompletionMessage: MessageRenderer<AsyncTaskCompleti
 ) => {
   try {
     const details = message.details;
-    const renderStatus = backgroundTaskRenderStatus(details?.status) ?? "succeeded";
-    const box = new Box(1, 1, statusBgFn(renderStatus, theme));
-    box.addChild(new Text(asyncTaskCompletionHeaderLine(details, renderStatus, theme), 0, 0));
+    const box = new Box(1, 1, backgroundStatusBgFn(details?.status, theme));
+    box.addChild(new Text(asyncTaskCompletionHeaderLine(details, theme), 0, 0));
     addMarkdownBlock(box, details?.description, theme, { paddingX: 1 });
     const taskId = details?.taskId?.trim();
     if (taskId) {
