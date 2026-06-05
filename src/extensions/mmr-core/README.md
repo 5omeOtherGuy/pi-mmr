@@ -78,9 +78,11 @@ Free mode disables all MMR enforcement and restores the baseline captured before
 
 ### Prompt assembly
 
-Per-turn rewrite via `before_agent_start` surgically replaces Pi's auto-rendered head (identity line through the `Pi documentation` block) with a custom mode prompt. The only MMR-owned XML marker is the initial one-line role marker (`<mmr_mode name="smart">…</mmr_mode>`); mode sections use Markdown headings. Pi's auto `Available tools:`, `Guidelines:`, and `Pi documentation` blocks embed byte-identically under `## Tool use`.
+Per-turn rewrite via `before_agent_start` consumes Pi's already-rendered native prompt as the base prompt. The active base/fragment map lives in [`prompt-registry.ts`](prompt-registry.ts): `pi-native-default-v1` records Pi's identity and section anchors, `MMR_PROMPT_FRAGMENTS` describes Pi-native passthrough fragments and MMR-owned fragments, and each prompted mode has a recipe (`basePromptId` + ordered fragment IDs + mode-specific intro/posture/response style). Adding a prompted mode should be a registry entry plus routing/tool policy, not a new ad hoc prompt splice.
 
-Content prepended by earlier handlers, Pi's `appendSystemPrompt`, `# Project Context`, `<available_skills>`, host/extension blocks after the documentation section, `Current date:` / `Current working directory:`, and tail-appended extension content are preserved byte-for-byte. Pi prompts pass through unchanged when the auto head cannot be located (e.g. user-supplied `--system-prompt`) and in `free` mode. MMR-owned built-in-tool guidance and shared mode guidance insert as separate blocks after Pi's `Guidelines:` block.
+The renderer surgically replaces Pi's auto-rendered head (identity line through the `Pi documentation` block) by rendering the recipe fragments in order. The only MMR-owned XML marker is the initial one-line role marker (`<mmr_mode name="smart">…</mmr_mode>`); mode sections use Markdown headings. Pi's auto `Available tools:`, `Guidelines:`, and `Pi documentation` blocks remain Pi-native fragments and embed byte-identically under `## Tool use`.
+
+Content prepended by earlier handlers is preserved byte-for-byte before the rewritten identity line. Pi's `appendSystemPrompt`, `# Project Context`, `<available_skills>`, host/extension blocks after the documentation section, `Current date:` / `Current working directory:`, and tail-appended extension content are preserved byte-for-byte as the `preserved-tail` fragment. Pi prompts pass through unchanged when the auto head cannot be located (e.g. user-supplied `--system-prompt`) and in `free` mode. MMR-owned built-in-tool guidance, shared guidance, mode posture, response style, and the optional summon gate are separate fragments.
 
 ### Subagent profiles
 

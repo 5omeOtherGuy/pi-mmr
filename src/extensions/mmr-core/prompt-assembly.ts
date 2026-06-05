@@ -3,7 +3,15 @@ import {
   extractActiveBuiltinToolNames,
 } from "./builtin-tool-guidance.js";
 import { SHARED_CODING_GUIDANCE, SHARED_TOOL_GUIDANCE } from "./prompt-modules.js";
-import { MMR_CTHULU_SUMMON_GATE, MMR_MODE_PROMPT_TEMPLATES } from "./prompt-templates.js";
+import { MMR_CTHULU_SUMMON_GATE } from "./prompt-templates.js";
+import {
+  getMmrModePromptRecipe,
+  getMmrPromptBase,
+  MMR_RESPONSE_STYLE_HEADING,
+  MMR_TOOL_USE_HEADING,
+  MMR_TOOL_USE_POSTURE_LINE,
+  type MmrPromptFragmentId,
+} from "./prompt-registry.js";
 import type {
   MmrActiveToolManifestEntry,
   MmrModeKey,
@@ -14,28 +22,17 @@ import type {
 } from "./types.js";
 
 /**
- * Public mmr-core constants reused by the splice. Kept here so other modules
- * (debug renderer, tests) can reference them without re-deriving from
- * prompt.ts internals.
+ * Public mmr-core constants reused by the splice. Re-exported here for
+ * backwards compatibility with existing callers and tests; the prompt registry
+ * is the source of truth for base prompt and fragment metadata.
  */
-export const MMR_IDENTITY_LINE =
-  "You are an expert coding assistant operating inside pi, a coding agent harness.";
-
-export const MMR_TOOL_USE_HEADING = "## Tool use";
-
-export const MMR_TOOL_USE_POSTURE_LINE =
-  "Use context first; reach for a tool only when it would change your answer. Run independent read-only calls in parallel; never parallelize edits to the same file. Avoid repeated reads of the same content.";
-
-export const MMR_ADDITIONAL_TOOLS_LINE =
-  "In addition to the tools above, you may have access to other custom tools depending on the project.";
-
-export const MMR_RESPONSE_STYLE_HEADING = "## Response style";
-
-/** Structural anchors for Pi's auto-emitted sections. See prompt.ts notes. */
-const TOOLS_SECTION_ANCHOR = "\n\nAvailable tools:\n";
-const GUIDELINES_SECTION_ANCHOR = "\n\nGuidelines:\n";
-const PI_DOCS_SECTION_ANCHOR = "\n\nPi documentation (";
-const DATE_TAIL_ANCHOR = "\nCurrent date:";
+export {
+  MMR_ADDITIONAL_TOOLS_LINE,
+  MMR_IDENTITY_LINE,
+  MMR_RESPONSE_STYLE_HEADING,
+  MMR_TOOL_USE_HEADING,
+  MMR_TOOL_USE_POSTURE_LINE,
+} from "./prompt-registry.js";
 
 function findHeaderStart(prompt: string, anchor: string, fromIdx: number): number {
   const idx = prompt.indexOf(anchor, fromIdx);
@@ -94,7 +91,7 @@ function passthroughResult(
 type PromptedMmrModeKey = Exclude<MmrModeKey, "free">;
 
 function isPromptedMode(mode: string): mode is PromptedMmrModeKey {
-  return mode in MMR_MODE_PROMPT_TEMPLATES;
+  return getMmrModePromptRecipe(mode) !== undefined;
 }
 
 /**
@@ -114,13 +111,17 @@ export function assembleActiveSurface(
   const mode = input.state.mode;
   if (!isPromptedMode(mode)) return passthroughResult(input, "not-prompted-mode");
 
+  const recipe = getMmrModePromptRecipe(mode);
+  if (recipe === undefined) return passthroughResult(input, "not-prompted-mode");
+  const promptBase = getMmrPromptBase(recipe.basePromptId);
+
   const base = input.baseSystemPrompt;
-  const introStart = base.indexOf(MMR_IDENTITY_LINE);
+  const introStart = base.indexOf(promptBase.identityLine);
   if (introStart === -1) return passthroughResult(input, "identity-anchor-missing");
 
-  const toolsStart = findHeaderStart(base, TOOLS_SECTION_ANCHOR, introStart);
-  const guidelinesStart = findHeaderStart(base, GUIDELINES_SECTION_ANCHOR, introStart);
-  const piDocsStart = findHeaderStart(base, PI_DOCS_SECTION_ANCHOR, introStart);
+  const toolsStart = findHeaderStart(base, promptBase.toolsSectionAnchor, introStart);
+  const guidelinesStart = findHeaderStart(base, promptBase.guidelinesSectionAnchor, introStart);
+  const piDocsStart = findHeaderStart(base, promptBase.piDocsSectionAnchor, introStart);
 
   if (toolsStart === -1 || guidelinesStart === -1 || piDocsStart === -1) {
     return passthroughResult(input, "section-anchor-missing");
@@ -137,7 +138,7 @@ export function assembleActiveSurface(
   if (toolsEnd === -1 || guidelinesEnd === -1) return passthroughResult(input, "section-boundary-missing");
 
   const docsBlankIdx = base.indexOf("\n\n", piDocsStart);
-  const docsDateIdx = base.indexOf(DATE_TAIL_ANCHOR, piDocsStart);
+  const docsDateIdx = base.indexOf(promptBase.dateTailAnchor, piDocsStart);
   const docsEndCandidates = [docsBlankIdx, docsDateIdx].filter((idx) => idx !== -1);
   const docsEnd = docsEndCandidates.length === 0 ? base.length : Math.min(...docsEndCandidates);
 
@@ -146,7 +147,9 @@ export function assembleActiveSurface(
   // this function again to rebuild the active-tools block for the child. In
   // that case, strip the previous MMR-owned shared/mode blocks and preserve
   // only Pi's docs block plus the original tail; otherwise repeated assembly
-  // duplicates every long MMR instruction.
+  // duplicates every long MMR instruction. Today the summon-gate fragment is
+  // the stable end delimiter for the MMR-owned layer; every prompted recipe is
+  // required to include it until a separate internal boundary marker exists.
   const previousMmrGateStart = base.indexOf(MMR_CTHULU_SUMMON_GATE, docsEnd);
   const headEnd = previousMmrGateStart === -1
     ? docsEnd
@@ -161,99 +164,112 @@ export function assembleActiveSurface(
   const guidelinesContent = base.slice(guidelinesStart, guidelinesEnd);
   const piDocumentationContent = base.slice(piDocsStart, docsEnd);
 
-  const template = MMR_MODE_PROMPT_TEMPLATES[mode];
   const before = base.slice(0, introStart);
   const after = base.slice(headEnd);
-
-  // Each block's text includes its own trailing separators so that
-  // concatenating all blocks reproduces the systemPrompt byte-for-byte.
-  const identityBlock: MmrPromptBlock = {
-    id: `identity:${mode}`,
-    kind: "identity",
-    text: `${before}${MMR_IDENTITY_LINE} <mmr_mode name="${template.tag}">${template.intro}</mmr_mode>\n\n`,
-    source: "mmr-core",
-  };
-
-  const toolLeadInBlock: MmrPromptBlock = {
-    id: "tool-lead-in",
-    kind: "tool-lead-in",
-    text: `${MMR_TOOL_USE_HEADING}\n\n${MMR_TOOL_USE_POSTURE_LINE}\n\n`,
-    source: "mmr-core",
-  };
-
-  const activeToolsBlock: MmrPromptBlock = {
-    id: "active-tools",
-    kind: "active-tools",
-    text: toolsBlockText,
-    source: "pi",
-  };
-
-  const activeGuidelinesBlock: MmrPromptBlock = {
-    id: "active-guidelines",
-    kind: "active-guidelines",
-    text: `${guidelinesContent}\n\n`,
-    source: "pi",
-  };
-
   const builtinToolGuidanceText = buildBuiltinToolGuidance(
     input.activeToolNames ?? extractActiveBuiltinToolNames(toolsBlockText),
   );
-  const builtinToolGuidanceBlock: MmrPromptBlock | null = builtinToolGuidanceText
-    ? {
-        id: "builtin-tool-guidance",
-        kind: "builtin-tool-guidance",
-        text: `${builtinToolGuidanceText}\n\n`,
-        source: "mmr-core",
+
+  // Each fragment owns its trailing separators so that concatenating all
+  // rendered blocks reproduces the systemPrompt byte-for-byte.
+  const renderFragment = (fragmentId: MmrPromptFragmentId): MmrPromptBlock | null => {
+    switch (fragmentId) {
+      case "identity":
+        return {
+          id: `identity:${mode}`,
+          kind: "identity",
+          text: `${before}${promptBase.identityLine} <mmr_mode name="${recipe.tag}">${recipe.intro}</mmr_mode>\n\n`,
+          source: "mmr-core",
+        };
+      case "tool-lead-in":
+        return {
+          id: "tool-lead-in",
+          kind: "tool-lead-in",
+          text: `${MMR_TOOL_USE_HEADING}\n\n${MMR_TOOL_USE_POSTURE_LINE}\n\n`,
+          source: "mmr-core",
+        };
+      case "active-tools":
+        return {
+          id: "active-tools",
+          kind: "active-tools",
+          text: toolsBlockText,
+          source: "pi",
+        };
+      case "active-guidelines":
+        return {
+          id: "active-guidelines",
+          kind: "active-guidelines",
+          text: `${guidelinesContent}\n\n`,
+          source: "pi",
+        };
+      case "builtin-tool-guidance":
+        return builtinToolGuidanceText
+          ? {
+              id: "builtin-tool-guidance",
+              kind: "builtin-tool-guidance",
+              text: `${builtinToolGuidanceText}\n\n`,
+              source: "mmr-core",
+            }
+          : null;
+      case "pi-docs":
+        return {
+          id: "pi-docs",
+          kind: "pi-docs",
+          text: `${piDocumentationContent}\n\n`,
+          source: "pi",
+        };
+      case "shared-tool-guidance":
+        return {
+          id: "shared-tool-guidance",
+          kind: "shared-tool-guidance",
+          text: `${SHARED_TOOL_GUIDANCE}\n\n`,
+          source: "mmr-core",
+        };
+      case "shared-coding-guidance":
+        return {
+          id: "shared-coding-guidance",
+          kind: "shared-coding-guidance",
+          text: `${SHARED_CODING_GUIDANCE}\n\n`,
+          source: "mmr-core",
+        };
+      case "mode-posture":
+        return {
+          id: `mode-posture:${mode}`,
+          kind: "mode-posture",
+          text: `${recipe.postureSections}\n\n`,
+          source: "mmr-core",
+        };
+      case "response-style":
+        return {
+          id: `response-style:${mode}`,
+          kind: "response-style",
+          text: `${MMR_RESPONSE_STYLE_HEADING}\n\n${recipe.closingLine}\n\n`,
+          source: "mmr-core",
+        };
+      case "sunken-rite":
+        return {
+          id: "sunken-rite",
+          kind: "sunken-rite",
+          text: MMR_CTHULU_SUMMON_GATE,
+          source: "mmr-core",
+        };
+      case "preserved-tail":
+        return {
+          id: "preserved-tail",
+          kind: "preserved-tail",
+          text: after,
+          source: "pi",
+        };
+      default: {
+        const exhaustive: never = fragmentId;
+        return exhaustive;
       }
-    : null;
-
-  const piDocsBlock: MmrPromptBlock = {
-    id: "pi-docs",
-    kind: "pi-docs",
-    text: `${piDocumentationContent}\n\n`,
-    source: "pi",
+    }
   };
 
-  const sharedToolGuidanceBlock: MmrPromptBlock = {
-    id: "shared-tool-guidance",
-    kind: "shared-tool-guidance",
-    text: `${SHARED_TOOL_GUIDANCE}\n\n`,
-    source: "mmr-core",
-  };
-
-  const sharedCodingGuidanceBlock: MmrPromptBlock = {
-    id: "shared-coding-guidance",
-    kind: "shared-coding-guidance",
-    text: `${SHARED_CODING_GUIDANCE}\n\n`,
-    source: "mmr-core",
-  };
-
-  const modePostureBlock: MmrPromptBlock = {
-    id: `mode-posture:${mode}`,
-    kind: "mode-posture",
-    text: `${template.postureSections}\n\n${MMR_RESPONSE_STYLE_HEADING}\n\n${template.closingLine}\n\n${MMR_CTHULU_SUMMON_GATE}`,
-    source: "mmr-core",
-  };
-
-  const preservedTailBlock: MmrPromptBlock = {
-    id: "preserved-tail",
-    kind: "preserved-tail",
-    text: after,
-    source: "pi",
-  };
-
-  const blocks: MmrPromptBlock[] = [
-    identityBlock,
-    toolLeadInBlock,
-    activeToolsBlock,
-    activeGuidelinesBlock,
-    ...(builtinToolGuidanceBlock ? [builtinToolGuidanceBlock] : []),
-    piDocsBlock,
-    sharedToolGuidanceBlock,
-    sharedCodingGuidanceBlock,
-    modePostureBlock,
-    preservedTailBlock,
-  ];
+  const blocks = recipe.fragments
+    .map((fragmentId) => renderFragment(fragmentId))
+    .filter((block): block is MmrPromptBlock => block !== null);
 
   const systemPrompt = blocks.map((b) => b.text).join("");
 

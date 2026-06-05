@@ -141,6 +141,8 @@ describe("Phase D: assembleActiveSurface() public API", () => {
         "shared-tool-guidance",
         "shared-coding-guidance",
         "mode-posture",
+        "response-style",
+        "sunken-rite",
       ]) {
         assert.ok(
           kinds.includes(required),
@@ -158,6 +160,8 @@ describe("Phase D: assembleActiveSurface() public API", () => {
         "shared-tool-guidance",
         "shared-coding-guidance",
         "mode-posture",
+        "response-style",
+        "sunken-rite",
         "preserved-tail",
       ];
       const indices = orderedKinds.map((k) => kinds.indexOf(k));
@@ -182,11 +186,17 @@ describe("Phase D: assembleActiveSurface() public API", () => {
       const sharedToolIdx = kinds.indexOf("shared-tool-guidance");
       const sharedCodingIdx = kinds.indexOf("shared-coding-guidance");
       const modePostureIdx = kinds.indexOf("mode-posture");
+      const responseStyleIdx = kinds.indexOf("response-style");
+      const sunkenRiteIdx = kinds.indexOf("sunken-rite");
       assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool guidance`);
       assert.ok(sharedToolIdx < sharedCodingIdx, `mode ${mode}: shared tool guidance must precede shared coding guidance`);
       assert.ok(sharedCodingIdx < modePostureIdx, `mode ${mode}: shared coding guidance must precede mode posture`);
+      assert.ok(modePostureIdx < responseStyleIdx, `mode ${mode}: mode posture must precede response style`);
+      assert.ok(responseStyleIdx < sunkenRiteIdx, `mode ${mode}: response style must precede sunken rite`);
       assert.match(result.blocks[sharedToolIdx].text, /## Tool execution policy/);
       assert.match(result.blocks[sharedCodingIdx].text, /## Autonomy and persistence/);
+      assert.match(result.blocks[responseStyleIdx].text, /## Response style/);
+      assert.match(result.blocks[sunkenRiteIdx].text, /## The Sunken Rite/);
     });
 
     it(`active-guidelines block is byte-identical to the Pi-authored Guidelines block for ${mode}`, () => {
