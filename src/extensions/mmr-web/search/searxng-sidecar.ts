@@ -58,6 +58,19 @@ const REAL_TIMER: SidecarTimer = {
   now: () => Date.now(),
 };
 
+/**
+ * Describe a spawn command for error messages WITHOUT leaking its arguments.
+ * Surfaces only the program name (argv[0]) and an argument count, matching the
+ * "set (N args)" arg-count style used by the `mmr-web` config view, so error
+ * output never echoes back full command lines that may carry sensitive paths,
+ * tokens, or flags.
+ */
+function describeCommandForError(command: ReadonlyArray<string>): string {
+  const program = command[0] ?? "(unset)";
+  const argCount = Math.max(0, command.length - 1);
+  return `"${program}" (${argCount} args)`;
+}
+
 export interface SidecarSettings {
   managed: boolean;
   /** Command array; must be non-empty for managed=true to actually spawn. */
@@ -261,7 +274,7 @@ export async function ensureSearxngSidecarRunning(
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `Failed to spawn managed SearXNG start command ${JSON.stringify(settings.startCommand)}: ${reason}.`,
+        `Failed to spawn managed SearXNG start command ${describeCommandForError(settings.startCommand!)}: ${reason}.`,
       );
     }
     // Keep the child handle even after it exits. Detached start commands

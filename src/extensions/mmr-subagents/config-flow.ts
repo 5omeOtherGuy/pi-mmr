@@ -60,9 +60,14 @@ export function resolveImportDestination(args: {
   const roots = getPiOwnedSubagentRoots(args.cwd, homeDir);
   const rootDir = args.destination === "global" ? roots.global : roots.project;
   const source = path.resolve(args.plan.sourcePath);
-  const insideRoot = path.relative(rootDir, source);
-  const alreadyAtDest = insideRoot === path.basename(source) && !insideRoot.startsWith("..") && !path.isAbsolute(insideRoot);
-  const file = alreadyAtDest ? path.basename(source) : `${importIdForName(args.plan.name)}.md`;
+  // A source already inside the chosen Pi-owned root (at any depth) is enabled
+  // in place. Containment holds when the relative path is non-empty, has no
+  // leading ".." escape segment, and is not absolute; the relative path itself
+  // becomes source.file so a nested candidate keeps its on-disk location.
+  const relativeToRoot = path.relative(rootDir, source);
+  const alreadyAtDest =
+    relativeToRoot.length > 0 && !relativeToRoot.startsWith("..") && !path.isAbsolute(relativeToRoot);
+  const file = alreadyAtDest ? relativeToRoot : `${importIdForName(args.plan.name)}.md`;
   return {
     root: args.destination,
     file,

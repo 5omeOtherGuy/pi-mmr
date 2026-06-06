@@ -3,7 +3,7 @@ import { runMmrWebConfigFlow } from "../mmr-web/config-flow.js";
 import { runMmrSubagentsConfigFlow } from "../mmr-subagents/config-flow.js";
 import { getProjectMmrSettingsPath, writeMmrCoreConfigFile, type MmrConfigUpdate } from "./config-writer.js";
 import { MMR_MODE_KEYS, getMmrMode, isMmrModeKey } from "./modes.js";
-import { isThinkingLevel } from "./settings.js";
+import { isThinkingLevel, loadMmrCoreSettings } from "./settings.js";
 import { getMmrSubagentProfile, listMmrSubagentProfiles } from "./subagent-profiles.js";
 import type { MmrModeKey, MmrModelPreference } from "./types.js";
 
@@ -26,6 +26,37 @@ export interface MmrCoreConfigFlowBindings {
   setConfiguredSubagentPreferences(profile: string, preferences: MmrModelPreference[] | undefined): void;
   /** Registered Pi tool names, forwarded to the subagent setup/import wizard. */
   getAvailableTools?(): readonly string[];
+}
+
+/**
+ * Re-read the persisted mode/subagent preferences from disk so the menu shows
+ * what is actually saved right now, not the in-memory snapshot captured at
+ * session start. Without this, an external edit to `<cwd>/.pi/settings.json`
+ * (or a write earlier this session) leaves the rendered "current" values stale.
+ * The on-disk shape (`MmrCoreSettings.modelPreferences` /
+ * `subagentModelPreferences`) matches the bindings' return shapes, so we reuse
+ * the shared loader/parsers instead of hand-parsing JSON. Falls back to the
+ * in-memory bindings if the load throws.
+ */
+function readPersistedPreferences(
+  ctx: ExtensionContext,
+  bindings: MmrCoreConfigFlowBindings,
+): {
+  modePreferences: Partial<Record<MmrModeKey, MmrModelPreference[]>>;
+  subagentPreferences: Record<string, MmrModelPreference[]>;
+} {
+  try {
+    const { settings } = loadMmrCoreSettings(ctx.cwd);
+    return {
+      modePreferences: settings.modelPreferences ?? {},
+      subagentPreferences: settings.subagentModelPreferences ?? {},
+    };
+  } catch {
+    return {
+      modePreferences: bindings.getConfiguredModelPreferences(),
+      subagentPreferences: bindings.getConfiguredSubagentModelPreferences(),
+    };
+  }
 }
 
 function describeConfiguredPreferences(
@@ -130,7 +161,9 @@ export async function runMmrConfigFlow(
   }
 
   if (targetChoice === "mode") {
-    const configuredModelPreferences = bindings.getConfiguredModelPreferences();
+    // Re-read disk so the "current" values reflect external edits / prior
+    // writes this session, not the startup snapshot held by the bindings.
+    const configuredModelPreferences = readPersistedPreferences(ctx, bindings).modePreferences;
     const modeChoices = MMR_MODE_KEYS.filter((key) => key !== "free").map((key) => {
       const defaults = getMmrMode(key).modelPreferences;
       const current = configuredModelPreferences[key];
@@ -158,7 +191,9 @@ export async function runMmrConfigFlow(
       ctx.ui.notify("No subagent profiles are registered.", "warning");
       return;
     }
-    const configuredSubagentModelPreferences = bindings.getConfiguredSubagentModelPreferences();
+    // Re-read disk so the "current" values reflect external edits / prior
+    // writes this session, not the startup snapshot held by the bindings.
+    const configuredSubagentModelPreferences = readPersistedPreferences(ctx, bindings).subagentPreferences;
     const subagentChoices = profileNames.map((name) => {
       const profile = getMmrSubagentProfile(name);
       const defaults = profile?.modelPreferences ?? [];

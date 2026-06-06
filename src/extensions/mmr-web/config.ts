@@ -53,25 +53,26 @@ export interface MmrWebSettings {
    * or the settings file `mmrWeb.searxngManaged` field.
    *
    * When enabled, `mmrWeb.searxngStartCommand` (and optionally
-   * `mmrWeb.searxngStopCommand`) must be set in the settings file. The
-   * start/stop commands are NEVER read from environment variables or
-   * model input — they spawn arbitrary processes and must come from
-   * user-trusted on-disk configuration only.
+   * `mmrWeb.searxngStopCommand`) must be set in the GLOBAL settings file
+   * (`~/.pi/agent/settings.json`). The start/stop commands are NEVER read
+   * from environment variables, model input, or a project-local
+   * `<cwd>/.pi/settings.json` — they spawn arbitrary processes and must
+   * come from the user's trusted global configuration only.
    */
   searxngManaged: boolean;
   /**
    * Command array used to start the managed SearXNG instance, e.g.
    * `["docker", "compose", "-f", "./searxng.yml", "up", "-d"]`.
-   * Settings file only. Items are passed to `child_process.spawn` with
-   * `shell: false`, so the command and its arguments are not interpreted
-   * by any shell.
+   * Global settings file only (project-local settings are ignored). Items
+   * are passed to `child_process.spawn` with `shell: false`, so the command
+   * and its arguments are not interpreted by any shell.
    */
   searxngStartCommand?: string[];
   /**
    * Command array used to stop the managed SearXNG instance, e.g.
-   * `["docker", "compose", "-f", "./searxng.yml", "down"]`. Settings file
-   * only. When omitted, `mmr-web` falls back to sending SIGTERM to the
-   * spawned PID and is best-effort.
+   * `["docker", "compose", "-f", "./searxng.yml", "down"]`. Global settings
+   * file only (project-local settings are ignored). When omitted, `mmr-web`
+   * falls back to sending SIGTERM to the spawned PID and is best-effort.
    */
   searxngStopCommand?: string[];
   /**
@@ -309,10 +310,13 @@ export function loadMmrWebSettings(
   const homeDirectory = options.homeDirectory ?? homedir();
   const env = options.env ?? process.env;
 
-  const files = [
-    path.join(homeDirectory, ".pi/agent/settings.json"),
-    path.join(cwd, ".pi/settings.json"),
-  ];
+  // The global (user-home) settings file is the only trusted layer for the
+  // managed-SearXNG start/stop commands: they spawn arbitrary processes, so a
+  // project-local `<cwd>/.pi/settings.json` (which travels with a checkout)
+  // must not be able to inject them. Everything else merges global → project.
+  const globalSettingsPath = path.join(homeDirectory, ".pi/agent/settings.json");
+  const projectSettingsPath = path.join(cwd, ".pi/settings.json");
+  const files = [globalSettingsPath, projectSettingsPath];
   const filesRead: string[] = [];
   const warnings: string[] = [];
   let merged: Partial<MmrWebSettings> = {};
@@ -327,7 +331,16 @@ export function loadMmrWebSettings(
     filesRead.push(filePath);
     const extracted = extractMmrWebSettings(value);
     if (!extracted) continue;
-    merged = { ...merged, ...extracted.values };
+    const values = extracted.values;
+    if (filePath !== globalSettingsPath &&
+        (values.searxngStartCommand !== undefined || values.searxngStopCommand !== undefined)) {
+      warnings.push(
+        `Ignoring mmrWeb.searxngStartCommand/searxngStopCommand in ${filePath}: the managed-SearXNG start/stop commands spawn arbitrary processes and are honored only from your global settings file (~/.pi/agent/settings.json), not from project-local settings.`,
+      );
+      delete values.searxngStartCommand;
+      delete values.searxngStopCommand;
+    }
+    merged = { ...merged, ...values };
     if (extracted.hasJinaApiKey) {
       warnings.push(
         `Ignoring mmrWeb.jinaApiKey in ${filePath}: mmr-web no longer uses Jina. Remove this settings-file secret and set BRAVE_API_KEY in the environment for web_search.`,

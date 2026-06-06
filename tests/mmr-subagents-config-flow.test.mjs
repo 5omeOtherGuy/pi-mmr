@@ -40,6 +40,35 @@ describe("mmr-subagents config-flow pure helpers", () => {
     assert.equal(dest.file, "manual.md");
   });
 
+  it("enables a nested-in-root source in place without copying or renaming", async () => {
+    const { resolveImportDestination } = await importSource(MODULE);
+    const dest = resolveImportDestination({
+      plan: { name: "Nested Agent", sourcePath: "/work/proj/.pi/subagents/sub/agent.md" },
+      destination: "project",
+      cwd: "/work/proj",
+      homeDir: "/home/u",
+    });
+    assert.equal(dest.alreadyAtDest, true, "nested-in-root source is enabled in place");
+    assert.equal(dest.file, path.join("sub", "agent.md"), "keeps the nested relative path under the root");
+    assert.equal(
+      dest.absPath,
+      path.join("/work/proj", ".pi", "subagents", "sub", "agent.md"),
+      "absPath points at the existing on-disk file, not a renamed copy",
+    );
+  });
+
+  it("copies a sibling-of-root source that escapes the root via ..", async () => {
+    const { resolveImportDestination } = await importSource(MODULE);
+    const dest = resolveImportDestination({
+      plan: { name: "Escapee", sourcePath: "/work/proj/.pi/agent.md" },
+      destination: "project",
+      cwd: "/work/proj",
+      homeDir: "/home/u",
+    });
+    assert.equal(dest.alreadyAtDest, false, "a source outside the root is copied, not enabled in place");
+    assert.equal(dest.file, "escapee.md");
+  });
+
   it("builds a global config input with project scope; omits projects for project destination", async () => {
     const { buildImportConfigInput, resolveImportDestination } = await importSource(MODULE);
     const plan = { name: "Scout", description: "d", toolName: "sa__scout", model: "inherit", modelDeclared: false, tools: ["read"], toolResults: [], diagnostics: [], sourcePath: "/home/u/.pi/agent/subagents/scout.md" };

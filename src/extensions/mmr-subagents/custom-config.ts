@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isRecord } from "../mmr-core/internal/json.js";
+import { rewriteJsonSettingsFile } from "../mmr-core/internal/settings-file.js";
 import { isMmrModeKey } from "../mmr-core/modes.js";
 import { isThinkingLevel } from "../mmr-core/settings.js";
 import type { MmrLockedModeKey } from "../mmr-core/types.js";
@@ -391,46 +392,31 @@ export function writeMmrSubagentsConfigRecord(
   if (RESERVED_AGENT_IDS.has(id)) {
     throw new Error(`Refusing to write reserved agent id "${id}".`);
   }
-  let existing: unknown = {};
-  let rawText: string | undefined;
-  try {
-    rawText = readFileSync(filePath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (rawText !== undefined) {
-    try {
-      existing = JSON.parse(rawText);
-    } catch (error) {
-      throw new Error(`Refusing to overwrite ${filePath}: contents are not valid JSON (${(error as Error).message}).`);
+  return rewriteJsonSettingsFile(filePath, (existing) => {
+    const root: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+    const flat = isRecord(root.mmrSubagents) ? { ...root.mmrSubagents } : undefined;
+    const mmrBlock = isRecord(root.mmr) ? { ...root.mmr } : undefined;
+    const nested = mmrBlock && isRecord(mmrBlock.subagents) ? { ...mmrBlock.subagents } : undefined;
+    const useNested = !flat && Boolean(nested);
+
+    const subagents: Record<string, unknown> = useNested ? nested ?? {} : flat ?? {};
+    const custom: Record<string, unknown> = isRecord(subagents.custom) ? { ...subagents.custom } : {};
+    const agents: Record<string, unknown> = isRecord(custom.agents) ? { ...custom.agents } : {};
+
+    if (record === undefined) delete agents[id];
+    else agents[id] = recordToJson(record);
+
+    custom.agents = agents;
+    subagents.custom = custom;
+
+    if (useNested) {
+      const nextMmr = { ...(mmrBlock ?? {}) };
+      nextMmr.subagents = subagents;
+      root.mmr = nextMmr;
+    } else {
+      root.mmrSubagents = subagents;
     }
-  }
 
-  const root: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
-  const flat = isRecord(root.mmrSubagents) ? { ...root.mmrSubagents } : undefined;
-  const mmrBlock = isRecord(root.mmr) ? { ...root.mmr } : undefined;
-  const nested = mmrBlock && isRecord(mmrBlock.subagents) ? { ...mmrBlock.subagents } : undefined;
-  const useNested = !flat && Boolean(nested);
-
-  const subagents: Record<string, unknown> = useNested ? nested ?? {} : flat ?? {};
-  const custom: Record<string, unknown> = isRecord(subagents.custom) ? { ...subagents.custom } : {};
-  const agents: Record<string, unknown> = isRecord(custom.agents) ? { ...custom.agents } : {};
-
-  if (record === undefined) delete agents[id];
-  else agents[id] = recordToJson(record);
-
-  custom.agents = agents;
-  subagents.custom = custom;
-
-  if (useNested) {
-    const nextMmr = { ...(mmrBlock ?? {}) };
-    nextMmr.subagents = subagents;
-    root.mmr = nextMmr;
-  } else {
-    root.mmrSubagents = subagents;
-  }
-
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, `${JSON.stringify(root, null, 2)}\n`, { encoding: "utf8" });
-  return filePath;
+    return root;
+  });
 }
