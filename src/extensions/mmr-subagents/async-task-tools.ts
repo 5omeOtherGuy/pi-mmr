@@ -41,6 +41,7 @@ import {
   type MmrAsyncTaskInternalSnapshot,
   type MmrAsyncTaskStatus,
 } from "./async-task-registry.js";
+import { refreshBackgroundTaskWidget } from "./background-task-widget.js";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const TASK_POLL_TOOL_NAME = "task_poll";
@@ -71,6 +72,8 @@ export interface AsyncTaskToolDetails {
   freshness?: MmrAsyncTaskInternalSnapshot["freshness"];
   /** User-facing invocation label for the background-task renderer. */
   description?: string;
+  /** Full worker prompt/query, rendered as the background card's Markdown body. */
+  prompt?: string;
   /** Clean terminal worker output for the background-task renderer. */
   finalOutput?: string;
   timedOut?: boolean;
@@ -199,6 +202,23 @@ const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
   "A background task notifies you once when it finishes (the poke wakes the session only when idle and is bounded per session); pass start_task({ notify: false }) to opt out and pull the result with task_poll/task_wait.",
 ];
+
+/**
+ * Best-effort: mirror the registry board onto the pinned background-agent
+ * widget. Never throws into a tool call — a widget failure must not demote a
+ * successful background-task operation.
+ */
+function refreshAsyncTaskWidget(
+  ctx: ExtensionContext | undefined,
+  registry: MmrAsyncTaskRegistry,
+  sessionKey: string,
+): void {
+  try {
+    refreshBackgroundTaskWidget(ctx, registry.listTasks(sessionKey));
+  } catch {
+    // UI mirror only; ignore.
+  }
+}
 
 function resolveCwd(ctx: ExtensionContext | undefined): string {
   const candidate = (ctx as { cwd?: unknown } | undefined)?.cwd;
@@ -376,6 +396,13 @@ function projectRunning(
     : snapshot.latestProgress
       ? firstText(buildTaskProgressResult(snapshot.latestProgress, detailsContextFromSnapshot(snapshot)).content)
       : undefined;
+  // Carry the latest projected subagent details so the renderer can show the
+  // worker model and any partial trail while the task is still running.
+  const progressDetails = snapshot.latestToolResult
+    ? snapshot.latestToolResult.details
+    : snapshot.latestProgress
+      ? buildTaskProgressResult(snapshot.latestProgress, detailsContextFromSnapshot(snapshot)).details
+      : undefined;
   const header = `${tool}: ${snapshot.agent} task ${snapshot.taskId} is ${snapshot.status}${freshnessNote(snapshot)}.`;
   const waitHint = opts.timedOut ? " Wait timed out; the worker is still running. Poll or wait again." : "";
   const body = progressText && progressText.trim().length > 0 ? `\n\n${progressText}` : "";
@@ -389,6 +416,8 @@ function projectRunning(
       status: snapshot.status,
       freshness: snapshot.freshness,
       description: snapshot.description,
+      prompt: snapshot.prompt,
+      ...(progressDetails !== undefined ? { final: progressDetails } : {}),
       ...(opts.timedOut !== undefined ? { timedOut: opts.timedOut } : {}),
     },
   };
@@ -423,6 +452,7 @@ function projectTerminal(
       status: snapshot.status,
       freshness: snapshot.freshness,
       description: snapshot.description,
+      prompt: snapshot.prompt,
       ...(finalOutput !== undefined ? { finalOutput } : {}),
       ...(final !== undefined ? { final } : {}),
       ...(snapshot.errorMessage !== undefined ? { errorMessage: snapshot.errorMessage } : {}),
@@ -467,7 +497,10 @@ function buildCompletionNotifier(
           `Background task "${escapeXmlAttr(snapshot.description)}" ${snapshot.status}. ` +
           `Use task_poll({task_id:"${escapeXmlAttr(snapshot.taskId)}"}) to read the result.\n` +
           `</task-notification>`,
-        display: true,
+        // The persistent background-agent widget and the eventual task_poll
+        // result own the human-facing surface; this push is model-facing only
+        // (display:false) so a finished task is not announced twice.
+        display: false,
         details: {
           version: 1,
           kind: ASYNC_TASK_COMPLETION_CUSTOM_TYPE,
@@ -570,8 +603,19 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       // must not opt this task out. The registry adds at-most-once + a
       // per-session budget on top. Delivery is `nextTurn` + `triggerTurn`, so a
       // push only wakes an idle session and otherwise rides the next turn.
-      const notify = (deps.enableCompletionPush ?? true) && parsed.wantsNotify
-        ? buildCompletionNotifier(deps.pi)
+      const wantsPush = (deps.enableCompletionPush ?? true) && parsed.wantsNotify;
+      const baseNotify = wantsPush ? buildCompletionNotifier(deps.pi) : undefined;
+      // Only attach a registry notifier when there is a real message sender, so
+      // `completionPush` stays "disabled" for a task that can never push (no
+      // `pi.sendMessage`) instead of being reported as sent. When push fires it
+      // also refreshes the pinned widget so a task that finishes while the
+      // session is idle drops off the bottom-of-window board. Opted-out / no-
+      // sender tasks update the widget on the next poll/wait/cancel instead.
+      const notify = baseNotify
+        ? (snapshot: MmrAsyncTaskInternalSnapshot) => {
+            baseNotify(snapshot);
+            refreshAsyncTaskWidget(ctx, registry, sessionKey);
+          }
         : undefined;
 
       const started = parsed.agent === "Task"
@@ -662,6 +706,9 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
         };
       }
       const snapshot = started.started.snapshot;
+      // Surface the launched agent on the pinned bottom-of-window widget so the
+      // transcript card can stay empty (see renderMmrBackgroundTaskResult).
+      refreshAsyncTaskWidget(ctx, registry, sessionKey);
       const dedupNote = started.started.deduplicated ? " (existing task for this call)" : "";
       const message =
         `start_task: started background worker ${snapshot.taskId}${dedupNote} ("${snapshot.description}", agent ${snapshot.agent}). ` +
@@ -728,6 +775,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       const taskId = (rawParams as { task_id?: unknown })?.task_id;
       if (typeof taskId !== "string" || taskId.length === 0) {
         const board = registry.listTasks(sessionKey);
+        refreshBackgroundTaskWidget(ctx, board);
         return {
           content: [{ type: "text", text: renderBoard(board) }],
           details: { worker: "mmr-subagents.async-task", tool: TASK_POLL_TOOL_NAME, board },
@@ -735,6 +783,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       }
       const snapshot = registry.getTask(sessionKey, taskId);
       if (!snapshot) return notFoundResult(TASK_POLL_TOOL_NAME, taskId);
+      refreshAsyncTaskWidget(ctx, registry, sessionKey);
       return projectSnapshot(TASK_POLL_TOOL_NAME, snapshot);
     },
   } satisfies ToolDefinition;
@@ -771,6 +820,7 @@ export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
       if (!result.found || !result.snapshot) return notFoundResult(TASK_WAIT_TOOL_NAME, taskId);
+      refreshAsyncTaskWidget(ctx, registry, sessionKey);
       return projectSnapshot(TASK_WAIT_TOOL_NAME, result.snapshot, { timedOut: result.timedOut });
     },
   } satisfies ToolDefinition;
@@ -807,6 +857,14 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
         ...(reason !== undefined ? { reason } : {}),
       });
       if (!snapshot) return notFoundResult(TASK_CANCEL_TOOL_NAME, taskId);
+      refreshAsyncTaskWidget(ctx, registry, sessionKey);
+      // Project the same subagent details poll/wait carry so a cancelled card
+      // shows the worker model/usage/trail like a blocking subagent.
+      const finalDetails = snapshot.finalToolResult
+        ? snapshot.finalToolResult.details
+        : snapshot.finalResult
+          ? buildTaskFinalResult(snapshot.finalResult, detailsContextFromSnapshot(snapshot)).details
+          : undefined;
       const trail = snapshot.finalResult?.trail
         ?? snapshot.latestProgress?.trail
         ?? extractTrailFromToolResult(snapshot.finalToolResult)
@@ -829,6 +887,8 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
           status: snapshot.status,
           freshness: snapshot.freshness,
           description: snapshot.description,
+          prompt: snapshot.prompt,
+          ...(finalDetails !== undefined ? { final: finalDetails } : {}),
           ...(finalOutput.length > 0 ? { finalOutput } : {}),
         },
       };
