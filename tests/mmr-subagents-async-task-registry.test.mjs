@@ -724,6 +724,51 @@ describe("async-task-registry worker groups", () => {
     assert.equal(reg.getTask("sess-A", "t0").completionPush, "disabled");
     assert.equal(reg.getTask("sess-A", "t1").completionPush, "disabled");
   });
+
+  it("stores an explicit group label and emits it in the group snapshot", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const reg = createMmrAsyncTaskRegistry({ groupIdFactory: () => "group_abc123" });
+    const group = reg.openGroup({ sessionKey: "sess-A", deliveryOptIn: false, label: "Explore order services" });
+    assert.equal(group.label, "Explore order services");
+    assert.equal(reg.getGroup("sess-A", "group_abc123").label, "Explore order services");
+  });
+
+  it("keeps the first label set-once when the same group id is reopened", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const reg = createMmrAsyncTaskRegistry();
+    reg.openGroup({ sessionKey: "sess-A", groupId: "group_abc123", deliveryOptIn: false, label: "First" });
+    const second = reg.openGroup({ sessionKey: "sess-A", groupId: "group_abc123", deliveryOptIn: false, label: "Second" });
+    assert.equal(second.label, "First", "a later opener must not clobber the first label");
+    assert.equal(reg.getGroup("sess-A", "group_abc123").label, "First");
+  });
+
+  it("falls back to the earliest-created child description when no label is set", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let clock = 1000;
+    const reg = createMmrAsyncTaskRegistry({ nowMs: () => clock, idFactory: () => `t${clock}` });
+    const group = reg.openGroup({ sessionKey: "sess-A", groupId: "group_abc123", deliveryOptIn: false });
+    assert.equal(group.label, undefined, "no label and no children yet means no resolved label");
+
+    const first = makeDeferredRun();
+    const second = makeDeferredRun();
+    clock = 1000;
+    reg.startTask(startArgs({ run: first.run, originToolCallId: "c0", groupId: "group_abc123", description: "earliest wins" }));
+    clock = 2000;
+    reg.startTask(startArgs({ run: second.run, originToolCallId: "c1", groupId: "group_abc123", description: "later loses" }));
+
+    assert.equal(reg.getGroup("sess-A", "group_abc123").label, "earliest wins");
+    first.resolve(makeWorkerResult());
+    second.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("caps an over-long explicit label at ASYNC_TASK_GROUP_LABEL_MAX_LEN", async () => {
+    const { createMmrAsyncTaskRegistry, ASYNC_TASK_GROUP_LABEL_MAX_LEN } = await importSource(REGISTRY_MODULE);
+    assert.equal(ASYNC_TASK_GROUP_LABEL_MAX_LEN, 120);
+    const reg = createMmrAsyncTaskRegistry({ groupIdFactory: () => "group_abc123" });
+    const group = reg.openGroup({ sessionKey: "sess-A", deliveryOptIn: false, label: "x".repeat(200) });
+    assert.equal(group.label.length, ASYNC_TASK_GROUP_LABEL_MAX_LEN);
+  });
 });
 
 describe("toPublicAsyncTaskSnapshot", () => {

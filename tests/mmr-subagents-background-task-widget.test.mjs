@@ -152,21 +152,24 @@ describe("background-task widget", () => {
     const lines = calls.at(-1).value(undefined, theme).render(120);
     const text = lines.join("\n");
     // Header carries the group id + synthesized status/counts (1 of 2 settled).
-    assert.match(text, /▸ group_aaa111/);
+    // The synthesized label leads with the earliest-created row's description.
+    assert.match(text, /group_aaa111/);
+    assert.match(text, /▸ Diff recent deploys · group_aaa111/);
     assert.match(text, /running/);
     assert.match(text, /1\/2/);
     // Capability profile is a row chip; the group id is NOT repeated per row.
     assert.match(text, /read-only/);
     assert.match(text, /read-write/);
-    const rowLines = lines.filter((l) => /Explore order services|Diff recent deploys/.test(l));
+    const rowLines = lines.filter((l) => /^ {2}\S/.test(l) && /Explore order services|Diff recent deploys/.test(l));
     assert.equal(rowLines.length, 2, "both grouped rows render");
     for (const l of rowLines) assert.match(l, /^ {2}\S/, "group members are indented under the header");
     for (const l of rowLines) {
       assert.equal((l.match(/group_aaa111/g) ?? []).length, 0, "group id is not a per-row chip");
     }
-    // Settled wave sorts above... no — running sorts above settled within a group.
-    assert.ok(text.indexOf("Explore order services") < text.indexOf("Diff recent deploys"),
-      "non-terminal rows sort above settled rows inside a group");
+    // running sorts above settled within a group (compare row lines, since the
+    // header now also mentions the earliest row's description).
+    assert.match(rowLines[0], /Explore order services/, "non-terminal row sorts first inside a group");
+    assert.match(rowLines[1], /Diff recent deploys/, "settled row sorts after the running one");
   });
 
   it("uses the resolved group snapshot for the header when provided", async () => {
@@ -187,6 +190,62 @@ describe("background-task widget", () => {
     assert.match(text, /▸ group_bbb222/);
     assert.match(text, /partial/);
     assert.match(text, /3\/4/, "settled count = succeeded + failed + cancelled + partial");
+  });
+
+  it("renders <label> · <id> in the header when the resolver supplies a label", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({ groupId: "group_ccc333", description: "scout" })],
+      }),
+      (groupId) => groupId === "group_ccc333"
+        ? { status: "running", counts: { running: 1, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: 1 }, label: "Explore pricing engine" }
+        : undefined,
+    );
+    const text = calls.at(-1).value(undefined, theme).render(120).join("\n");
+    assert.match(text, /▸ Explore pricing engine · group_\w+/, "label leads, id trails in the header");
+  });
+
+  it("renders an id-only header when the resolver supplies no label", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({ groupId: "group_ddd444", description: "scout" })],
+      }),
+      (groupId) => groupId === "group_ddd444"
+        ? { status: "running", counts: { running: 1, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: 1 } }
+        : undefined,
+    );
+    const lines = calls.at(-1).value(undefined, theme).render(120);
+    const header = lines.find((l) => /▸/.test(l));
+    assert.ok(header, "a section header renders");
+    assert.match(header, /^▸ group_\w+\s+●/, "header begins with ▸ <id> directly, no stray label · separator");
+  });
+
+  it("truncates a long group label to the label width cap", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    const longLabel = "Investigate " + "x".repeat(70); // 82 chars; well over the 40-char cap
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({ groupId: "group_eee555", description: "scout" })],
+      }),
+      (groupId) => groupId === "group_eee555"
+        ? { status: "running", counts: { running: 1, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: 1 }, label: longLabel }
+        : undefined,
+    );
+    // Render wide enough that truncation comes from the 40-char label cap, not terminal width.
+    const text = calls.at(-1).value(undefined, theme).render(200).join("\n");
+    assert.doesNotMatch(text, new RegExp(longLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "the full label is not rendered");
+    assert.match(text, /…/, "an over-cap label is truncated with a trailing ellipsis");
   });
 
   it("retains a freshly finished group row but drops a stale one", async () => {
