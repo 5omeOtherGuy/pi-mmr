@@ -413,3 +413,24 @@ describe("librarian failure mapping", () => {
     }
   });
 });
+
+describe("librarian blocking-vs-background guidance", () => {
+  it("states librarian is blocking and names start_task(agent librarian) for background", async () => {
+    const { createLibrarianTool } = await importSource(LIBRARIAN_MODULE);
+    const tool = createLibrarianTool();
+    assert.ok(
+      tool.promptGuidelines.some((g) => /blocking/i.test(g)),
+      "a librarian guideline must state librarian is blocking",
+    );
+    assert.ok(
+      tool.promptGuidelines.some((g) => /start_task/.test(g) && /agent: "librarian"/.test(g)),
+      "a librarian guideline must name start_task with agent librarian for background",
+    );
+    assert.match(tool.description, /blocking/i, "librarian description must state it is blocking");
+    assert.match(
+      tool.description,
+      /start_task with agent: "librarian"/,
+      "librarian description must name the start_task background path",
+    );
+  });
+});

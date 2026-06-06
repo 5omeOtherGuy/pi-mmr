@@ -1094,3 +1094,23 @@ describe("Task tool", () => {
     assert.equal(undefinedArgs.includes("--tools"), false, "omitted tools must not emit --tools");
   });
 });
+
+describe("Task blocking-vs-background guidance", () => {
+  it("states Task is blocking and routes background/fan-out to start_task", async () => {
+    const { createTaskTool } = await importSource(TASK_MODULE);
+    const tool = createTaskTool({ runner: { async run() { return makeWorkerResult(); } } });
+    assert.match(tool.description, /blocking/i, "Task description must state it is blocking");
+    assert.match(tool.description, /start_task/, "Task description must name start_task as the background path");
+    assert.doesNotMatch(
+      tool.description,
+      /Run workers in parallel only for independent read-only work/i,
+      "Task must not teach blocking-parallel as the fan-out mechanism",
+    );
+    assert.ok(
+      tool.promptGuidelines.some(
+        (g) => /start_task/.test(g) && /background|parallel|fan[ -]?out/i.test(g),
+      ),
+      "a Task guideline must route background/parallel orchestration to start_task",
+    );
+  });
+});

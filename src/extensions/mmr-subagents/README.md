@@ -39,6 +39,27 @@ Deferred repository-provider variants of `librarian` beyond GitHub (Bitbucket, �
 
 The internal `history-reader` profile is used by `mmr-history.read_session`; it is not a model-visible Pi tool. See `mmr-core` for the profile table.
 
+### Blocking vs background
+
+`pi-mmr` exposes the same "run a worker" capability two ways: blocking worker
+tools (`Task`, `finder`, `librarian`, `oracle`) that return their result inline,
+and background orchestration tools (`start_task`, `task_poll`, `task_wait`,
+`task_cancel`) that run a worker while the parent keeps working. The runtime
+split is intentional; the model-visible guidance for it is unified through a
+shared source of truth (`tool-guidance.ts`) so every tool states the same
+canonical, two-sided rule:
+
+- Need the result before your next reasoning step → use the blocking
+  `Task`/`finder`/`librarian` tool.
+- Want independent work to continue while you proceed, or the user explicitly
+  asks for background, fan-out, parallel, or asynchronous workers → use
+  `start_task` with the matching `agent`.
+- `oracle` is always blocking and can never run as a background agent.
+
+Choosing a worker ("use a subagent" / "delegate") does not by itself mean
+background; `start_task` is the canonical background launcher and carries
+concrete `agent: "finder"` / `agent: "librarian"` / `agent: "Task"` examples.
+
 ## Behavior
 
 ### Concrete subagent ownership

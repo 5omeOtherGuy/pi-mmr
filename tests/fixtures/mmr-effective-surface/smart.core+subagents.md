@@ -36,6 +36,7 @@ Guidelines:
 - Give finder concrete artifacts, patterns, APIs, technical terms, file types, expected code patterns, scoped directories, and explicit success criteria so the worker knows when to stop.
 - Prefer finder queries such as `Find every place we build an HTTP error response.` or `Find watchdog-related files under core and server/src.`; avoid vague or exploratory requests such as `error handling search` or broad root-level filename scans such as `Find files named watchdog anywhere.`
 - Prefer scoped finder searches before falling back to repo-wide filename scans.
+- finder is blocking: it returns the search result inline. To run finder in the background while you keep working, use start_task with agent: "finder".
 - Be concise in your responses
 - Show file paths clearly when working with files
 
@@ -223,9 +224,12 @@ Prompt guidelines:
 - Give finder concrete artifacts, patterns, APIs, technical terms, file types, expected code patterns, scoped directories, and explicit success criteria so the worker knows when to stop.
 - Prefer finder queries such as `Find every place we build an HTTP error response.` or `Find watchdog-related files under core and server/src.`; avoid vague or exploratory requests such as `error handling search` or broad root-level filename scans such as `Find files named watchdog anywhere.`
 - Prefer scoped finder searches before falling back to repo-wide filename scans.
+- finder is blocking: it returns the search result inline. To run finder in the background while you keep working, use start_task with agent: "finder".
 
 Description:
 Intelligently search your codebase: Use finder for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches. Anytime you want to chain multiple grep calls you should use this tool.
+
+finder is blocking: it returns the search result inline. To run finder in the background while you keep working, use start_task with agent: "finder".
 
 WHEN TO USE THIS TOOL:
 - You must locate code by behavior or concept

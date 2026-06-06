@@ -32,6 +32,7 @@ import {
   runMmrWorkerWithModelFallback,
 } from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
+import { FINDER_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import {
   resolveCtxMmrModelRegistry,
   resolveMmrWorkerModelContextWindowFromCtx,
@@ -114,10 +115,13 @@ export const FINDER_PROMPT_GUIDELINES: readonly string[] = [
   "Give finder concrete artifacts, patterns, APIs, technical terms, file types, expected code patterns, scoped directories, and explicit success criteria so the worker knows when to stop.",
   "Prefer finder queries such as `Find every place we build an HTTP error response.` or `Find watchdog-related files under core and server/src.`; avoid vague or exploratory requests such as `error handling search` or broad root-level filename scans such as `Find files named watchdog anywhere.`",
   "Prefer scoped finder searches before falling back to repo-wide filename scans.",
+  FINDER_BACKGROUND_GUIDANCE,
 ];
 
 export const FINDER_DESCRIPTION = [
   "Intelligently search your codebase: Use finder for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches. Anytime you want to chain multiple grep calls you should use this tool.",
+  "",
+  FINDER_BACKGROUND_GUIDANCE,
   "",
   "WHEN TO USE THIS TOOL:",
   "- You must locate code by behavior or concept",

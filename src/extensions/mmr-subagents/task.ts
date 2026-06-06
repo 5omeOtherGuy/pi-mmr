@@ -32,6 +32,7 @@ import {
   runMmrWorkerWithModelFallback,
 } from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
+import { TASK_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
@@ -92,7 +93,7 @@ export const TASK_PROMPT_GUIDELINES: readonly string[] = [
   "When not to use Task: do not spawn a worker for a single file read, a single exact search, a small edit you can complete directly, or a task whose plan is not yet clear.",
   "Write outcome-first prompts that include the goal, scope, relevant context, files or evidence to inspect first, constraints and non-goals, validation to run, and the expected return shape.",
   "Ask for compact results, not transcripts: outcome, files changed or inspected, summary, validation result, concerns or blockers, and next action.",
-  "Run multiple Task workers only for genuinely independent work. Keep code-writing single-threaded unless write targets are clearly disjoint.",
+  'Task is blocking. For multiple or parallel Task workers, prefer start_task (agent: "Task") so they run in the background while you keep working; reserve back-to-back blocking Task calls for the rare case where you must have every result before the next step, and keep code-writing single-threaded unless write targets are clearly disjoint.',
   "Use capabilityProfile (read-only or read-write) only to narrow a Task worker's tool surface; omit it to preserve the default Task behavior.",
   "When the worker finishes, inspect its diff or evidence, run any combined validation, and summarize the user-relevant result yourself.",
 ] as const;
@@ -101,6 +102,8 @@ export const TASK_DESCRIPTION = [
   "Perform a bounded sub-task in a worker process derived from the active MMR subagent framework.",
   "",
   "Use Task when a scoped implementation, investigation, repair, UI check, or review would produce enough intermediate output that it is better handled outside the parent turn.",
+  "",
+  TASK_BACKGROUND_GUIDANCE,
   "",
   "When NOT to use Task:",
   "- Do not use Task for a single file read, one exact search, or one small edit the parent can complete directly.",
@@ -111,7 +114,7 @@ export const TASK_DESCRIPTION = [
   "- Provide an outcome-first prompt with the goal, scope, relevant files or evidence, constraints, validation to run, and expected result shape.",
   "- Provide a short description for progress display and diagnostics.",
   "- Expect a compact final result, not a transcript. The worker should report outcome, files changed or inspected, summary, validation, and concerns or blockers.",
-  "- Run workers in parallel only for independent read-only work or clearly disjoint implementation units.",
+  '- For background or fan-out runs, use start_task (agent: "Task"); blocking Task is not the parallel mechanism.',
   "- Optionally set capabilityProfile (read-only or read-write) to narrow the worker's tools; leaving it unset preserves the default Task surface.",
 ].join("\n");
 

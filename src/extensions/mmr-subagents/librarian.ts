@@ -33,6 +33,7 @@ import {
   runMmrWorkerWithModelFallback,
 } from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
+import { LIBRARIAN_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
@@ -83,10 +84,13 @@ export const LIBRARIAN_PROMPT_GUIDELINES: readonly string[] = [
   "When calling librarian, name the repository as owner/repo or a full repository URL when possible.",
   "Ask a precise librarian research question and include intent, branch/revision, known files, commit IDs, or related repositories in `context` when those details matter.",
   "Return the librarian's full answer to the user-facing response; do not compress away evidence links, caveats, or conclusions.",
+  LIBRARIAN_BACKGROUND_GUIDANCE,
 ] as const;
 
 export const LIBRARIAN_DESCRIPTION = [
   "Research remote repositories with the librarian, a read-only repository-understanding worker for code outside the local workspace.",
+  "",
+  LIBRARIAN_BACKGROUND_GUIDANCE,
   "",
   "Coverage:",
   "- Public GitHub repositories, and connected private repositories when an",

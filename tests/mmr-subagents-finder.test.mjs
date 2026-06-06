@@ -970,3 +970,24 @@ describe("finder parent↔child route agreement", () => {
     assert.equal(childWithExplicit.modelArg, parentModelArg);
   });
 });
+
+describe("finder blocking-vs-background guidance", () => {
+  it("states finder is blocking and names start_task(agent finder) for background", async () => {
+    const { createFinderTool } = await importSource(FINDER_MODULE);
+    const tool = createFinderTool();
+    assert.ok(
+      tool.promptGuidelines.some((g) => /blocking/i.test(g)),
+      "a finder guideline must state finder is blocking",
+    );
+    assert.ok(
+      tool.promptGuidelines.some((g) => /start_task/.test(g) && /agent: "finder"/.test(g)),
+      "a finder guideline must name start_task with agent finder for background",
+    );
+    assert.match(tool.description, /blocking/i, "finder description must state it is blocking");
+    assert.match(
+      tool.description,
+      /start_task with agent: "finder"/,
+      "finder description must name the start_task background path",
+    );
+  });
+});

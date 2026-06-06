@@ -693,6 +693,36 @@ describe("async task tools model-visible surface", () => {
       start.promptGuidelines.some((g) => /open the group with start_task\(\{ group_id: 'new'/.test(g) && /task_poll\(\{ task_id \}\)/.test(g)),
       "guidelines should give a concrete open-group-then-reuse example with the per-child retrieval call",
     );
+    assert.ok(
+      start.promptGuidelines.some(
+        (g) => /Choosing a worker/i.test(g) && /does not by itself mean background/i.test(g),
+      ),
+      "start_task guidelines should carry the two-sided blocking-vs-background rule",
+    );
+    assert.match(
+      start.description,
+      /does not by itself mean background/i,
+      "start_task description should carry the two-sided blocking-vs-background rule",
+    );
+    assert.doesNotMatch(
+      start.description,
+      /Prefer the blocking Task\/finder\/librarian tools when you need the result before your next reasoning step/i,
+      "the one-sided start_task description line must be replaced",
+    );
+    assert.ok(
+      start.promptGuidelines.some((g) => /start_task\(\{ agent: "finder"/.test(g)),
+      'start_task guidelines should include a concrete agent:"finder" example',
+    );
+    assert.ok(
+      start.promptGuidelines.some((g) => /start_task\(\{ agent: "librarian"/.test(g)),
+      'start_task guidelines should include a concrete agent:"librarian" example',
+    );
+    assert.ok(
+      !start.promptGuidelines.some((g) =>
+        /prefer the blocking Task\/finder\/librarian tools when you need the result immediately/i.test(g),
+      ),
+      "the one-sided 'prefer blocking ... when you need the result immediately' guideline must be replaced",
+    );
   });
 });
 

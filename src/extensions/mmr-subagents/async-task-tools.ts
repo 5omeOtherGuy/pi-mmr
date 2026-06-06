@@ -52,6 +52,7 @@ import {
   type MmrAsyncTerminalDeliveryItem,
 } from "./async-task-registry.js";
 import { refreshBackgroundTaskWidget } from "./background-task-widget.js";
+import { START_TASK_AGENT_EXAMPLES, START_TASK_SELECTION_GUIDANCE } from "./tool-guidance.js";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const TASK_POLL_TOOL_NAME = "task_poll";
@@ -254,7 +255,7 @@ const START_TASK_DESCRIPTION = [
   "",
   "Use start_task only for independent work that can proceed while you do other things (long analysis, broad search, a self-contained implementation unit).",
   "Set agent to choose the background worker: Task (default), finder, or librarian. Use params for the selected tool's normal input shape. Oracle cannot run in the background; it is always blocking.",
-  "Prefer the blocking Task/finder/librarian tools when you need the result before your next reasoning step.",
+  START_TASK_SELECTION_GUIDANCE,
   "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session.",
   "Use task_poll/task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
   "Use group_id:'new' on the first grouped start_task call to mint a worker group, then reuse the returned group_id on sibling start_task calls and task_poll/task_wait/task_cancel. The opening call controls the single grouped notification; sibling tasks in the group do not send individual completion notifications.",
@@ -265,7 +266,7 @@ const START_TASK_DESCRIPTION = [
 ].join("\n");
 
 const ASYNC_TASK_GUIDELINES: readonly string[] = [
-  "Use start_task only for independent work that can run while you continue; prefer the blocking Task/finder/librarian tools when you need the result immediately. Oracle is always blocking and cannot be a background agent.",
+  START_TASK_SELECTION_GUIDANCE,
   "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session. Do not poll only to discover whether a single task completed.",
   "Use task_poll or task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
   "Treat a terminal task_poll/task_wait result as consumed. Do not poll the same task again unless you intentionally need to re-read the same result.",
@@ -275,6 +276,7 @@ const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task or group.",
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
   "Pass start_task({ notify: false }) to opt out of automatic delivery and pull the result explicitly with task_poll/task_wait.",
+  ...START_TASK_AGENT_EXAMPLES,
 ];
 
 /**

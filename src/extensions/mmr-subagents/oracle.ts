@@ -30,6 +30,7 @@ import {
   runMmrWorkerWithModelFallback,
 } from "./fallback.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
+import { ORACLE_ALWAYS_BLOCKING_GUIDANCE } from "./tool-guidance.js";
 import {
   resolveCtxMmrModelRegistry,
   resolveMmrWorkerModelContextWindowFromCtx,
@@ -120,6 +121,7 @@ export const ORACLE_PROMPT_GUIDELINES: readonly string[] = [
   "When you know the files involved, list them in the oracle `files` parameter as a JSON array of strings (`[\"path/to/file1.ts\", \"path/to/file2.ts\"]`) even when there is only one file (`[\"path/to/file1.ts\"]`).",
   "When you invoke the oracle, mention to the user why — use language such as `I'm going to ask the oracle for advice` or `I need to consult with the oracle.`",
   "Run multiple oracle calls in parallel only when they address distinct concerns (for example architecture review, performance analysis, race-condition investigation); each oracle call is invoked zero-shot, so every call must be self-contained.",
+  ORACLE_ALWAYS_BLOCKING_GUIDANCE,
   "Example oracle call for an architecture review with attached files: `{\"task\":\"Review the authentication architecture and suggest improvements\",\"files\":[\"src/auth/index.ts\",\"src/auth/jwt.ts\"]}`.",
   "Example oracle call for planning a feature when no files are needed: `{\"task\":\"Plan the implementation of real-time collaboration feature\"}`.",
   "Example oracle call for a performance analysis using `context` instead of files: `{\"task\":\"Analyze performance bottlenecks\",\"context\":\"Users report slow response times when processing large datasets\"}`.",
@@ -129,6 +131,8 @@ export const ORACLE_PROMPT_GUIDELINES: readonly string[] = [
 
 export const ORACLE_DESCRIPTION = [
   "Consult the oracle - an AI advisor powered by OpenAI's GPT-5.5 reasoning model that can plan, review, and provide expert guidance.",
+  "",
+  ORACLE_ALWAYS_BLOCKING_GUIDANCE,
   "",
   "The oracle has access to the following tools:",
   "- read",

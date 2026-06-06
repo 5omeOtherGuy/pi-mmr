@@ -880,3 +880,24 @@ describe("oracle parent↔child route agreement", () => {
     assert.equal(childWithExplicit.modelArg, parentModelArg);
   });
 });
+
+describe("oracle always-blocking guidance", () => {
+  it("states oracle is always blocking and cannot run as a background agent", async () => {
+    const { createOracleTool } = await importSource(ORACLE_MODULE);
+    const tool = createOracleTool();
+    assert.ok(
+      tool.promptGuidelines.some((g) => /always blocking/i.test(g) && /background/i.test(g)),
+      "an oracle guideline must state it is always blocking and cannot be backgrounded",
+    );
+    assert.match(
+      tool.description,
+      /always blocking/i,
+      "oracle description must state it is always blocking",
+    );
+    assert.match(
+      tool.description,
+      /cannot run as a background agent/i,
+      "oracle description must state it cannot run as a background agent",
+    );
+  });
+});
