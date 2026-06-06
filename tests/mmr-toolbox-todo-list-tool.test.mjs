@@ -1034,8 +1034,8 @@ describe("mmr-toolbox task_list — widget gates on TUI run mode", () => {
         ...(overrides.mode !== undefined ? { mode: overrides.mode } : {}),
         hasUI: overrides.hasUI ?? true,
         ui: {
-          setWidget(id, value) {
-            widgetCalls.push({ id, value });
+          setWidget(id, value, options) {
+            widgetCalls.push({ id, value, options });
           },
           theme: { fg: (_n, v) => v, bold: (v) => v },
         },
@@ -1071,6 +1071,7 @@ describe("mmr-toolbox task_list — widget gates on TUI run mode", () => {
     refreshTodoWidget(ctx, tasks);
     assert.equal(widgetCalls.length, 1, "TUI mode must project the widget");
     assert.equal(typeof widgetCalls[0].value, "function", "widget uses the factory form");
+    assert.deepEqual(widgetCalls[0].options, { placement: "aboveEditor" }, "task list must stay above the editor");
   });
 
   it("refreshTodoWidget is a no-op in RPC mode even when hasUI is true", async () => {

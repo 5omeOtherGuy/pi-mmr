@@ -42,8 +42,8 @@ function makeCtx() {
       mode: "tui",
       ui: {
         theme,
-        setWidget(id, value) {
-          calls.push({ id, value });
+        setWidget(id, value, options) {
+          calls.push({ id, value, options });
         },
       },
     },
@@ -76,6 +76,7 @@ describe("background-task widget", () => {
     const last = calls.at(-1);
     assert.equal(last.id, BACKGROUND_TASK_WIDGET_ID);
     assert.equal(typeof last.value, "function");
+    assert.deepEqual(last.options, { placement: "belowEditor" }, "background agents must stay below the editor");
     const widget = last.value(undefined, theme);
     const text = widget.render(80).join("\n");
     assert.match(text, /Background agents/);

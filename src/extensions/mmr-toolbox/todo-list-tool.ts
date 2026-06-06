@@ -105,6 +105,7 @@ interface WidgetUILike {
   setWidget(
     id: string,
     value: readonly string[] | WidgetFactory | undefined,
+    options?: { placement?: "aboveEditor" | "belowEditor" },
   ): void;
   theme?: WidgetThemeLike;
 }
@@ -269,7 +270,7 @@ export function refreshTodoWidget(
   if (options.isHidden?.()) return;
   try {
     if (tasks.length === 0) {
-      ctx.ui.setWidget(TASK_LIST_WIDGET_ID, undefined);
+      ctx.ui.setWidget(TASK_LIST_WIDGET_ID, undefined, { placement: "aboveEditor" });
       return;
     }
     // Factory form: the captured `theme` is Pi's live theme singleton, so the
@@ -323,7 +324,7 @@ export function refreshTodoWidget(
           }
         },
       };
-    });
+    }, { placement: "aboveEditor" });
   } catch {
     // Best-effort: a render/setWidget failure must never demote a
     // successful tool call to an error result.

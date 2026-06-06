@@ -5,8 +5,8 @@
  * `task_cancel`) register a background run in the in-memory registry and
  * return immediately. Their per-call transcript output is intentionally
  * minimal; the live, at-a-glance state of every background agent is shown
- * here instead — pinned above the editor with `ctx.ui.setWidget(...)`, the
- * same surface the `task_list` todo widget uses.
+ * here instead — pinned below the editor with `ctx.ui.setWidget(...)`, away
+ * from the above-editor `task_list` todo widget.
  *
  * This keeps background agents off the transcript as repeated cards (a raw
  * `task_<id>` per launch) and gives them one animated status board, mirroring
@@ -68,6 +68,7 @@ interface WidgetUILike {
   setWidget(
     id: string,
     value: readonly string[] | WidgetFactory | undefined,
+    options?: { placement?: "aboveEditor" | "belowEditor" },
   ): void;
   theme?: WidgetThemeLike;
 }
@@ -220,7 +221,7 @@ export function refreshBackgroundTaskWidget(
   try {
     const rows = boardRows(board);
     if (rows.length === 0) {
-      ctx.ui.setWidget(BACKGROUND_TASK_WIDGET_ID, undefined);
+      ctx.ui.setWidget(BACKGROUND_TASK_WIDGET_ID, undefined, { placement: "belowEditor" });
       return;
     }
     const hasActive = board.active.length > 0 || board.stalled.length > 0;
@@ -259,7 +260,7 @@ export function refreshBackgroundTaskWidget(
           }
         },
       };
-    });
+    }, { placement: "belowEditor" });
   } catch {
     // Best-effort: a widget failure must never demote a successful tool call.
   }
