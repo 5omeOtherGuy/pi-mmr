@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Pi package](https://img.shields.io/badge/Pi-package-7c3aed)
 
-> Mode-driven multi-model routing, worker tools, and fail-safe defaults for Pi.
+> Amp Code-style mode routing, worker tools, and fail-safe defaults for Pi.
 
-`pi-mmr` turns [Pi](https://github.com/earendil-works/pi-coding-agent) into a locked coding harness. Pick a mode such as `rush`, `smart`, `large`, or `deep`; `pi-mmr` applies the model route, thinking policy, context profile, active-tool set, worker profile, and prompt behavior for that job.
+`pi-mmr` is for Pi users who want Amp Code-style, one-command coding profiles without leaving Pi. It deliberately mirrors that workflow shape: pick a mode such as `rush`, `smart`, `large`, or `deep`, and `pi-mmr` applies the model route, thinking policy, context profile, active-tool set, worker profile, and prompt behavior for that job.
 
 It also brings Pi-native tools for codebase search, expert review, GitHub repository research, web lookup, prior-session recall, safe patching, todos, and subscription quota fallback — all scoped by explicit feature gates and reversible with `free` mode.
 
