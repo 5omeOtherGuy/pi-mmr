@@ -174,6 +174,12 @@ const GROUP_ID_SCHEMA = Type.String({
     "Optional worker-group id. Use group_id:'new' on the first start_task call to mint a group, then reuse the returned group_id on sibling start_task calls. Concrete ids must look like group_<hex>.",
 });
 
+const GROUP_LABEL_SCHEMA = Type.String({
+  maxLength: 256,
+  description:
+    "Optional human-readable label for the worker group, shown on the orchestration widget header. Honored only on the opening call (group_id:'new'); ignored when joining an existing group. Defaults to the first worker's description when omitted.",
+});
+
 const START_TASK_PARAMETERS = Type.Object(
   {
     agent: Type.Optional(START_TASK_AGENT_SCHEMA),
@@ -194,6 +200,7 @@ const START_TASK_PARAMETERS = Type.Object(
     description: Type.Optional(Type.String({ description: "Short display label for the background task." })),
     capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
     group_id: Type.Optional(GROUP_ID_SCHEMA),
+    group_label: Type.Optional(GROUP_LABEL_SCHEMA),
     notify: Type.Optional(
       Type.Boolean({
         description:
@@ -717,6 +724,7 @@ interface ParsedStartParams {
   wantsNotify: boolean;
   capabilityProfile?: string;
   groupId?: string;
+  groupLabel?: string;
 }
 
 function parseStartParams(rawParams: unknown): ParsedStartParams | { error: string } {
@@ -756,6 +764,9 @@ function parseStartParams(rawParams: unknown): ParsedStartParams | { error: stri
   }
   // Schema constrained group_id to 'new' | group_<hex>; normalize to a string.
   const groupId = typeof rawParams.group_id === "string" ? rawParams.group_id : undefined;
+  // Schema constrained group_label to a string; honored only when opening a
+  // group (group_id:'new'), mirroring how capabilityProfile is Task-only.
+  const groupLabel = typeof rawParams.group_label === "string" ? rawParams.group_label : undefined;
   return {
     agent,
     params,
@@ -766,6 +777,7 @@ function parseStartParams(rawParams: unknown): ParsedStartParams | { error: stri
     wantsNotify: rawParams.notify !== false,
     ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
     ...(groupId !== undefined ? { groupId } : {}),
+    ...(groupLabel !== undefined ? { groupLabel } : {}),
   };
 }
 
@@ -866,6 +878,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
         ? registry.openGroup({
             sessionKey,
             deliveryOptIn: wantsAutomaticDelivery,
+            ...(parsed.groupLabel !== undefined ? { label: parsed.groupLabel } : {}),
             ...(groupNotify !== undefined ? { notify: groupNotify } : {}),
             onSettle,
           })
@@ -967,6 +980,19 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
         };
       }
       const snapshot = started.started.snapshot;
+      // Idempotent-retry rollback: a deduplicated start returns the pre-existing
+      // task, so a group this call just minted (group_id:"new") would otherwise
+      // linger as an empty orphan — now a labeled one. Drop it when the dedup'd
+      // task is not in it. Mirrors the cap-rejection rollback above;
+      // dropEmptyGroup is a no-op once a group holds tasks or if it pre-existed.
+      if (
+        started.started.deduplicated
+        && groupId !== undefined
+        && !groupPreexisted
+        && snapshot.groupId !== groupId
+      ) {
+        registry.dropEmptyGroup(sessionKey, groupId);
+      }
       // Surface the launched agent on the pinned bottom-of-window widget so the
       // transcript card can stay empty (see renderMmrBackgroundTaskResult).
       refreshAsyncTaskWidget(ctx, registry, sessionKey);

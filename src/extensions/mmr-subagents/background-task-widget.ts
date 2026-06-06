@@ -148,9 +148,12 @@ interface WidgetRow {
  */
 interface WidgetSection {
   groupId: string | undefined;
-  group?: Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts">;
+  group?: Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts" | "label">;
   rows: WidgetRow[];
 }
+
+/** Width cap for the group label shown in the section header. */
+const WIDGET_GROUP_LABEL_LIMIT = 40;
 
 function backgroundStatusColor(status: string): string {
   if (status === "running" || status === "cancelling") return "warning";
@@ -277,7 +280,7 @@ function compareRows(a: WidgetRow, b: WidgetRow): number {
  * Status/counts are derived from the rows on hand, so the total may undercount
  * members that have already aged out — acceptable for a best-effort header.
  */
-function synthesizeGroup(rows: readonly WidgetRow[]): Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts"> {
+function synthesizeGroup(rows: readonly WidgetRow[]): Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts" | "label"> {
   const counts = { running: 0, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: rows.length };
   for (const r of rows) {
     if (r.status === "succeeded") r.terminalOutcome === "partial" ? counts.partial++ : counts.succeeded++;
@@ -291,7 +294,14 @@ function synthesizeGroup(rows: readonly WidgetRow[]): Pick<MmrAsyncTaskGroupSnap
     : counts.partial > 0 ? "partial"
     : counts.succeeded > 0 ? "completed"
     : "cancelled";
-  return { status, counts };
+  // Mirror the registry's earliest-child fallback so a synthesized header still
+  // carries a label when no live snapshot is available.
+  let earliest: WidgetRow | undefined;
+  for (const r of rows) {
+    if (!earliest || r.createdAtMs < earliest.createdAtMs) earliest = r;
+  }
+  const label = earliest?.description?.trim();
+  return { status, counts, ...(label ? { label } : {}) };
 }
 
 /**
@@ -337,7 +347,11 @@ function boardSections(
     }
     const resolved = resolveGroup?.(key);
     const group = resolved
-      ? { status: resolved.status, counts: resolved.counts }
+      ? {
+          status: resolved.status,
+          counts: resolved.counts,
+          ...(resolved.label !== undefined ? { label: resolved.label } : {}),
+        }
       : synthesizeGroup(rows);
     const minCreated = rows.reduce((min, r) => Math.min(min, r.createdAtMs), Number.POSITIVE_INFINITY);
     grouped.push({ section: { groupId: key, group, rows }, minCreated });
@@ -398,7 +412,11 @@ function renderRowLine(
   return `${indent}${glyph} ${agent}${desc}${metadata}${fresh}`;
 }
 
-/** `▸ group_94f0d2  ● completed · 3/4` — id dim, status dot+word in group colour. */
+/**
+ * `▸ Explore order services · group_94f0d2  ● completed · 3/4` when the group
+ * has a resolved label (label muted, id dim); `▸ group_94f0d2  ● …` when it has
+ * none. Status dot+word in the group colour; settled/total in dim.
+ */
 function renderSectionHeader(
   section: WidgetSection,
   theme: WidgetThemeLike | undefined,
@@ -408,14 +426,19 @@ function renderSectionHeader(
   const marker = safeFg("dim", "▸");
   const id = safeFg("dim", section.groupId);
   const group = section.group;
-  if (!group) return `${marker} ${id}`;
+  const label = group?.label ? compactOneLine(group.label, WIDGET_GROUP_LABEL_LIMIT) : undefined;
+  // Label leads, id trails as the dim disambiguator: `▸ <label> · <id>`.
+  const head = label !== undefined
+    ? `${marker} ${safeFg("muted", label)} ${safeFg("dim", "·")} ${id}`
+    : `${marker} ${id}`;
+  if (!group) return head;
   const color = groupStatusColor(group.status);
   const dot = safeFg(color, "●");
   const word = safeFg(color, group.status);
   const { succeeded, failed, cancelled, partial, total } = group.counts;
   const settled = succeeded + failed + cancelled + partial;
   const count = safeFg("dim", `${settled}/${total}`);
-  return `${marker} ${id}  ${dot} ${word} ${safeFg("dim", "·")} ${count}`;
+  return `${head}  ${dot} ${word} ${safeFg("dim", "·")} ${count}`;
 }
 
 /**

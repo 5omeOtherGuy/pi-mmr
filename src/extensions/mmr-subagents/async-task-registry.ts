@@ -370,6 +370,14 @@ export type MmrAsyncTaskGroupStatus = "running" | "failed" | "cancelled" | "part
 export interface MmrAsyncTaskGroupSnapshot {
   groupId: string;
   status: MmrAsyncTaskGroupStatus;
+  /**
+   * Human-readable group label resolved to a single source of truth: the
+   * explicit label supplied at {@link openGroup}, else the earliest child's
+   * description. Omitted only when the group has no explicit label and no
+   * children to borrow one from. The widget header and the (future) settlement
+   * card both read this so the label is computed once here.
+   */
+  label?: string;
   generatedAtMs: number;
   createdAtMs: number;
   updatedAtMs: number;
@@ -388,6 +396,12 @@ export interface WaitForAsyncTaskGroupResult {
 export interface OpenAsyncTaskGroupArgs {
   sessionKey: string;
   groupId?: string;
+  /**
+   * Optional human-readable group label. Set-once: stored only when this call
+   * mints a brand-new group, so a later sibling reuse can never clobber the
+   * opener's label. Trimmed and length-capped by the registry.
+   */
+  label?: string;
   /**
    * Whether automatic model-facing delivery is permitted for this group. The
    * opening call owns group-level delivery; sibling child starts do not change
@@ -555,9 +569,22 @@ interface MmrAsyncTaskRecord {
   promise?: Promise<void>;
 }
 
+/** Cap on a stored group label so a pathological input can't bloat the header. */
+export const ASYNC_TASK_GROUP_LABEL_MAX_LEN = 120;
+
+function normalizeGroupLabel(label: string | undefined): string | undefined {
+  if (typeof label !== "string") return undefined;
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.length > ASYNC_TASK_GROUP_LABEL_MAX_LEN
+    ? trimmed.slice(0, ASYNC_TASK_GROUP_LABEL_MAX_LEN)
+    : trimmed;
+}
+
 interface MmrAsyncTaskGroupRecord {
   groupId: string;
   sessionKey: string;
+  label?: string;
   createdAtMs: number;
   updatedAtMs: number;
   completedAtMs?: number;
@@ -696,12 +723,14 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   private ensureGroup(args: {
     sessionKey: string;
     groupId?: string;
+    label?: string;
     deliveryOptIn?: boolean;
     notify?: MmrAsyncTaskGroupNotifier;
     onSettle?: MmrAsyncTaskGroupSettleCallback;
   }): MmrAsyncTaskGroupRecord {
     const groupId = args.groupId ?? this.groupIdFactory();
     assertValidGroupId(groupId);
+    const label = normalizeGroupLabel(args.label);
     const map = this.groupMap(args.sessionKey);
     let group = map.get(groupId);
     if (!group) {
@@ -709,6 +738,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       group = {
         groupId,
         sessionKey: args.sessionKey,
+        ...(label !== undefined ? { label } : {}),
         createdAtMs: now,
         updatedAtMs: now,
         deliveryOptIn: args.deliveryOptIn === true,
@@ -719,6 +749,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       };
       map.set(groupId, group);
     } else {
+      // Set-once: a sibling reuse may fill an absent label, but never clobber
+      // the opener's.
+      if (label !== undefined) group.label ??= label;
       // The opener's delivery choice is authoritative; a sibling child start
       // must not flip it. Only upgrade disabled->enabled when this call also
       // supplies a group-level delivery owner (§6).
@@ -1095,13 +1128,32 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     return "completed";
   }
 
+  /**
+   * Resolve the single-source-of-truth group label: the explicit label set at
+   * open time, else the description of the earliest-created child (so the
+   * widget header and the future settlement card stay consistent).
+   */
+  private resolveGroupLabel(
+    group: MmrAsyncTaskGroupRecord,
+    children: readonly MmrAsyncTaskRecord[],
+  ): string | undefined {
+    if (group.label !== undefined) return group.label;
+    let earliest: MmrAsyncTaskRecord | undefined;
+    for (const child of children) {
+      if (!earliest || child.createdAtMs < earliest.createdAtMs) earliest = child;
+    }
+    return normalizeGroupLabel(earliest?.description);
+  }
+
   private groupSnapshot(group: MmrAsyncTaskGroupRecord): MmrAsyncTaskGroupSnapshot {
     const now = this.nowMs();
     const children = this.groupChildren(group);
     const status = this.groupStatus(children);
+    const label = this.resolveGroupLabel(group, children);
     return {
       groupId: group.groupId,
       status,
+      ...(label !== undefined ? { label } : {}),
       generatedAtMs: now,
       createdAtMs: group.createdAtMs,
       updatedAtMs: group.updatedAtMs,

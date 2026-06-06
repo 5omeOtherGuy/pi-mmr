@@ -83,10 +83,21 @@ codebase's injectable-time convention and keep the render pure/testable.
 
 ```ts
 function renderSectionHeader(section: WidgetSection, theme): string
-// ▸ group_94f0d2  ● completed · 4/4
+// ▸ group_94f0d2  ● completed · 4/4            (no label)
+// ▸ Explore order services · group_94f0d2  ● completed · 4/4   (with label)
 ```
 
-- `▸` + `groupId` in `dim`.
+- **Group label (follow-up, Delta 1):** when the group snapshot carries a
+  resolved `label`, it leads the header in `muted` and the `groupId` trails as
+  the `dim` disambiguator: `▸ <label> · <groupId>`. The label is compacted to a
+  40-char cap (`WIDGET_GROUP_LABEL_LIMIT`). With no label the header is
+  unchanged (`▸ <groupId>`). The label is resolved once in the registry
+  snapshot (`MmrAsyncTaskGroupSnapshot.label`) — the explicit `openGroup` label
+  (set-once, capped at 120) else the earliest child's description — so the
+  widget and the future settlement card share one source of truth; the
+  no-resolver `synthesizeGroup` fallback borrows the earliest visible row's
+  description. The opening `start_task` call sets it via `group_label`.
+- `▸` + `groupId` in `dim` (when no label is present).
 - `●` + status word in the **group status colour**: `running`→`warning`,
   `completed`→`success`, `failed`→`error`, `partial`→`warning`,
   `cancelled`→`muted` (new `groupStatusColor`, mirrors `backgroundStatusColor`).

@@ -657,8 +657,9 @@ describe("async task tools model-visible surface", () => {
       assert.equal(typeof t.renderCall, "function");
       assert.equal(typeof t.renderResult, "function");
     }
-    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "capabilityProfile", "description", "group_id", "notify", "params", "prompt"]);
+    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "capabilityProfile", "description", "group_id", "group_label", "notify", "params", "prompt"]);
     assert.equal(start.parameters.properties.notify.type, "boolean");
+    assert.equal(start.parameters.properties.group_label.type, "string");
     assert.deepEqual(start.parameters.properties.capabilityProfile.anyOf.map((entry) => entry.const), ["read-only", "read-write"]);
     assert.deepEqual(start.parameters.properties.agent.anyOf.map((entry) => entry.const), ["Task", "finder", "librarian"]);
     assert.equal(start.parameters.required, undefined);
@@ -1009,6 +1010,96 @@ describe("start_task capability profile and group side effects", () => {
     assert.match(rejected.content[0].text, /cannot start/i);
     assert.equal(rejected.details.taskId, undefined);
     assert.equal(registry.getGroup("S", "group_cab123"), undefined, "cap rejection must not leave an empty orphan group");
+    def.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("forwards group_label into the group it opens", async () => {
+    const { startTask, registry, def } = await makeToolset();
+    const result = await startTask.execute(
+      "g0",
+      { ...GOOD_PARAMS, group_id: "new", group_label: "Explore order services" },
+      undefined,
+      undefined,
+      CTX,
+    );
+    const groupId = result.details.groupId;
+    assert.ok(typeof groupId === "string" && groupId.length > 0, "opening call must mint a group id");
+    assert.equal(registry.getGroup("S", groupId).label, "Explore order services");
+    def.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("length-caps the forwarded group_label via the registry", async () => {
+    const { startTask, registry, def } = await makeToolset();
+    const result = await startTask.execute(
+      "g0",
+      { ...GOOD_PARAMS, group_id: "new", group_label: "x".repeat(130) },
+      undefined,
+      undefined,
+      CTX,
+    );
+    const groupId = result.details.groupId;
+    assert.equal(registry.getGroup("S", groupId).label.length, 120);
+    def.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("ignores group_label when joining an existing group (set-once on open)", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => `gt${n++}`, groupIdFactory: () => "group_abc999" });
+    const calls = [];
+    const runner = {
+      run(options) {
+        const call = { options };
+        calls.push(call);
+        return new Promise((resolve) => { call.resolve = resolve; });
+      },
+    };
+    const deps = {
+      registry,
+      sessionKey: "S",
+      resolveInvocation: stubTaskInvocation(),
+      runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+    };
+    const startTask = tools.createStartTaskTool(deps);
+
+    const first = await startTask.execute("g0", { ...GOOD_PARAMS, group_id: "new", group_label: "First" }, undefined, undefined, CTX);
+    const groupId = first.details.groupId;
+    assert.equal(registry.getGroup("S", groupId).label, "First");
+    await startTask.execute("g1", { ...GOOD_PARAMS, description: "second", group_id: groupId, group_label: "Second" }, undefined, undefined, CTX);
+    assert.equal(registry.getGroup("S", groupId).label, "First", "label is set-once on open; joining must not clobber it");
+    calls[0].resolve(makeWorkerResult());
+    calls[1].resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("does not leave an empty labeled orphan group when an opener retries (idempotent dedup)", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let g = 0;
+    const groupIds = ["group_aaa001", "group_bbb002"];
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "t1", groupIdFactory: () => groupIds[g++] });
+    const def = makeDeferredRunner();
+    const deps = {
+      registry,
+      sessionKey: "S",
+      resolveInvocation: stubTaskInvocation(),
+      runner: def.runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+    };
+    const startTask = tools.createStartTaskTool(deps);
+    // First opener mints group_aaa001 and attaches the task.
+    const first = await startTask.execute("same-call", { ...GOOD_PARAMS, group_id: "new", group_label: "Wave" }, undefined, undefined, CTX);
+    assert.equal(first.details.groupId, "group_aaa001");
+    // Retry with the SAME tool-call id mints group_bbb002 but dedups to the existing task.
+    const retry = await startTask.execute("same-call", { ...GOOD_PARAMS, group_id: "new", group_label: "Wave" }, undefined, undefined, CTX);
+    assert.equal(retry.details.groupId, "group_aaa001", "dedup returns the original task's group");
+    assert.equal(registry.getGroup("S", "group_bbb002"), undefined, "the retry's freshly minted group must not linger as an orphan");
+    assert.equal(registry.getGroup("S", "group_aaa001").label, "Wave");
     def.resolve(makeWorkerResult());
     await flush();
   });
