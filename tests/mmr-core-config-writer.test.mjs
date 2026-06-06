@@ -255,3 +255,114 @@ describe("mmr-core settings: subagentModelPreferences", () => {
     }
   });
 });
+
+describe("mmr-core config-flow: renders current values from disk, not stale snapshots", () => {
+  // Build a ctx that drives `runMmrConfigFlow` into a single branch, captures
+  // the rendered choice labels, then cancels (returns undefined). The home dir
+  // is redirected to an empty temp dir so `loadMmrCoreSettings(ctx.cwd)` only
+  // sees the project file we write, keeping the test deterministic.
+  function makeCtx(project, capturedChoices, branch) {
+    return {
+      cwd: project,
+      hasUI: true,
+      modelRegistry: { getAvailable: () => [] },
+      ui: {
+        select: async (title, options) => {
+          if (/what do you want to set/.test(title)) return branch;
+          capturedChoices.push(...options);
+          return undefined; // cancel after capturing the rendered list
+        },
+        input: async () => undefined,
+        confirm: async () => false,
+        notify: () => {},
+        setStatus: () => {},
+        theme: { fg: (_color, value) => value },
+      },
+    };
+  }
+
+  // Bindings deliberately return an EMPTY (stale) snapshot, simulating a
+  // session that started before the on-disk preference was written. Setters
+  // are kept so the public bindings interface stays intact.
+  function staleBindings() {
+    return {
+      getConfiguredModelPreferences: () => ({}),
+      getConfiguredSubagentModelPreferences: () => ({}),
+      setConfiguredModePreferences: () => {},
+      setConfiguredSubagentPreferences: () => {},
+    };
+  }
+
+  function withTempHome(home, run) {
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      return run();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
+    }
+  }
+
+  it("shows the on-disk mode preference instead of the binding's startup snapshot", async () => {
+    const { runMmrConfigFlow } = await importSource("extensions/mmr-core/config-flow.ts");
+
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-config-flow-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      // Custom 'deep' preference that differs from both the mode default
+      // (gpt-5.5 → claude-opus-4-8) and the stale binding (empty).
+      writeFileSync(
+        path.join(project, ".pi/settings.json"),
+        JSON.stringify({ mmrCore: { modelPreferences: { deep: ["openai-codex/o5-preview"] } } }),
+      );
+
+      const captured = [];
+      await withTempHome(home, () => runMmrConfigFlow(makeCtx(project, captured, "mode"), staleBindings()));
+
+      const deepChoice = captured.find((choice) => choice.startsWith("deep \u2014"));
+      assert.ok(deepChoice, `expected a 'deep' mode choice, got ${JSON.stringify(captured)}`);
+      assert.match(deepChoice, /openai-codex\/o5-preview/, "deep current value should reflect the on-disk preference");
+      assert.doesNotMatch(deepChoice, /gpt-5\.5/, "deep current value must not fall back to the stale binding's mode default");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("shows the on-disk subagent preference instead of the binding's startup snapshot", async () => {
+    const { runMmrConfigFlow } = await importSource("extensions/mmr-core/config-flow.ts");
+
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-config-flow-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      // Custom 'finder' override that differs from the profile default and the
+      // empty stale binding.
+      writeFileSync(
+        path.join(project, ".pi/settings.json"),
+        JSON.stringify({ mmrCore: { subagentModelPreferences: { finder: ["openai-codex/o5-preview"] } } }),
+      );
+
+      const captured = [];
+      await withTempHome(home, () => runMmrConfigFlow(makeCtx(project, captured, "subagent"), staleBindings()));
+
+      const finderChoice = captured.find((choice) => choice.startsWith("finder \u2014"));
+      assert.ok(finderChoice, `expected a 'finder' subagent choice, got ${JSON.stringify(captured)}`);
+      assert.match(finderChoice, /openai-codex\/o5-preview/, "finder current value should reflect the on-disk override");
+      assert.doesNotMatch(finderChoice, /gpt-5\.4-mini/, "finder current value must not fall back to the stale binding's profile default");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});

