@@ -260,6 +260,16 @@ function escapeXmlAttr(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function compactOneLine(value: string, limit = 220): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= limit) return compact;
+  return `${compact.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+function withPeriod(value: string): string {
+  return /[.!?…]$/.test(value) ? value : `${value}.`;
+}
+
 function detailsContextFromSnapshot(snapshot: MmrAsyncTaskInternalSnapshot): TaskDetailsContext {
   return {
     prompt: snapshot.prompt,
@@ -281,6 +291,30 @@ function firstText(content: AgentToolResult<unknown>["content"]): string | undef
     if (part.type === "text" && typeof part.text === "string") return part.text;
   }
   return undefined;
+}
+
+function workerResultReason(result: MmrAsyncTaskInternalSnapshot["finalResult"]): string | undefined {
+  if (!result) return undefined;
+  if (result.spawnError) return `spawn failed: ${result.spawnError}`;
+  if (result.subagentActivationError) return `subagent activation failed: ${result.subagentActivationError}`;
+  if (result.errorMessage) return result.errorMessage;
+  if (result.aborted) return "worker was cancelled before producing a result";
+  if (result.signal) return `worker exited after signal ${result.signal}`;
+  if (typeof result.exitCode === "number" && result.exitCode !== 0) return `worker exited with code ${result.exitCode}`;
+  return undefined;
+}
+
+function nonNormalOutcomeText(snapshot: MmrAsyncTaskInternalSnapshot): string | undefined {
+  if (snapshot.status === "succeeded") return undefined;
+  if (snapshot.status !== "failed" && snapshot.status !== "cancelled") return undefined;
+  const toolText = snapshot.finalToolResult ? firstText(snapshot.finalToolResult.content) : undefined;
+  const cancellationReason = snapshot.status === "cancelled" ? snapshot.cancelReason : undefined;
+  const reason = snapshot.errorMessage
+    ?? cancellationReason
+    ?? workerResultReason(snapshot.finalResult)
+    ?? toolText
+    ?? (snapshot.status === "failed" ? "worker did not complete successfully" : "worker was cancelled before producing a result");
+  return `${snapshot.status} — ${withPeriod(compactOneLine(reason))}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -498,12 +532,14 @@ function buildCompletionNotifier(
   const sendMessage = (pi as { sendMessage?: ExtensionAPI["sendMessage"] } | undefined)?.sendMessage;
   if (typeof sendMessage !== "function") return undefined;
   return (snapshot) => {
+    const outcomeText = nonNormalOutcomeText(snapshot);
     sendMessage(
       {
         customType: ASYNC_TASK_COMPLETION_CUSTOM_TYPE,
         content:
           `<task-notification task_id="${escapeXmlAttr(snapshot.taskId)}" status="${snapshot.status}">\n` +
-          `Background task "${escapeXmlAttr(snapshot.description)}" ${snapshot.status}. ` +
+          `Background task "${escapeXmlAttr(snapshot.description)}" ${snapshot.status}.\n` +
+          (outcomeText ? `Non-normal outcome: ${escapeXmlAttr(outcomeText)}\n` : "") +
           `Use this notification as the default completion signal; the worker result is ready for this follow-up turn. ` +
           `Poll only later as an elapsed-time fallback or during multi-worker orchestration.\n` +
           `</task-notification>`,
@@ -517,6 +553,7 @@ function buildCompletionNotifier(
           taskId: snapshot.taskId,
           status: snapshot.status,
           description: snapshot.description,
+          ...(outcomeText !== undefined ? { outcomeText } : {}),
         } satisfies AsyncTaskCompletionDetails,
       },
       { deliverAs: "followUp", triggerTurn: true },

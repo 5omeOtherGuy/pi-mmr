@@ -1413,6 +1413,7 @@ describe("renderAsyncTaskCompletionMessage", () => {
             taskId: "task_3",
             status: "failed",
             description: "Doomed worker",
+            outcomeText: "failed — kaboom.",
           }),
           { expanded: false },
           fakeTheme,
@@ -1421,6 +1422,7 @@ describe("renderAsyncTaskCompletionMessage", () => {
     );
     assert.match(failed, /background task .* failed/);
     assert.match(failed, /Doomed worker/);
+    assert.match(failed, /failed — kaboom\./);
 
     const cancelled = normalize(
       renderText(

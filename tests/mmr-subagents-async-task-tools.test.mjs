@@ -559,7 +559,8 @@ describe("async task tools completion push", () => {
   async function pushHarness(overrides = {}) {
     const tools = await importSource(TOOLS_MODULE);
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
-    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "t1" });
+    const { registryDeps, ...toolOverrides } = overrides;
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "t1", ...registryDeps });
     const def = makeDeferredRunner();
     const sent = [];
     const deps = {
@@ -569,9 +570,15 @@ describe("async task tools completion push", () => {
       runner: def.runner,
       buildSystemPrompt: () => "WORKER PROMPT",
       pi: { sendMessage: (m, o) => sent.push({ m, o }) },
-      ...overrides,
+      ...toolOverrides,
     };
-    return { registry, def, sent, startTask: tools.createStartTaskTool(deps) };
+    return {
+      registry,
+      def,
+      sent,
+      startTask: tools.createStartTaskTool(deps),
+      cancel: tools.createTaskCancelTool(deps),
+    };
   }
 
   it("pushes exactly once by default", async () => {
@@ -583,9 +590,35 @@ describe("async task tools completion push", () => {
     assert.deepEqual(sent[0].o, { deliverAs: "followUp", triggerTurn: true });
     assert.equal(sent[0].m.customType, "mmr-subagents.async-task-completion");
     assert.match(sent[0].m.content, /Use this notification as the default completion signal/);
+    assert.doesNotMatch(sent[0].m.content, /Non-normal outcome:/);
+    assert.equal(sent[0].m.details.outcomeText, undefined);
     assert.doesNotMatch(sent[0].m.content, /Use task_poll\(\{task_id:/);
     assert.equal(sent[0].m.display, false, "completion push is model-facing only; inline lifecycle cards own human rendering");
     assert.equal(registry.getTask("S", "t1").completionPush, "sent");
+  });
+
+  it("includes explicit non-normal outcome text in the model-facing completion push", async () => {
+    const { def, sent, startTask } = await pushHarness();
+    await startTask.execute("c0", GOOD_PARAMS, undefined, undefined, CTX);
+    def.reject(new Error("kaboom"));
+    await flush();
+
+    assert.equal(sent.length, 1, "failed tasks still send one completion push");
+    assert.match(sent[0].m.content, /Non-normal outcome: failed — kaboom\./);
+    assert.equal(sent[0].m.details.outcomeText, "failed — kaboom.");
+  });
+
+  it("prefers the explicit cancellation reason in the model-facing completion push", async () => {
+    const { def, sent, startTask, cancel } = await pushHarness({ registryDeps: { cancelDeadAfterMs: 30 } });
+    await startTask.execute("c0", GOOD_PARAMS, undefined, undefined, CTX);
+    const cancelPromise = cancel.execute("x0", { task_id: "t1", reason: "duplicate work" }, undefined, undefined, CTX);
+    def.resolve(makeWorkerResult({ aborted: true, signal: "SIGTERM", exitCode: null }));
+    await cancelPromise;
+    await flush();
+
+    assert.equal(sent.length, 1, "cancelled tasks still send one completion push");
+    assert.match(sent[0].m.content, /Non-normal outcome: cancelled — duplicate work\./);
+    assert.equal(sent[0].m.details.outcomeText, "cancelled — duplicate work.");
   });
 
   it("does not push when the task opts out", async () => {
