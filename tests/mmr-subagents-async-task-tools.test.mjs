@@ -152,26 +152,31 @@ describe("start_task", () => {
     await flush();
   });
 
-  it("updates the footer status while background agents are running and clears it on settle", async () => {
-    const statusCalls = [];
+  it("refreshes the bottom-of-window widget while running and clears it on settle", async () => {
+    const widgetCalls = [];
     const ctx = {
       ...CTX,
-      ui: { setStatus: (key, text) => statusCalls.push({ key, text }) },
+      mode: "tui",
+      ui: { setWidget: (id, value) => widgetCalls.push({ id, value }) },
     };
     const { startTask, def } = await makeToolset();
 
     await startTask.execute("call-1", GOOD_PARAMS, undefined, undefined, ctx);
-    assert.deepEqual(statusCalls.at(-1), {
-      key: "mmr-subagents.async-tasks",
-      text: "1 background agent running",
-    });
+    assert.equal(
+      typeof widgetCalls.at(-1)?.value,
+      "function",
+      "launching a background agent pins the widget factory",
+    );
 
+    // The registry settle hook (onSettle) must clear the widget even though this
+    // task settles without anyone polling it.
     def.resolve(makeWorkerResult());
     await flush();
-    assert.deepEqual(statusCalls.at(-1), {
-      key: "mmr-subagents.async-tasks",
-      text: undefined,
-    });
+    assert.equal(
+      widgetCalls.at(-1)?.value,
+      undefined,
+      "settling the only background agent clears the widget via onSettle",
+    );
   });
 
   it("does NOT bind the worker to the per-call tool signal", async () => {
@@ -559,6 +564,7 @@ describe("async task tools completion push", () => {
     assert.equal(sent.length, 1, "exactly one completion push");
     assert.deepEqual(sent[0].o, { deliverAs: "followUp", triggerTurn: true });
     assert.equal(sent[0].m.customType, "mmr-subagents.async-task-completion");
+    assert.equal(sent[0].m.display, false, "completion push is model-facing only; the widget + poll cards own human rendering");
     assert.equal(registry.getTask("S", "t1").completionPush, "sent");
   });
 

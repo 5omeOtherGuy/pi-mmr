@@ -912,7 +912,7 @@ describe("renderMmrSubagentResult", () => {
 });
 
 describe("background task rendering", () => {
-  it("renders a running background task as a collapsed subagent-style box", async () => {
+  it("renders no transcript card for a successful start_task (the widget owns it)", async () => {
     const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
     const component = renderMmrBackgroundTaskResult(
       "start_task",
@@ -931,15 +931,40 @@ describe("background task rendering", () => {
       fakeTheme,
       makeContext({ agent: "finder" }),
     );
-    const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder .* background ⠋ running/);
-    assert.doesNotMatch(rendered, /in background/);
-    assert.match(rendered, /Find async task rendering/);
-    assert.doesNotMatch(rendered, /started background worker/);
+    assert.equal(renderText(component), "");
   });
 
-  it("renders a terminal background task final output without trail details", async () => {
+  it("renders a still-running polled task as a subagent-style box with its model", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      {
+        content: [{ type: "text", text: "task_poll: finder task task_1 is running." }],
+        details: {
+          worker: "mmr-subagents.async-task",
+          tool: "task_poll",
+          agent: "finder",
+          taskId: "task_1",
+          status: "running",
+          description: "Find async task rendering",
+          prompt: "Find async task rendering in progress-rendering.ts",
+          final: { worker: "mmr-subagents.finder", reportedModel: "openai-codex/gpt-5.4-mini" },
+        },
+      },
+      { expanded: false, isPartial: false },
+      fakeTheme,
+      makeContext({ task_id: "task_1" }),
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /finder • gpt-5\.4-mini • background ⠋ running/);
+    assert.doesNotMatch(rendered, /in background/);
+    assert.match(rendered, /Find async task rendering in progress-rendering\.ts/);
+    assert.doesNotMatch(rendered, /task_poll: finder task/);
+  });
+
+  it("renders a collapsed terminal background task with its model and final output", async () => {
     const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
     const component = renderMmrBackgroundTaskResult(
       "task_poll",
@@ -953,7 +978,45 @@ describe("background task rendering", () => {
           status: "succeeded",
           description: "Find async task rendering",
           finalOutput: "Final answer",
-          final: { trail: [{ type: "assistant", text: "hidden trail" }] },
+          final: {
+            worker: "mmr-subagents.finder",
+            reportedModel: "openai-codex/gpt-5.4-mini",
+            trail: [{ type: "assistant", text: "hidden trail" }],
+          },
+        },
+      },
+      { expanded: false, isPartial: false },
+      fakeTheme,
+      makeContext({ task_id: "task_1" }),
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /finder • gpt-5\.4-mini • background ✓ completed/);
+    assert.match(rendered, /Find async task rendering/);
+    assert.match(rendered, /Final answer/);
+    assert.doesNotMatch(rendered, /hidden trail/);
+    assert.doesNotMatch(rendered, /task_poll: finder task/);
+  });
+
+  it("expands a terminal background task to the worker trail like a blocking subagent", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      {
+        content: [{ type: "text", text: "task_poll: finder task task_1 succeeded.\n\nFinal answer" }],
+        details: {
+          worker: "mmr-subagents.async-task",
+          tool: "task_poll",
+          agent: "finder",
+          taskId: "task_1",
+          status: "succeeded",
+          description: "Find async task rendering",
+          finalOutput: "Final answer",
+          final: {
+            worker: "mmr-subagents.finder",
+            reportedModel: "openai-codex/gpt-5.4-mini",
+            trail: [{ type: "assistant", text: "shown trail" }],
+          },
         },
       },
       { expanded: true, isPartial: false },
@@ -962,11 +1025,9 @@ describe("background task rendering", () => {
     );
     const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder .* background ✓ completed/);
-    assert.match(rendered, /Find async task rendering/);
+    assert.match(rendered, /finder • gpt-5\.4-mini • background ✓ completed/);
+    assert.match(rendered, /shown trail/);
     assert.match(rendered, /Final answer/);
-    assert.doesNotMatch(rendered, /hidden trail/);
-    assert.doesNotMatch(rendered, /task_poll: finder task/);
   });
 
   it("renders a cancelled background task distinctly from a failure", async () => {

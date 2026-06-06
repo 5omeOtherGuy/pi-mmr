@@ -79,7 +79,15 @@ interface BackgroundTaskDetails {
   status?: string;
   board?: unknown;
   description?: string;
+  /** Full worker prompt/query, used as the rendered Markdown task body. */
+  prompt?: string;
   finalOutput?: string;
+  /** Projected subagent details (model, usage, trail) for the rich card. */
+  final?: unknown;
+  /** Resolved worker model id; header/usage fallback before first progress. */
+  resolvedModel?: string;
+  /** Worker context window; usage-line fallback before first progress. */
+  contextWindow?: number;
   errorMessage?: string;
 }
 
@@ -1012,9 +1020,10 @@ function backgroundStatusBadge(
 
 function backgroundTaskHeaderLine(
   details: BackgroundTaskDetails,
+  model: string | undefined,
   theme: SubagentTheme,
 ): string {
-  const title = formatTitle(details.agent ?? "background task", undefined, theme);
+  const title = formatTitle(details.agent ?? "background task", model, theme);
   const badge = theme.fg("muted", "background");
   return `${title} ${theme.fg("muted", "•")} ${badge}  ${backgroundStatusBadge(details.status, theme)}`;
 }
@@ -1189,9 +1198,9 @@ export function renderMmrBackgroundTaskCall(
 export function renderMmrBackgroundTaskResult(
   _toolName: string,
   result: AgentToolResult<unknown>,
-  _options: { expanded?: boolean; isPartial?: boolean },
+  options: { expanded?: boolean; isPartial?: boolean },
   theme: SubagentTheme,
-  _context?: RenderContextLike,
+  context?: RenderContextLike,
 ): Component {
   const details = result.details as BackgroundTaskDetails | undefined;
   const output = textContent(result).trim();
@@ -1210,6 +1219,13 @@ export function renderMmrBackgroundTaskResult(
     return container;
   }
 
+  // start_task's success row is owned by the persistent bottom widget, not the
+  // transcript: returning an empty component avoids a duplicate launch card
+  // (and stops opaque task ids from leading the visible output).
+  if (details.tool === "start_task" && details.taskId && !details.errorMessage) {
+    return new Container();
+  }
+
   const renderStatus = backgroundTaskRenderStatus(details.status);
   if (!renderStatus || !details.taskId || !details.agent) {
     const container = new Container();
@@ -1217,10 +1233,27 @@ export function renderMmrBackgroundTaskResult(
     return container;
   }
 
+  // Reuse the subagent rendering building blocks so a polled background result
+  // matches a blocking subagent (model in the header, Markdown task body,
+  // trail, usage line), while keeping background-specific status semantics
+  // (neutral cancelled, the `background` badge).
+  const subDetails = (isRecord(details.final) ? details.final : {}) as SubagentProgressDetails;
+  const model = stripProvider(subDetails.reportedModel ?? subDetails.model ?? details.resolvedModel);
+  const contextWindow = subDetails.contextWindow ?? details.contextWindow;
+  const expanded = options.expanded === true;
+  const operation = details.prompt
+    ?? subDetails.query
+    ?? subDetails.prompt
+    ?? subDetails.task
+    ?? subDetails.description
+    ?? details.description;
+
   const container = new Container();
   const box = new Box(1, 1, backgroundStatusBgFn(details.status, theme));
-  box.addChild(new Text(backgroundTaskHeaderLine(details, theme), 0, 0));
-  addMarkdownBlock(box, details.description ?? details.taskId, theme, { paddingX: 1 });
+  box.addChild(new Text(backgroundTaskHeaderLine(details, model, theme), 0, 0));
+  const preview = taskPreview(operation ?? "", expanded);
+  addMarkdownBlock(box, preview.body, theme, { paddingX: 1 });
+  if (preview.hint) box.addChild(new Text(theme.fg("muted", preview.hint), 1, 0));
   // Gate the error diagnostic on the raw status, not the coarse renderStatus
   // (which folds cancelled into failed). A user-initiated cancel is neutral and
   // must not surface an error-colored diagnostic.
@@ -1229,10 +1262,23 @@ export function renderMmrBackgroundTaskResult(
   }
   container.addChild(box);
 
-  const finalOutput = details.finalOutput?.trim();
-  if (finalOutput && renderStatus !== "running") {
+  const cleanFinal = details.finalOutput?.trim() ?? "";
+  const trail = subDetails.trail ?? [];
+  if (expanded && trail.length > 0) {
     container.addChild(new Spacer(1));
-    addFinalOutputBox(container, finalOutput, theme);
+    addTrailComponents(container, trail, cleanFinal, theme, context, operation, true);
+  }
+
+  if (cleanFinal && renderStatus !== "running") {
+    container.addChild(new Spacer(1));
+    addFinalOutputBox(container, cleanFinal, theme);
+  }
+
+  if (renderStatus !== "running" && (subDetails.usage || model)) {
+    container.addChild(new Spacer(1));
+    container.addChild(
+      new WorkerStatusLineComponent(details.agent, subDetails.usage, contextWindow, model, theme),
+    );
   }
 
   return container;
