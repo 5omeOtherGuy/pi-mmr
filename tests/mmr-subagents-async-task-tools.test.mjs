@@ -154,7 +154,7 @@ describe("start_task", () => {
     await flush();
   });
 
-  it("refreshes the bottom-of-window widget while running and clears it on settle", async () => {
+  it("refreshes the bottom-of-window widget while running and retains the settled row briefly", async () => {
     const widgetCalls = [];
     const ctx = {
       ...CTX,
@@ -170,14 +170,15 @@ describe("start_task", () => {
       "launching a background agent pins the widget factory",
     );
 
-    // The registry settle hook (onSettle) must clear the widget even though this
-    // task settles without anyone polling it.
+    // The registry settle hook (onSettle) still fires, but a freshly-settled
+    // task now lingers in place for WIDGET_FINISHED_RETENTION_MS so the wave can
+    // be seen flipping to ✓ before it drops — it does not clear immediately.
     def.resolve(makeWorkerResult());
     await flush();
     assert.equal(
-      widgetCalls.at(-1)?.value,
-      undefined,
-      "settling the only background agent clears the widget via onSettle",
+      typeof widgetCalls.at(-1)?.value,
+      "function",
+      "a just-settled background agent is retained on the widget for the brief drop-off window",
     );
   });
 

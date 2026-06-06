@@ -273,7 +273,9 @@ function refreshAsyncTaskWidget(
   sessionKey: string,
 ): void {
   try {
-    refreshBackgroundTaskWidget(ctx, registry.listTasks(sessionKey));
+    refreshBackgroundTaskWidget(ctx, registry.listTasks(sessionKey), (groupId) =>
+      registry.getGroup(sessionKey, groupId),
+    );
   } catch {
     // UI mirror only; ignore.
   }
@@ -1042,7 +1044,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       }
       if (!control.taskId) {
         const board = registry.listTasks(sessionKey);
-        refreshBackgroundTaskWidget(ctx, board);
+        refreshBackgroundTaskWidget(ctx, board, (groupId) => registry.getGroup(sessionKey, groupId));
         return {
           content: [{ type: "text", text: renderBoard(board) }],
           details: { worker: "mmr-subagents.async-task", tool: TASK_POLL_TOOL_NAME, board },

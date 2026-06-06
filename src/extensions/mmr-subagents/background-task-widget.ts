@@ -15,11 +15,27 @@
  */
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { MmrAsyncTaskBoard, MmrAsyncTaskBoardEntry } from "./async-task-registry.js";
+import type {
+  MmrAsyncTaskBoard,
+  MmrAsyncTaskBoardEntry,
+  MmrAsyncTaskGroupSnapshot,
+  MmrAsyncTaskGroupStatus,
+} from "./async-task-registry.js";
 import {
   formatMmrWorkerTokens,
   stripMmrWorkerModelProvider,
 } from "./worker-usage-format.js";
+
+/**
+ * Resolves a group's live snapshot (status + counts) for its section header.
+ * Supplied by the caller, which holds the registry. Optional: when absent —
+ * or when it returns `undefined` — the section header is synthesized from the
+ * rows on hand instead. The widget owns no state, so it never reads a registry
+ * directly.
+ */
+export type MmrWidgetGroupResolver = (
+  groupId: string,
+) => MmrAsyncTaskGroupSnapshot | undefined;
 
 /**
  * Stable widget id used with `ctx.ui.setWidget(...)`. Process-wide unique to
@@ -27,8 +43,17 @@ import {
  */
 export const BACKGROUND_TASK_WIDGET_ID = "pi-mmr-background-tasks";
 
-/** Cap visible rows so a long backlog never pushes the editor off-screen. */
+/** Cap visible lines (group headers + rows) so a long backlog never pushes the editor off-screen. */
 const WIDGET_MAX_ROWS = 8;
+
+/**
+ * How long a finished task lingers in its group section before dropping off the
+ * live widget. The registry retains terminal records far longer (for the result
+ * card); this is purely the brief "show the wave settle in place" window so a
+ * completed group flips to ✓/✕ for a beat before the section disappears. The
+ * eventual task_poll/wait card remains the durable record of the outcome.
+ */
+const WIDGET_FINISHED_RETENTION_MS = 8_000;
 
 /**
  * Pi's native streaming loader frames (see `@earendil-works/pi-tui` `Loader`).
@@ -103,6 +128,7 @@ interface WidgetRow {
   agent: string;
   description: string;
   runtimeMs: number;
+  createdAtMs: number;
   resolvedModel?: string;
   contextWindow?: number;
   usage?: MmrAsyncTaskBoardEntry["usage"];
@@ -110,7 +136,20 @@ interface WidgetRow {
   latestToolStatus?: MmrAsyncTaskBoardEntry["latestToolStatus"];
   toolCount?: number;
   terminalOutcome?: MmrAsyncTaskBoardEntry["terminalOutcome"];
+  capabilityProfile?: string;
   groupId?: string;
+}
+
+/**
+ * One group's worth of rows plus the snapshot that labels its header. The
+ * synthetic ungrouped bucket has `groupId === undefined` and no `group`; it is
+ * rendered headerless when it is the only section (so non-grouped Task usage is
+ * byte-identical to the pre-grouping widget).
+ */
+interface WidgetSection {
+  groupId: string | undefined;
+  group?: Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts">;
+  rows: WidgetRow[];
 }
 
 function backgroundStatusColor(status: string): string {
@@ -118,6 +157,15 @@ function backgroundStatusColor(status: string): string {
   if (status === "succeeded") return "success";
   if (status === "failed") return "error";
   // cancelled / unknown: neutral. A user-initiated cancel is not an error.
+  return "muted";
+}
+
+function groupStatusColor(status: MmrAsyncTaskGroupStatus): string {
+  if (status === "running") return "warning";
+  if (status === "completed") return "success";
+  if (status === "failed") return "error";
+  if (status === "partial") return "warning";
+  // cancelled / unknown: neutral, mirroring a row-level cancel.
   return "muted";
 }
 
@@ -175,6 +223,9 @@ function widgetMetadataParts(row: WidgetRow): string[] {
   if (elapsed) parts.push(elapsed);
   const model = stripMmrWorkerModelProvider(row.resolvedModel);
   if (model) parts.push(model);
+  // Capability profile (e.g. `read-only` / `read-write`) shown verbatim as the
+  // worker's lane. The group id is NOT a row chip — it labels the section header.
+  if (row.capabilityProfile) parts.push(row.capabilityProfile);
   if (row.latestToolName) {
     const suffix = row.latestToolStatus === "running" ? "…" : "";
     parts.push(`${row.latestToolName}${suffix}`);
@@ -184,20 +235,20 @@ function widgetMetadataParts(row: WidgetRow): string[] {
   if (typeof row.toolCount === "number" && Number.isFinite(row.toolCount) && row.toolCount > 0) {
     parts.push(`${formatMmrWorkerTokens(row.toolCount)} tool${row.toolCount === 1 ? "" : "s"}`);
   }
-  if (row.groupId) parts.push(row.groupId);
   if (row.terminalOutcome === "partial") parts.push("partial");
   const context = formatContextUsage(row);
   if (context) parts.push(context);
   return parts;
 }
 
-function boardRows(board: MmrAsyncTaskBoard): WidgetRow[] {
-  const toRow = (entry: MmrAsyncTaskBoardEntry): WidgetRow => ({
+function toRow(entry: MmrAsyncTaskBoardEntry): WidgetRow {
+  return {
     status: entry.status,
     freshness: entry.freshness,
     agent: entry.agent,
     description: entry.description,
     runtimeMs: entry.runtimeMs,
+    createdAtMs: entry.createdAtMs,
     ...(entry.resolvedModel !== undefined ? { resolvedModel: entry.resolvedModel } : {}),
     ...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
     ...(entry.usage !== undefined ? { usage: entry.usage } : {}),
@@ -205,24 +256,101 @@ function boardRows(board: MmrAsyncTaskBoard): WidgetRow[] {
     ...(entry.latestToolStatus !== undefined ? { latestToolStatus: entry.latestToolStatus } : {}),
     ...(entry.toolCount !== undefined ? { toolCount: entry.toolCount } : {}),
     ...(entry.terminalOutcome !== undefined ? { terminalOutcome: entry.terminalOutcome } : {}),
+    ...(entry.capabilityProfile !== undefined ? { capabilityProfile: entry.capabilityProfile } : {}),
     ...(entry.groupId !== undefined ? { groupId: entry.groupId } : {}),
-  });
-  // Show only in-flight work (active + stalled), mirroring Pi/Claude Code's
-  // bottom indicator which surfaces running agents. A finished task drops off
-  // the widget; its result is shown by the eventual task_poll/wait card, so a
-  // completed agent is never displayed in two places at once.
-  return [
-    ...board.active.map(toRow),
-    ...board.stalled.map(toRow),
-  ];
+  };
 }
 
-function renderRowLine(
-  row: WidgetRow,
-  theme: WidgetThemeLike | undefined,
-  activeFrame: string | undefined,
-): string {
-  const safeFg = (name: string, value: string): string => {
+function isTerminalRowStatus(status: string): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+/** Non-terminal rows sort above settled ones; ties break by launch order. */
+function compareRows(a: WidgetRow, b: WidgetRow): number {
+  const rank = (r: WidgetRow) => (isTerminalRowStatus(r.status) ? 1 : 0);
+  return rank(a) - rank(b) || a.createdAtMs - b.createdAtMs;
+}
+
+/**
+ * Synthesize a section header when no live group snapshot is available (the
+ * resolver is absent or the group has already been pruned from the registry).
+ * Status/counts are derived from the rows on hand, so the total may undercount
+ * members that have already aged out — acceptable for a best-effort header.
+ */
+function synthesizeGroup(rows: readonly WidgetRow[]): Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts"> {
+  const counts = { running: 0, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: rows.length };
+  for (const r of rows) {
+    if (r.status === "succeeded") r.terminalOutcome === "partial" ? counts.partial++ : counts.succeeded++;
+    else if (r.status === "failed") counts.failed++;
+    else if (r.status === "cancelled") counts.cancelled++;
+    else counts.running++;
+  }
+  const status: MmrAsyncTaskGroupStatus =
+    counts.running > 0 ? "running"
+    : counts.failed > 0 ? "failed"
+    : counts.partial > 0 ? "partial"
+    : counts.succeeded > 0 ? "completed"
+    : "cancelled";
+  return { status, counts };
+}
+
+/**
+ * Bucket the board into per-group sections in display order: groups first
+ * (earliest-launched group on top, mirroring how parallel waves stack), then a
+ * trailing ungrouped bucket. In-flight rows (active + stalled) always show;
+ * finished rows show only while within `WIDGET_FINISHED_RETENTION_MS` of
+ * completion, so a settled wave lingers briefly in place before dropping.
+ */
+function boardSections(
+  board: MmrAsyncTaskBoard,
+  resolveGroup: MmrWidgetGroupResolver | undefined,
+  nowMs: number,
+): WidgetSection[] {
+  const retainedFinished = board.finished.filter(
+    (entry) =>
+      typeof entry.completedAtMs === "number" &&
+      Number.isFinite(entry.completedAtMs) &&
+      nowMs - entry.completedAtMs <= WIDGET_FINISHED_RETENTION_MS,
+  );
+  const entries = [...board.active, ...board.stalled, ...retainedFinished];
+
+  const order: (string | undefined)[] = [];
+  const buckets = new Map<string | undefined, WidgetRow[]>();
+  for (const entry of entries) {
+    const key = entry.groupId;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+      order.push(key);
+    }
+    bucket.push(toRow(entry));
+  }
+
+  const grouped: { section: WidgetSection; minCreated: number }[] = [];
+  let ungrouped: WidgetSection | undefined;
+  for (const key of order) {
+    const rows = buckets.get(key)!.slice().sort(compareRows);
+    if (key === undefined) {
+      ungrouped = { groupId: undefined, rows };
+      continue;
+    }
+    const resolved = resolveGroup?.(key);
+    const group = resolved
+      ? { status: resolved.status, counts: resolved.counts }
+      : synthesizeGroup(rows);
+    const minCreated = rows.reduce((min, r) => Math.min(min, r.createdAtMs), Number.POSITIVE_INFINITY);
+    grouped.push({ section: { groupId: key, group, rows }, minCreated });
+  }
+  grouped.sort((a, b) => a.minCreated - b.minCreated);
+
+  const sections = grouped.map((g) => g.section);
+  if (ungrouped) sections.push(ungrouped);
+  return sections;
+}
+
+function makeSafeFg(theme: WidgetThemeLike | undefined) {
+  return (name: string, value: string): string => {
     if (!theme) return value;
     try {
       return theme.fg(name, value);
@@ -230,6 +358,15 @@ function renderRowLine(
       return value;
     }
   };
+}
+
+function renderRowLine(
+  row: WidgetRow,
+  theme: WidgetThemeLike | undefined,
+  activeFrame: string | undefined,
+  indent = "",
+): string {
+  const safeFg = makeSafeFg(theme);
   const color = backgroundStatusColor(row.status);
   const glyph = safeFg(color, backgroundStatusGlyph(row.status, activeFrame));
   const agent = safeFg("accent", row.agent);
@@ -243,28 +380,76 @@ function renderRowLine(
   const fresh = row.freshness === "stalled" || row.freshness === "dead"
     ? ` ${safeFg(row.freshness === "dead" ? "error" : "warning", `[${row.freshness}]`)}`
     : "";
-  return `${glyph} ${agent}${desc}${metadata}${fresh}`;
+  return `${indent}${glyph} ${agent}${desc}${metadata}${fresh}`;
 }
 
+/** `▸ group_94f0d2  ● completed · 3/4` — id dim, status dot+word in group colour. */
+function renderSectionHeader(
+  section: WidgetSection,
+  theme: WidgetThemeLike | undefined,
+): string {
+  const safeFg = makeSafeFg(theme);
+  if (section.groupId === undefined) return safeFg("dim", "▸ ungrouped");
+  const marker = safeFg("dim", "▸");
+  const id = safeFg("dim", section.groupId);
+  const group = section.group;
+  if (!group) return `${marker} ${id}`;
+  const color = groupStatusColor(group.status);
+  const dot = safeFg(color, "●");
+  const word = safeFg(color, group.status);
+  const { succeeded, failed, cancelled, partial, total } = group.counts;
+  const settled = succeeded + failed + cancelled + partial;
+  const count = safeFg("dim", `${settled}/${total}`);
+  return `${marker} ${id}  ${dot} ${word} ${safeFg("dim", "·")} ${count}`;
+}
+
+/**
+ * Flatten sections into widget lines: each group prints a header then its
+ * indented rows. A lone ungrouped section prints headerless and flush-left, so
+ * non-grouped Task usage renders exactly as before. `WIDGET_MAX_ROWS` counts
+ * headers + rows together and never splits a group across the cut — whole
+ * trailing sections drop and collapse into `… N more`.
+ */
 function renderWidgetLines(
-  rows: readonly WidgetRow[],
+  sections: readonly WidgetSection[],
   theme: WidgetThemeLike | undefined,
   activeFrame: string | undefined,
 ): string[] {
-  const safeFg = (name: string, value: string): string => {
-    if (!theme) return value;
-    try {
-      return theme.fg(name, value);
-    } catch {
-      return value;
+  const safeFg = makeSafeFg(theme);
+  const hasGroups = sections.some((s) => s.groupId !== undefined);
+
+  // Build each section as a self-contained block of lines so truncation can
+  // drop whole sections rather than orphaning rows under a header.
+  const blocks = sections.map((section) => {
+    const showHeader = section.groupId !== undefined || hasGroups;
+    const indent = showHeader ? "  " : "";
+    const lines: string[] = [];
+    if (showHeader) lines.push(renderSectionHeader(section, theme));
+    for (const row of section.rows) lines.push(renderRowLine(row, theme, activeFrame, indent));
+    return { lines, rowCount: section.rows.length };
+  });
+
+  const out: string[] = [];
+  let omittedRows = 0;
+  let used = 0;
+  for (const block of blocks) {
+    if (used + block.lines.length <= WIDGET_MAX_ROWS) {
+      out.push(...block.lines);
+      used += block.lines.length;
+    } else if (out.length === 0) {
+      // First section alone exceeds the cap: show as many of its lines as fit
+      // (header + leading rows) rather than rendering an empty widget.
+      const slice = block.lines.slice(0, WIDGET_MAX_ROWS);
+      out.push(...slice);
+      used += slice.length;
+      const shownRows = Math.max(0, slice.length - (block.lines.length - block.rowCount));
+      omittedRows += block.rowCount - shownRows;
+    } else {
+      omittedRows += block.rowCount;
     }
-  };
-  const visible = rows.slice(0, WIDGET_MAX_ROWS);
-  const remaining = rows.length - visible.length;
-  const lines: string[] = [];
-  for (const row of visible) lines.push(renderRowLine(row, theme, activeFrame));
-  if (remaining > 0) lines.push(safeFg("dim", `… ${remaining} more`));
-  return lines;
+  }
+  if (omittedRows > 0) out.push(safeFg("dim", `… ${omittedRows} more`));
+  return out;
 }
 
 function truncateWidgetLines(lines: readonly string[], width: number): string[] {
@@ -283,11 +468,13 @@ function truncateWidgetLines(lines: readonly string[], width: number): string[] 
 export function refreshBackgroundTaskWidget(
   ctx: WidgetCtxLike | undefined,
   board: MmrAsyncTaskBoard,
+  resolveGroup?: MmrWidgetGroupResolver,
 ): void {
   if (!isTuiWidgetSurface(ctx) || !ctx?.ui) return;
   try {
-    const rows = boardRows(board);
-    if (rows.length === 0) {
+    const sections = boardSections(board, resolveGroup, board.generatedAtMs);
+    const rowTotal = sections.reduce((sum, s) => sum + s.rows.length, 0);
+    if (rowTotal === 0) {
       ctx.ui.setWidget(BACKGROUND_TASK_WIDGET_ID, undefined, { placement: "belowEditor" });
       return;
     }
@@ -316,7 +503,7 @@ export function refreshBackgroundTaskWidget(
       return {
         render: (width) =>
           truncateWidgetLines(
-            renderWidgetLines(rows, theme, hasActive ? PI_LOADER_FRAMES[frame] : undefined),
+            renderWidgetLines(sections, theme, hasActive ? PI_LOADER_FRAMES[frame] : undefined),
             width,
           ),
         invalidate: () => {},
