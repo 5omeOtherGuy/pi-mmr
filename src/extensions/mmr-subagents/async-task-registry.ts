@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import type {
-  MmrWorkerProgressSnapshot,
-  MmrWorkerResult,
-  MmrWorkerTrailItem,
-  MmrWorkerUsageStats,
+import {
+  deriveAsyncTerminalOutcome,
+  type MmrAsyncTerminalOutcome,
+  type MmrWorkerProgressSnapshot,
+  type MmrWorkerResult,
+  type MmrWorkerTrailItem,
+  type MmrWorkerUsageStats,
 } from "./runner.js";
 
 /**
@@ -90,6 +92,7 @@ export const DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION = 8;
 export interface MmrAsyncTaskToolRunResult {
   toolResult: AgentToolResult<unknown>;
   status?: MmrAsyncTaskStatus;
+  terminalOutcome?: MmrAsyncTerminalOutcome;
   errorMessage?: string;
 }
 
@@ -125,6 +128,8 @@ export interface StartAsyncTaskArgs {
   resolvedModel?: string;
   contextWindow?: number;
   workerTools: readonly string[];
+  capabilityProfile?: string;
+  groupId?: string;
   run: MmrAsyncTaskRun;
   /**
    * Optional at-most-once completion notifier. When provided, the
@@ -175,6 +180,9 @@ export interface MmrAsyncTaskInternalSnapshot {
   runtimeMs: number;
   lastProgressAgeMs?: number;
   completionPush: MmrAsyncTaskCompletionPushState;
+  terminalOutcome?: MmrAsyncTerminalOutcome;
+  capabilityProfile?: string;
+  groupId?: string;
   latestProgress?: MmrWorkerProgressSnapshot;
   latestToolResult?: AgentToolResult<unknown>;
   finalResult?: MmrWorkerResult;
@@ -207,6 +215,9 @@ export interface MmrAsyncTaskSnapshot {
   runtimeMs: number;
   lastProgressAgeMs?: number;
   completionPush: MmrAsyncTaskCompletionPushState;
+  terminalOutcome?: MmrAsyncTerminalOutcome;
+  capabilityProfile?: string;
+  groupId?: string;
   /** Length of the worker prompt in characters; the text itself is not exposed. */
   promptChars: number;
   /** Whether a terminal worker result is available (read it via task_poll). */
@@ -243,6 +254,9 @@ export function toPublicAsyncTaskSnapshot(
       ? { lastProgressAgeMs: snapshot.lastProgressAgeMs }
       : {}),
     completionPush: snapshot.completionPush,
+    ...(snapshot.terminalOutcome !== undefined ? { terminalOutcome: snapshot.terminalOutcome } : {}),
+    ...(snapshot.capabilityProfile !== undefined ? { capabilityProfile: snapshot.capabilityProfile } : {}),
+    ...(snapshot.groupId !== undefined ? { groupId: snapshot.groupId } : {}),
     promptChars: snapshot.prompt.length,
     hasFinalResult: snapshot.finalResult !== undefined || snapshot.finalToolResult !== undefined,
     ...(snapshot.errorMessage !== undefined ? { errorMessage: snapshot.errorMessage } : {}),
@@ -268,6 +282,9 @@ export interface MmrAsyncTaskBoardEntry {
   latestToolName?: string;
   latestToolStatus?: Extract<MmrWorkerTrailItem, { type: "tool" }>["status"];
   toolCount?: number;
+  terminalOutcome?: MmrAsyncTerminalOutcome;
+  capabilityProfile?: string;
+  groupId?: string;
   errorMessage?: string;
 }
 
@@ -280,20 +297,74 @@ export interface MmrAsyncTaskBoard {
   finished: MmrAsyncTaskBoardEntry[];
 }
 
+export type MmrAsyncTaskGroupStatus = "running" | "failed" | "cancelled" | "partial" | "completed";
+
+export interface MmrAsyncTaskGroupSnapshot {
+  groupId: string;
+  status: MmrAsyncTaskGroupStatus;
+  generatedAtMs: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  completedAtMs?: number;
+  completionPush: MmrAsyncTaskCompletionPushState;
+  taskIds: string[];
+  counts: { running: number; succeeded: number; failed: number; cancelled: number; partial: number; total: number };
+}
+
+export interface WaitForAsyncTaskGroupResult {
+  found: boolean;
+  timedOut: boolean;
+  snapshot?: MmrAsyncTaskGroupSnapshot;
+}
+
+export interface OpenAsyncTaskGroupArgs {
+  sessionKey: string;
+  groupId?: string;
+  notify?: MmrAsyncTaskGroupNotifier;
+  onSettle?: MmrAsyncTaskGroupSettleCallback;
+}
+
+export type MmrAsyncTaskGroupNotifier = (
+  snapshot: MmrAsyncTaskGroupSnapshot,
+) => void | Promise<void>;
+
+export type MmrAsyncTaskGroupSettleCallback = (
+  snapshot: MmrAsyncTaskGroupSnapshot,
+) => void | Promise<void>;
+
 export interface MmrAsyncTaskRegistry {
   startTask(args: StartAsyncTaskArgs): StartAsyncTaskResult;
+  openGroup(args: OpenAsyncTaskGroupArgs): MmrAsyncTaskGroupSnapshot;
   getTask(sessionKey: string, taskId: string): MmrAsyncTaskInternalSnapshot | undefined;
+  getGroup(sessionKey: string, groupId: string): MmrAsyncTaskGroupSnapshot | undefined;
+  /**
+   * Remove a group only if it currently holds no tasks. Returns true when a
+   * group was dropped. Used to roll back a just-opened group when the
+   * accompanying task start is rejected (e.g. concurrency cap), so a failed
+   * start never leaves an empty orphan group.
+   */
+  dropEmptyGroup(sessionKey: string, groupId: string): boolean;
   listTasks(sessionKey: string): MmrAsyncTaskBoard;
   waitForTask(args: {
     sessionKey: string;
     taskId: string;
     timeoutMs?: number;
   }): Promise<WaitForAsyncTaskResult>;
+  waitForGroup(args: {
+    sessionKey: string;
+    groupId: string;
+    timeoutMs?: number;
+  }): Promise<WaitForAsyncTaskGroupResult>;
   cancelTask(args: {
     sessionKey: string;
     taskId: string;
     reason?: string;
   }): Promise<MmrAsyncTaskInternalSnapshot | undefined>;
+  cancelGroup(args: {
+    sessionKey: string;
+    groupId: string;
+    reason?: string;
+  }): Promise<MmrAsyncTaskGroupSnapshot | undefined>;
   prune(sessionKey?: string): void;
   shutdownSession(sessionKey?: string, reason?: string): void;
 }
@@ -303,6 +374,8 @@ export interface MmrAsyncTaskRegistryDeps {
   nowMs?: () => number;
   /** Opaque task-id factory. Injectable for deterministic tests. */
   idFactory?: () => string;
+  /** Opaque group-id factory. Injectable for deterministic tests. */
+  groupIdFactory?: () => string;
   /** Per-session concurrency cap. */
   maxRunningPerSession?: number;
   maxRuntimeMs?: number;
@@ -325,6 +398,8 @@ interface MmrAsyncTaskRecord {
   resolvedModel?: string;
   contextWindow?: number;
   workerTools: readonly string[];
+  capabilityProfile?: string;
+  groupId?: string;
   status: MmrAsyncTaskStatus;
   createdAtMs: number;
   startedAtMs: number;
@@ -343,6 +418,7 @@ interface MmrAsyncTaskRecord {
   watchdogTimer?: ReturnType<typeof setTimeout>;
   latestProgress?: MmrWorkerProgressSnapshot;
   latestToolResult?: AgentToolResult<unknown>;
+  terminalOutcome?: MmrAsyncTerminalOutcome;
   finalResult?: MmrWorkerResult;
   finalToolResult?: AgentToolResult<unknown>;
   errorMessage?: string;
@@ -353,12 +429,40 @@ interface MmrAsyncTaskRecord {
   promise?: Promise<void>;
 }
 
+interface MmrAsyncTaskGroupRecord {
+  groupId: string;
+  sessionKey: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  completedAtMs?: number;
+  finalObservedAtMs?: number;
+  notify?: MmrAsyncTaskGroupNotifier;
+  onSettle?: MmrAsyncTaskGroupSettleCallback;
+  completionPush: MmrAsyncTaskCompletionPushState;
+  waiters: Set<() => void>;
+  taskIds: Set<string>;
+}
+
 function isTerminalStatus(status: MmrAsyncTaskStatus): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
 }
 
 function defaultIdFactory(): string {
   return `task_${randomBytes(6).toString("hex")}`;
+}
+
+function defaultGroupIdFactory(): string {
+  return `group_${randomBytes(6).toString("hex")}`;
+}
+
+export function isValidAsyncTaskGroupId(groupId: string): boolean {
+  return /^group_[a-f0-9]{6,}$/.test(groupId);
+}
+
+function assertValidGroupId(groupId: string): void {
+  if (!isValidAsyncTaskGroupId(groupId)) {
+    throw new Error(`Invalid async task group id "${groupId}"; expected group_<hex>.`);
+  }
 }
 
 function isAgentToolResult(value: unknown): value is AgentToolResult<unknown> {
@@ -390,9 +494,11 @@ function latestToolFromProgress(
 
 class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   private readonly sessions = new Map<string, Map<string, MmrAsyncTaskRecord>>();
+  private readonly groups = new Map<string, Map<string, MmrAsyncTaskGroupRecord>>();
   private readonly taskIdByToolCallId = new Map<string, string>();
   private readonly nowMs: () => number;
   private readonly idFactory: () => string;
+  private readonly groupIdFactory: () => string;
   private readonly maxRunningPerSession: number;
   private readonly maxRuntimeMs: number;
   private readonly stalledAfterMs: number;
@@ -406,6 +512,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   constructor(deps: MmrAsyncTaskRegistryDeps = {}) {
     this.nowMs = deps.nowMs ?? (() => Date.now());
     this.idFactory = deps.idFactory ?? defaultIdFactory;
+    this.groupIdFactory = deps.groupIdFactory ?? defaultGroupIdFactory;
     this.maxRunningPerSession = deps.maxRunningPerSession ?? DEFAULT_ASYNC_TASK_MAX_RUNNING_PER_SESSION;
     this.maxRuntimeMs = deps.maxRuntimeMs ?? ASYNC_TASK_MAX_RUNTIME_MS;
     this.stalledAfterMs = deps.stalledAfterMs ?? ASYNC_TASK_STALLED_AFTER_MS;
@@ -423,6 +530,49 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       this.sessions.set(sessionKey, map);
     }
     return map;
+  }
+
+  private groupMap(sessionKey: string): Map<string, MmrAsyncTaskGroupRecord> {
+    let map = this.groups.get(sessionKey);
+    if (!map) {
+      map = new Map<string, MmrAsyncTaskGroupRecord>();
+      this.groups.set(sessionKey, map);
+    }
+    return map;
+  }
+
+  private ensureGroup(args: OpenAsyncTaskGroupArgs): MmrAsyncTaskGroupRecord {
+    const groupId = args.groupId ?? this.groupIdFactory();
+    assertValidGroupId(groupId);
+    const map = this.groupMap(args.sessionKey);
+    let group = map.get(groupId);
+    if (!group) {
+      const now = this.nowMs();
+      group = {
+        groupId,
+        sessionKey: args.sessionKey,
+        createdAtMs: now,
+        updatedAtMs: now,
+        ...(args.notify !== undefined ? { notify: args.notify } : {}),
+        ...(args.onSettle !== undefined ? { onSettle: args.onSettle } : {}),
+        completionPush: args.notify !== undefined ? "pending" : "disabled",
+        waiters: new Set(),
+        taskIds: new Set(),
+      };
+      map.set(groupId, group);
+    } else {
+      if (args.notify !== undefined && group.notify === undefined) {
+        group.notify = args.notify;
+        if (group.completionPush === "disabled") group.completionPush = "pending";
+      }
+      if (args.onSettle !== undefined) group.onSettle = args.onSettle;
+    }
+    return group;
+  }
+
+  openGroup(args: OpenAsyncTaskGroupArgs): MmrAsyncTaskGroupSnapshot {
+    this.prune(args.sessionKey);
+    return this.groupSnapshot(this.ensureGroup(args));
   }
 
   private toolCallIndexKey(sessionKey: string, toolCallId: string): string {
@@ -450,6 +600,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       return { ok: false, reason: "concurrency-cap", runningCount, cap: this.maxRunningPerSession };
     }
 
+    const group = args.groupId !== undefined
+      ? this.ensureGroup({ sessionKey: args.sessionKey, groupId: args.groupId })
+      : undefined;
     const now = this.nowMs();
     const controller = new AbortController();
     const record: MmrAsyncTaskRecord = {
@@ -463,6 +616,8 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       ...(args.resolvedModel !== undefined ? { resolvedModel: args.resolvedModel } : {}),
       ...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
       workerTools: args.workerTools,
+      ...(args.capabilityProfile !== undefined ? { capabilityProfile: args.capabilityProfile } : {}),
+      ...(args.groupId !== undefined ? { groupId: args.groupId } : {}),
       status: "running",
       createdAtMs: now,
       startedAtMs: now,
@@ -472,12 +627,16 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       controller,
       runGeneration: 0,
       runnerSettled: false,
-      ...(args.notify !== undefined ? { notify: args.notify } : {}),
+      ...(args.groupId === undefined && args.notify !== undefined ? { notify: args.notify } : {}),
       ...(args.onSettle !== undefined ? { onSettle: args.onSettle } : {}),
-      completionPush: args.notify !== undefined ? "pending" : "disabled",
+      completionPush: args.groupId === undefined && args.notify !== undefined ? "pending" : "disabled",
       waiters: new Set(),
     };
     map.set(record.taskId, record);
+    if (group) {
+      group.taskIds.add(record.taskId);
+      group.updatedAtMs = now;
+    }
     this.taskIdByToolCallId.set(indexKey, record.taskId);
 
     const generation = record.runGeneration;
@@ -538,22 +697,27 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     record.runnerSettled = true;
     record.completedAtMs = now;
     record.updatedAtMs = now;
+    record.terminalOutcome = deriveAsyncTerminalOutcome(result, { partialOutputPolicy: "prefer-usable-output" });
 
     if (record.cancelRequestedAtMs !== undefined) {
       if (record.expiredByWatchdog) {
         record.status = "failed";
         record.terminalFreshness = "dead";
+        record.terminalOutcome = "failed";
         record.errorMessage = result.errorMessage ?? "Background task exceeded its maximum runtime.";
       } else {
         record.status = "cancelled";
         record.terminalFreshness = "healthy";
+        record.terminalOutcome = undefined;
       }
     } else if (result.aborted) {
       record.status = "cancelled";
       record.terminalFreshness = "healthy";
+      record.terminalOutcome = undefined;
     } else if (result.spawnError || result.subagentActivationError) {
       record.status = "failed";
       record.terminalFreshness = "healthy";
+      record.terminalOutcome = "failed";
       record.errorMessage = result.spawnError ?? result.subagentActivationError ?? result.errorMessage;
     } else if (result.exitCode === 0) {
       record.status = "succeeded";
@@ -561,6 +725,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     } else {
       record.status = "failed";
       record.terminalFreshness = "healthy";
+      record.terminalOutcome = "failed";
       if (result.errorMessage) record.errorMessage = result.errorMessage;
     }
 
@@ -576,15 +741,18 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     record.runnerSettled = true;
     record.completedAtMs = now;
     record.updatedAtMs = now;
+    record.terminalOutcome = result.terminalOutcome;
     let status = result.status ?? "succeeded";
     if (record.cancelRequestedAtMs !== undefined) {
       if (record.expiredByWatchdog) {
         status = "failed";
         record.terminalFreshness = "dead";
+        record.terminalOutcome = "failed";
         record.errorMessage = result.errorMessage ?? "Background task exceeded its maximum runtime.";
       } else {
         status = "cancelled";
         record.terminalFreshness = "healthy";
+        record.terminalOutcome = undefined;
       }
     } else {
       record.terminalFreshness = "healthy";
@@ -606,6 +774,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     record.updatedAtMs = now;
     record.status = "failed";
     record.terminalFreshness = "dead";
+    record.terminalOutcome = "failed";
     record.errorMessage = record.expiredByWatchdog
       ? "Background task exceeded its maximum runtime."
       : message;
@@ -627,14 +796,17 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       if (record.expiredByWatchdog) {
         record.status = "failed";
         record.terminalFreshness = "dead";
+        record.terminalOutcome = "failed";
         record.errorMessage = "Background task exceeded its maximum runtime.";
       } else {
         record.status = "cancelled";
         record.terminalFreshness = "healthy";
+        record.terminalOutcome = undefined;
       }
     } else {
       record.status = "failed";
       record.terminalFreshness = "healthy";
+      record.terminalOutcome = "failed";
       record.errorMessage = err instanceof Error ? err.message : String(err);
     }
     this.settle(record);
@@ -685,6 +857,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     }
     this.fireSettleCallback(record);
     this.maybeNotify(record, observedByWaiter);
+    this.maybeSettleGroup(record.groupId, record.sessionKey);
   }
 
   private fireSettleCallback(record: MmrAsyncTaskRecord): void {
@@ -732,6 +905,113 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       );
   }
 
+  private groupChildren(group: MmrAsyncTaskGroupRecord): MmrAsyncTaskRecord[] {
+    const map = this.sessions.get(group.sessionKey);
+    if (!map) return [];
+    return [...group.taskIds].flatMap((taskId) => {
+      const record = map.get(taskId);
+      return record ? [record] : [];
+    });
+  }
+
+  private groupStatus(children: readonly MmrAsyncTaskRecord[]): MmrAsyncTaskGroupStatus {
+    if (children.length === 0 || children.some((child) => !isTerminalStatus(child.status))) return "running";
+    if (children.some((child) => child.status === "failed" || child.terminalFreshness === "dead")) return "failed";
+    if (children.some((child) => child.status === "cancelled")) return "cancelled";
+    if (children.some((child) => child.terminalOutcome === "partial")) return "partial";
+    return "completed";
+  }
+
+  private groupSnapshot(group: MmrAsyncTaskGroupRecord): MmrAsyncTaskGroupSnapshot {
+    const now = this.nowMs();
+    const children = this.groupChildren(group);
+    const status = this.groupStatus(children);
+    return {
+      groupId: group.groupId,
+      status,
+      generatedAtMs: now,
+      createdAtMs: group.createdAtMs,
+      updatedAtMs: group.updatedAtMs,
+      ...(group.completedAtMs !== undefined ? { completedAtMs: group.completedAtMs } : {}),
+      completionPush: group.completionPush,
+      taskIds: children.map((child) => child.taskId),
+      counts: {
+        running: children.filter((child) => !isTerminalStatus(child.status)).length,
+        succeeded: children.filter((child) => child.status === "succeeded").length,
+        failed: children.filter((child) => child.status === "failed").length,
+        cancelled: children.filter((child) => child.status === "cancelled").length,
+        partial: children.filter((child) => child.terminalOutcome === "partial").length,
+        total: children.length,
+      },
+    };
+  }
+
+  private markGroupObserved(group: MmrAsyncTaskGroupRecord): void {
+    const now = this.nowMs();
+    group.finalObservedAtMs = now;
+    for (const child of this.groupChildren(group)) {
+      if (isTerminalStatus(child.status) && child.finalObservedAtMs === undefined) child.finalObservedAtMs = now;
+    }
+  }
+
+  private fireGroupSettleCallback(group: MmrAsyncTaskGroupRecord): void {
+    const onSettle = group.onSettle;
+    if (!onSettle) return;
+    const snapshot = this.groupSnapshot(group);
+    void Promise.resolve().then(() => onSettle(snapshot)).catch(() => {
+      // UI lifecycle hooks are best-effort and must never affect group state.
+    });
+  }
+
+  private maybeNotifyGroup(group: MmrAsyncTaskGroupRecord, observedByWaiter = false): void {
+    if (group.completionPush !== "pending" || !group.notify) return;
+    if (observedByWaiter || group.finalObservedAtMs !== undefined) {
+      group.completionPush = "observed";
+      return;
+    }
+    const used = this.completionPushesUsed.get(group.sessionKey) ?? 0;
+    if (used >= this.maxCompletionPushesPerSession) {
+      group.completionPush = "suppressed";
+      return;
+    }
+    this.completionPushesUsed.set(group.sessionKey, used + 1);
+    group.completionPush = "sending";
+    const snapshot = this.groupSnapshot(group);
+    void Promise.resolve()
+      .then(() => group.notify?.(snapshot))
+      .then(
+        () => {
+          group.completionPush = "sent";
+        },
+        () => {
+          group.completionPush = "failed";
+        },
+      );
+  }
+
+  private maybeSettleGroup(groupId: string | undefined, sessionKey: string): void {
+    if (!groupId) return;
+    const group = this.groups.get(sessionKey)?.get(groupId);
+    if (!group) return;
+    const snapshot = this.groupSnapshot(group);
+    group.updatedAtMs = this.nowMs();
+    if (snapshot.status === "running") return;
+    if (group.completedAtMs === undefined) {
+      group.completedAtMs = this.nowMs();
+      const observedByWaiter = group.waiters.size > 0;
+      for (const waiter of [...group.waiters]) {
+        group.waiters.delete(waiter);
+        try {
+          waiter();
+        } catch {
+          // ignore
+        }
+      }
+      this.fireGroupSettleCallback(group);
+      this.maybeNotifyGroup(group, observedByWaiter);
+    }
+  }
+
   getTask(sessionKey: string, taskId: string): MmrAsyncTaskInternalSnapshot | undefined {
     this.prune(sessionKey);
     const record = this.sessions.get(sessionKey)?.get(taskId);
@@ -742,6 +1022,21 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       record.finalObservedAtMs = this.nowMs();
     }
     return this.snapshot(record);
+  }
+
+  getGroup(sessionKey: string, groupId: string): MmrAsyncTaskGroupSnapshot | undefined {
+    this.prune(sessionKey);
+    if (!isValidAsyncTaskGroupId(groupId)) return undefined;
+    const group = this.groups.get(sessionKey)?.get(groupId);
+    return group ? this.groupSnapshot(group) : undefined;
+  }
+
+  dropEmptyGroup(sessionKey: string, groupId: string): boolean {
+    const map = this.groups.get(sessionKey);
+    const group = map?.get(groupId);
+    if (!map || !group || group.taskIds.size > 0) return false;
+    map.delete(groupId);
+    return true;
   }
 
   listTasks(sessionKey: string): MmrAsyncTaskBoard {
@@ -780,24 +1075,15 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     return board;
   }
 
-  async waitForTask(args: {
-    sessionKey: string;
-    taskId: string;
-    timeoutMs?: number;
-  }): Promise<WaitForAsyncTaskResult> {
-    this.prune(args.sessionKey);
-    const record = this.sessions.get(args.sessionKey)?.get(args.taskId);
-    if (!record) {
-      return { found: false, timedOut: false };
-    }
+  private async waitForRecord(
+    record: MmrAsyncTaskRecord,
+    timeoutMs: number,
+    observe: boolean,
+  ): Promise<boolean> {
     if (isTerminalStatus(record.status)) {
-      if (record.finalObservedAtMs === undefined) record.finalObservedAtMs = this.nowMs();
-      return { found: true, timedOut: false, snapshot: this.snapshot(record) };
+      if (observe && record.finalObservedAtMs === undefined) record.finalObservedAtMs = this.nowMs();
+      return true;
     }
-
-    const rawTimeout = args.timeoutMs ?? DEFAULT_TASK_WAIT_TIMEOUT_MS;
-    const timeoutMs = Math.max(0, Math.min(rawTimeout, MAX_TASK_WAIT_TIMEOUT_MS));
-
     let timer: ReturnType<typeof setTimeout> | undefined;
     let waiter: (() => void) | undefined;
     const settled = await new Promise<boolean>((resolve) => {
@@ -808,12 +1094,63 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     });
     if (timer) clearTimeout(timer);
     if (waiter) record.waiters.delete(waiter);
-
-    if (settled && isTerminalStatus(record.status) && record.finalObservedAtMs === undefined) {
+    if (settled && observe && isTerminalStatus(record.status) && record.finalObservedAtMs === undefined) {
       record.finalObservedAtMs = this.nowMs();
     }
+    return settled;
+  }
+
+  async waitForTask(args: {
+    sessionKey: string;
+    taskId: string;
+    timeoutMs?: number;
+  }): Promise<WaitForAsyncTaskResult> {
+    this.prune(args.sessionKey);
+    const record = this.sessions.get(args.sessionKey)?.get(args.taskId);
+    if (!record) {
+      return { found: false, timedOut: false };
+    }
+    const rawTimeout = args.timeoutMs ?? DEFAULT_TASK_WAIT_TIMEOUT_MS;
+    const timeoutMs = Math.max(0, Math.min(rawTimeout, MAX_TASK_WAIT_TIMEOUT_MS));
+    const settled = await this.waitForRecord(record, timeoutMs, true);
     // A wait timeout must NOT cancel the worker.
     return { found: true, timedOut: !settled, snapshot: this.snapshot(record) };
+  }
+
+  async waitForGroup(args: {
+    sessionKey: string;
+    groupId: string;
+    timeoutMs?: number;
+  }): Promise<WaitForAsyncTaskGroupResult> {
+    this.prune(args.sessionKey);
+    if (!isValidAsyncTaskGroupId(args.groupId)) return { found: false, timedOut: false };
+    const group = this.groups.get(args.sessionKey)?.get(args.groupId);
+    if (!group) return { found: false, timedOut: false };
+    const rawTimeout = args.timeoutMs ?? DEFAULT_TASK_WAIT_TIMEOUT_MS;
+    const timeoutMs = Math.max(0, Math.min(rawTimeout, MAX_TASK_WAIT_TIMEOUT_MS));
+    const children = this.groupChildren(group);
+    const snapshotBefore = this.groupSnapshot(group);
+    if (snapshotBefore.status !== "running") {
+      this.markGroupObserved(group);
+      return { found: true, timedOut: false, snapshot: this.groupSnapshot(group) };
+    }
+    if (children.length === 0) return { found: true, timedOut: false, snapshot: snapshotBefore };
+    const waits = children
+      .filter((child) => !isTerminalStatus(child.status))
+      .map((child) => this.waitForRecord(child, timeoutMs, false));
+    let groupTimer: ReturnType<typeof setTimeout> | undefined;
+    const allSettled = await Promise.race([
+      Promise.allSettled(waits).then(() => true),
+      new Promise<boolean>((resolve) => {
+        groupTimer = setTimeout(() => resolve(false), timeoutMs);
+        if (typeof groupTimer.unref === "function") groupTimer.unref();
+      }),
+    ]);
+    if (groupTimer) clearTimeout(groupTimer);
+    const snapshot = this.groupSnapshot(group);
+    const terminal = snapshot.status !== "running";
+    if (terminal) this.markGroupObserved(group);
+    return { found: true, timedOut: !allSettled || !terminal, snapshot: this.groupSnapshot(group) };
   }
 
   async cancelTask(args: {
@@ -860,6 +1197,25 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     return this.snapshot(record);
   }
 
+  async cancelGroup(args: {
+    sessionKey: string;
+    groupId: string;
+    reason?: string;
+  }): Promise<MmrAsyncTaskGroupSnapshot | undefined> {
+    this.prune(args.sessionKey);
+    if (!isValidAsyncTaskGroupId(args.groupId)) return undefined;
+    const group = this.groups.get(args.sessionKey)?.get(args.groupId);
+    if (!group) return undefined;
+    const children = this.groupChildren(group).filter((child) => !isTerminalStatus(child.status));
+    await Promise.allSettled(children.map((child) => this.cancelTask({
+      sessionKey: args.sessionKey,
+      taskId: child.taskId,
+      ...(args.reason !== undefined ? { reason: args.reason } : {}),
+    })));
+    this.maybeSettleGroup(args.groupId, args.sessionKey);
+    return this.groupSnapshot(group);
+  }
+
   prune(sessionKey?: string): void {
     const now = this.nowMs();
     const keys = sessionKey !== undefined ? [sessionKey] : [...this.sessions.keys()];
@@ -887,8 +1243,19 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
         if (now - anchor > ttl) {
           this.clearWatchdog(record);
           map.delete(taskId);
+          if (record.groupId) this.groups.get(key)?.get(record.groupId)?.taskIds.delete(taskId);
           this.taskIdByToolCallId.delete(this.toolCallIndexKey(key, record.originToolCallId));
         }
+      }
+      const groupMap = this.groups.get(key);
+      if (groupMap) {
+        for (const [groupId, group] of [...groupMap.entries()]) {
+          for (const taskId of [...group.taskIds]) {
+            if (!map.has(taskId)) group.taskIds.delete(taskId);
+          }
+          if (group.taskIds.size === 0) groupMap.delete(groupId);
+        }
+        if (groupMap.size === 0) this.groups.delete(key);
       }
       if (map.size === 0) this.sessions.delete(key);
     }
@@ -912,6 +1279,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
         if (!isTerminalStatus(record.status)) {
           record.status = "cancelled";
           record.terminalFreshness = "healthy";
+          record.terminalOutcome = undefined;
           record.cancelReason = reason ?? "session shutdown";
           record.completedAtMs = now;
           record.updatedAtMs = now;
@@ -925,6 +1293,22 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
             // ignore
           }
         }
+      }
+      const groupMap = this.groups.get(key);
+      if (groupMap) {
+        for (const group of groupMap.values()) {
+          group.completionPush = "disabled";
+          group.notify = undefined;
+          for (const waiter of [...group.waiters]) {
+            group.waiters.delete(waiter);
+            try {
+              waiter();
+            } catch {
+              // ignore
+            }
+          }
+        }
+        this.groups.delete(key);
       }
       this.completionPushesUsed.delete(key);
       this.sessions.delete(key);
@@ -970,6 +1354,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       runtimeMs: (record.completedAtMs ?? now) - record.startedAtMs,
       ...(lastProgressAt !== undefined ? { lastProgressAgeMs: now - lastProgressAt } : {}),
       completionPush: record.completionPush,
+      ...(record.terminalOutcome !== undefined ? { terminalOutcome: record.terminalOutcome } : {}),
+      ...(record.capabilityProfile !== undefined ? { capabilityProfile: record.capabilityProfile } : {}),
+      ...(record.groupId !== undefined ? { groupId: record.groupId } : {}),
       ...(record.latestProgress !== undefined ? { latestProgress: record.latestProgress } : {}),
       ...(record.latestToolResult !== undefined ? { latestToolResult: record.latestToolResult } : {}),
       ...(record.finalResult !== undefined ? { finalResult: record.finalResult } : {}),
@@ -1006,6 +1393,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
         ? { latestToolName: latestTool.toolName, latestToolStatus: latestTool.status }
         : {}),
       ...(toolCount !== undefined ? { toolCount } : {}),
+      ...(record.terminalOutcome !== undefined ? { terminalOutcome: record.terminalOutcome } : {}),
+      ...(record.capabilityProfile !== undefined ? { capabilityProfile: record.capabilityProfile } : {}),
+      ...(record.groupId !== undefined ? { groupId: record.groupId } : {}),
       ...(record.errorMessage !== undefined ? { errorMessage: record.errorMessage } : {}),
     };
   }
@@ -1030,10 +1420,15 @@ const globalRegistryStore = globalThis as typeof globalThis & {
 
 const REQUIRED_REGISTRY_METHODS = [
   "startTask",
+  "openGroup",
   "getTask",
+  "getGroup",
+  "dropEmptyGroup",
   "listTasks",
   "waitForTask",
+  "waitForGroup",
   "cancelTask",
+  "cancelGroup",
   "prune",
   "shutdownSession",
 ] as const satisfies readonly (keyof MmrAsyncTaskRegistry)[];

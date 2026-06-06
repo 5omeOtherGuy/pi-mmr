@@ -100,6 +100,19 @@ export {
   extractMmrSubagentActivationFailure,
   resolveMmrSubagentInvocation,
 } from "./extensions/mmr-core/subagent-resolver.js";
+export {
+  MMR_SUBAGENT_CAPABILITY_PROFILE_KEYS,
+  MMR_SUBAGENT_CUSTOM_DEFAULT_TOOLS,
+  MMR_SUBAGENT_EXECUTION_TOOLS,
+  MMR_SUBAGENT_MUTATION_TOOLS,
+  MMR_SUBAGENT_READ_ONLY_TOOLS,
+  MMR_SUBAGENT_READ_WRITE_TOOLS,
+  MMR_SUBAGENT_RECURSIVE_ADVISORY_DENY_TOOLS,
+  MMR_SUBAGENT_SHARED_DENY_TOOLS,
+  MMR_SUBAGENT_TOOLBOX_MCP_DENY_TOOLS,
+  isMmrCapabilityProfileKey,
+  resolveMmrCapabilityAllowedTools,
+} from "./extensions/mmr-core/subagent-tool-policy.js";
 export type {
   MmrSubagentInvocation,
   MmrSubagentInvocationFail,
@@ -109,6 +122,7 @@ export type {
   MmrSubagentToolResolution,
   ResolveMmrSubagentInvocationArgs,
 } from "./extensions/mmr-core/subagent-resolver.js";
+export type { MmrCapabilityProfileKey } from "./extensions/mmr-core/subagent-tool-policy.js";
 export { extractExplicitWorkerCliFlags } from "./extensions/mmr-core/worker-cli-flags.js";
 export type { ExplicitWorkerCliFlags } from "./extensions/mmr-core/worker-cli-flags.js";
 export { getMmrSubagentState } from "./extensions/mmr-core/runtime.js";
@@ -448,12 +462,15 @@ export {
   MAX_TASK_WAIT_TIMEOUT_MS,
   createMmrAsyncTaskRegistry,
   getMmrAsyncTaskRegistry,
+  isValidAsyncTaskGroupId,
   toPublicAsyncTaskSnapshot,
 } from "./extensions/mmr-subagents/async-task-registry.js";
 export type {
   MmrAsyncTaskBoard,
   MmrAsyncTaskBoardEntry,
   MmrAsyncTaskFreshness,
+  MmrAsyncTaskGroupSnapshot,
+  MmrAsyncTaskGroupStatus,
   MmrAsyncTaskInternalSnapshot,
   MmrAsyncTaskRegistry,
   MmrAsyncTaskRegistryDeps,
@@ -470,6 +487,7 @@ export {
   MMR_WORKER_TRAIL_LIMIT,
   buildMmrWorkerArgs,
   classifyMmrWorkerOutcome,
+  deriveAsyncTerminalOutcome,
   createChildCliMmrSubagentRunner,
   createMmrSubagentRunnerFromRunWorker,
   emptyMmrWorkerUsageStats,
@@ -482,6 +500,7 @@ export {
 } from "./extensions/mmr-subagents/runner.js";
 export type {
   ClassifyMmrWorkerOutcomeOptions,
+  MmrAsyncTerminalOutcome,
   MmrSpawnedSubagentWorkerDetailsBase,
   MmrSubagentRunOptions,
   MmrSubagentRunProgress,

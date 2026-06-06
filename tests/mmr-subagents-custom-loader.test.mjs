@@ -45,6 +45,19 @@ describe("mmr-subagents custom sa__ loader framework", () => {
     assert.deepEqual(normalizeMmrCustomSubagentToolPatterns(["shell", "browser", "planner"]), ["shell", "browser", "planner"]);
   });
 
+  it("reuses the shared subagent tool-policy constants for denied and read-only tool sets", async () => {
+    const loader = await importSource(LOADER_MODULE);
+    const policy = await importSource("extensions/mmr-core/subagent-tool-policy.ts");
+    assert.deepEqual(
+      [...loader.MMR_CUSTOM_SUBAGENT_DENIED_TOOLS].sort(),
+      [...policy.MMR_SUBAGENT_SHARED_DENY_TOOLS].sort(),
+    );
+    assert.deepEqual(
+      [...loader.MMR_CUSTOM_SUBAGENT_RECOMMENDED_READONLY_TOOLS].sort(),
+      [...policy.MMR_SUBAGENT_READ_ONLY_TOOLS].filter((tool) => ["read", "find", "grep"].includes(tool)).sort(),
+    );
+  });
+
   it("parses subagent frontmatter, derives a tool name, substitutes baseDir, and keeps inherit as a model sentinel", async () => {
     const { parseMmrCustomSubagentMarkdown } = await importSource(LOADER_MODULE);
     const filePath = path.join("/repo", ".pi", "subagents", "repo-auditor.md");

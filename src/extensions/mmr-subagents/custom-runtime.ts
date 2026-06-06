@@ -59,6 +59,7 @@ import {
   resolveMmrWorkerModelContextWindowFromCtx,
 } from "./worker-model-metadata.js";
 import { resolveMmrSubagentInvocation } from "../mmr-core/subagent-resolver.js";
+import { MMR_SUBAGENT_SHARED_DENY_TOOLS } from "../mmr-core/subagent-tool-policy.js";
 
 export const CUSTOM_SUBAGENT_PARAMETERS_SCHEMA = Type.Object(
   {
@@ -296,18 +297,7 @@ function createProfile(definition: MmrCustomSubagentDefinition): MmrSubagentProf
     modelPreferences: preferencesForDefinition(definition),
     tools: [...effectiveCustomSubagentToolPatterns(definition)],
     ...(definition.thinkingLevel ? { thinkingLevel: definition.thinkingLevel } : {}),
-    denyTools: [
-      "Task",
-      "oracle",
-      "librarian",
-      "handoff",
-      "start_task",
-      "task_poll",
-      "task_wait",
-      "task_cancel",
-      "apply_patch",
-      "read_mcp_resource",
-    ],
+    denyTools: MMR_SUBAGENT_SHARED_DENY_TOOLS,
     promptRoute: "standalone",
     promptBuilder: definition.toolName,
     allowMcp: false,

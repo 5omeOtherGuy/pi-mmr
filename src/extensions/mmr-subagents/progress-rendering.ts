@@ -77,8 +77,11 @@ interface BackgroundTaskDetails {
   tool?: string;
   agent?: string;
   taskId?: string;
+  groupId?: string;
   status?: string;
+  terminalOutcome?: string;
   board?: unknown;
+  group?: unknown;
   description?: string;
   /** Full worker prompt/query, used as the rendered Markdown task body. */
   prompt?: string;
@@ -1121,7 +1124,8 @@ function backgroundTaskHeaderLine(
 ): string {
   const title = formatTitle(details.agent ?? "background task", model, theme);
   const badge = theme.fg("muted", "background");
-  return `${title} ${theme.fg("muted", "•")} ${badge}  ${backgroundStatusBadge(details.status, theme)}`;
+  const outcome = details.terminalOutcome === "partial" ? ` ${theme.fg("warning", "partial")}` : "";
+  return `${title} ${theme.fg("muted", "•")} ${badge}  ${backgroundStatusBadge(details.status, theme)}${outcome}`;
 }
 
 function backgroundTaskDisplayText(
@@ -1208,7 +1212,9 @@ function backgroundBoardEntryLine(entry: MmrAsyncTaskBoardEntry, theme: Subagent
   const fresh = entry.freshness !== "healthy" && entry.freshness !== "terminal"
     ? ` ${theme.fg(entry.freshness === "dead" ? "error" : "warning", `[${entry.freshness}]`)}`
     : "";
-  return `  ${glyph} ${id} ${agent}${desc}${fresh}`;
+  const group = entry.groupId ? ` ${theme.fg("dim", entry.groupId)}` : "";
+  const partial = entry.terminalOutcome === "partial" ? ` ${theme.fg("warning", "[partial]")}` : "";
+  return `  ${glyph} ${id} ${agent}${desc}${group}${partial}${fresh}`;
 }
 
 /**
@@ -1332,6 +1338,12 @@ export function renderMmrBackgroundTaskResult(
   if (details?.board !== undefined) {
     const boardComponent = renderBackgroundTaskBoard(details.board, theme);
     if (boardComponent) return boardComponent;
+    const container = new Container();
+    addMarkdownBlock(container, output, theme, { paddingX: 1 });
+    return container;
+  }
+
+  if (details?.group !== undefined) {
     const container = new Container();
     addMarkdownBlock(container, output, theme, { paddingX: 1 });
     return container;

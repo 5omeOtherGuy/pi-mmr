@@ -291,7 +291,7 @@ describe("resolveMmrSubagentInvocation", () => {
       assert.deepEqual([...result.workerTools], TASK_REGISTERED_TOOLS);
       assert.deepEqual(
         [...result.toolResolution.deniedTools].sort(),
-        ["Task", "handoff", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+        ["Task", "apply_patch", "handoff", "librarian", "oracle", "read_mcp_resource", "start_task", "task_cancel", "task_poll", "task_wait"],
       );
       assert.deepEqual([...result.toolResolution.omittedTools], []);
     }
@@ -545,6 +545,86 @@ describe("resolveMmrSubagentInvocation", () => {
       "diff_github",
       "list_repositories",
     ]);
+  });
+
+  it("narrows Task worker tools with capability profiles without changing the default", async () => {
+    const { resolveMmrSubagentInvocation } = await importSource(RESOLVER);
+    const { getMmrSubagentProfile } = await importSource(PROFILES);
+    const profile = getMmrSubagentProfile("task-subagent");
+    const registry = makeTaskRegistry();
+    const baseArgs = { profile, registry, parentMode: "smart", registeredTools: TASK_REGISTERED_TOOLS };
+
+    const defaultResult = resolveMmrSubagentInvocation(baseArgs);
+    assert.equal(defaultResult.ok, true);
+    assert.deepEqual([...defaultResult.workerTools], TASK_REGISTERED_TOOLS);
+    assert.equal(defaultResult.capabilityProfile, undefined);
+
+    const readOnly = resolveMmrSubagentInvocation({ ...baseArgs, capabilityProfile: "read-only" });
+    assert.equal(readOnly.ok, true);
+    assert.deepEqual([...readOnly.workerTools], ["read", "read_web_page", "web_search", "finder", "skill", "task_list"]);
+    assert.equal(readOnly.capabilityProfile, "read-only");
+    assert.equal(readOnly.workerTools.includes("bash"), false);
+    assert.equal(readOnly.workerTools.includes("edit"), false);
+    assert.equal(readOnly.workerTools.includes("write"), false);
+
+    const readWrite = resolveMmrSubagentInvocation({ ...baseArgs, capabilityProfile: "read-write" });
+    assert.equal(readWrite.ok, true);
+    assert.deepEqual([...readWrite.workerTools], ["read", "edit", "write", "read_web_page", "web_search", "finder", "skill", "task_list"]);
+  });
+
+  it("fails closed for unknown capability profiles", async () => {
+    const { resolveMmrSubagentInvocation } = await importSource(RESOLVER);
+    const { getMmrSubagentProfile } = await importSource(PROFILES);
+    const profile = getMmrSubagentProfile("task-subagent");
+    const registry = makeTaskRegistry();
+    const baseArgs = { profile, registry, parentMode: "smart", registeredTools: TASK_REGISTERED_TOOLS };
+
+    const unknown = resolveMmrSubagentInvocation({ ...baseArgs, capabilityProfile: "root" });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.code, "tools.capability");
+    assert.match(unknown.message, /Unknown capability profile/i);
+
+    // Privileged keys were removed from the public surface; they are now just
+    // unknown enum values and must fail closed without any gate argument.
+    for (const removed of ["execute", "all"]) {
+      const rejected = resolveMmrSubagentInvocation({ ...baseArgs, capabilityProfile: removed });
+      assert.equal(rejected.ok, false, `${removed} must be rejected`);
+      assert.equal(rejected.code, "tools.capability");
+      assert.match(rejected.message, /Unknown capability profile/i);
+    }
+  });
+
+  it("keeps recursive, advisory, toolbox, and MCP tools out under capabilityProfile=read-write", async () => {
+    const { resolveMmrSubagentInvocation } = await importSource(RESOLVER);
+    const { MMR_SUBAGENT_SHARED_DENY_TOOLS } = await importSource("extensions/mmr-core/subagent-tool-policy.ts");
+    const profile = {
+      name: "wide",
+      displayName: "Wide",
+      modelPreferences: [{ model: "gpt-5.4-mini" }],
+      tools: ["read", "bash", "Task", "oracle", "librarian", "handoff", "start_task", "task_poll", "task_wait", "task_cancel", "apply_patch", "read_mcp_resource"],
+      denyTools: MMR_SUBAGENT_SHARED_DENY_TOOLS,
+      promptRoute: "standalone",
+      promptBuilder: "wide",
+      allowMcp: false,
+      allowToolbox: false,
+      enforceLockedMode: false,
+      persistSubagentState: false,
+    };
+    const registry = makeRegistry([{ provider: "openai-codex", id: "gpt-5.4-mini" }]);
+    const result = resolveMmrSubagentInvocation({
+      profile,
+      registry,
+      registeredTools: profile.tools,
+      capabilityProfile: "read-write",
+    });
+    assert.equal(result.ok, true);
+    // read-write narrows to the read/write preset; bash and all shared-deny
+    // tools are excluded regardless of the profile's wider tool list.
+    assert.deepEqual([...result.workerTools], ["read"]);
+    assert.equal(result.workerTools.includes("bash"), false);
+    for (const denied of MMR_SUBAGENT_SHARED_DENY_TOOLS) {
+      assert.equal(result.workerTools.includes(denied), false, `${denied} must stay denied`);
+    }
   });
 
   it("honors modelPreferencesOverride without disturbing prompt base or deny set", async () => {

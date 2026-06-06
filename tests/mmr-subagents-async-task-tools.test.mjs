@@ -225,6 +225,37 @@ describe("start_task", () => {
     await flush();
   });
 
+  it("accepts a Task capability profile shortcut and forwards it into Task params", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => "cap-task" });
+    const def = makeDeferredRunner();
+    const inputs = [];
+    const startTask = tools.createStartTaskTool({
+      registry,
+      sessionKey: "S",
+      resolveInvocation(input) {
+        inputs.push(input);
+        return stubTaskInvocation()();
+      },
+      runner: def.runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+    });
+
+    await startTask.execute(
+      "cap0",
+      { prompt: "Run it", description: "run", capabilityProfile: "read-write" },
+      undefined,
+      undefined,
+      CTX,
+    );
+
+    assert.equal(inputs[0].capabilityProfile, "read-write");
+    assert.ok(!("allowPrivilegedProfiles" in inputs[0]), "privileged-gate plumbing must not be threaded into the resolver input");
+    def.resolve(makeWorkerResult());
+    await flush();
+  });
+
   it("accepts explicit Task agent params as a background Task worker", async () => {
     const { startTask, def } = await makeToolset();
     const result = await startTask.execute(
@@ -394,6 +425,22 @@ describe("task_poll", () => {
     assert.equal(result.details.final.worker, "mmr-subagents.Task");
   });
 
+  it("renders partial terminal outcomes distinctly from clean success", async () => {
+    const { startTask, poll, def } = await makeToolset();
+    await startTask.execute("c0", GOOD_PARAMS, undefined, undefined, CTX);
+    def.resolve(makeWorkerResult({
+      outputTruncated: true,
+      finalOutput: "full answer beyond the limit",
+      truncatedFinalOutput: "clipped answer",
+    }));
+    await flush();
+
+    const result = await poll.execute("p0", { task_id: "t1" }, undefined, undefined, CTX);
+    assert.equal(result.details.status, "succeeded");
+    assert.equal(result.details.terminalOutcome, "partial");
+    assert.match(result.content[0].text, /partial/i);
+  });
+
   it("returns a deterministic not-found result for an unknown id", async () => {
     const { poll } = await makeToolset();
     const result = await poll.execute("p0", { task_id: "ghost" }, undefined, undefined, CTX);
@@ -416,6 +463,77 @@ describe("task_wait", () => {
     const settled = await waitPromise;
     assert.notEqual(settled.details.timedOut, true);
     assert.equal(settled.details.status, "succeeded");
+  });
+});
+
+describe("async task worker groups", () => {
+  it("opens a group with start_task group_id=new and polls/waits/cancels by group_id", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => `gt${n++}`, groupIdFactory: () => "group_abc999", cancelDeadAfterMs: 30 });
+    const calls = [];
+    const runner = {
+      run(options) {
+        const call = { options };
+        calls.push(call);
+        return new Promise((resolve) => {
+          call.resolve = resolve;
+        });
+      },
+    };
+    const deps = {
+      registry,
+      sessionKey: "S",
+      resolveInvocation: stubTaskInvocation(),
+      runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+    };
+    const startTask = tools.createStartTaskTool(deps);
+    const poll = tools.createTaskPollTool(deps);
+    const wait = tools.createTaskWaitTool(deps);
+    const cancel = tools.createTaskCancelTool(deps);
+
+    const first = await startTask.execute("g0", { ...GOOD_PARAMS, group_id: "new" }, undefined, undefined, CTX);
+    assert.equal(first.details.groupId, "group_abc999");
+    assert.equal(first.details.taskId, "gt0");
+    const groupId = first.details.groupId;
+    const second = await startTask.execute("g1", { ...GOOD_PARAMS, description: "thing 2", group_id: groupId }, undefined, undefined, CTX);
+    assert.equal(second.details.groupId, groupId);
+    assert.equal(second.details.taskId, "gt1");
+
+    let group = await poll.execute("pg", { group_id: groupId }, undefined, undefined, CTX);
+    assert.equal(group.details.group.status, "running");
+    assert.deepEqual(group.details.group.taskIds, ["gt0", "gt1"]);
+    assert.match(group.content[0].text, /Child task_ids: gt0, gt1/, "running group result lists child task_ids");
+
+    calls[0].resolve(makeWorkerResult({ outputTruncated: true }));
+    await flush();
+    const timedOut = await wait.execute("wg0", { group_id: groupId, timeout_ms: 5 }, undefined, undefined, CTX);
+    assert.equal(timedOut.details.timedOut, true);
+    assert.equal(timedOut.details.group.status, "running");
+
+    const cancelPromise = cancel.execute("cg", { group_id: groupId, reason: "stop group" }, undefined, undefined, CTX);
+    assert.equal(calls[1].options.signal.aborted, true);
+    calls[1].resolve(makeWorkerResult({ aborted: true, signal: "SIGTERM", exitCode: null }));
+    const cancelResult = await cancelPromise;
+    assert.equal(cancelResult.details.group.status, "cancelled");
+    group = await poll.execute("pg2", { group_id: groupId }, undefined, undefined, CTX);
+    assert.equal(group.details.group.status, "cancelled");
+    assert.match(group.content[0].text, /group_abc999/);
+    assert.match(
+      group.content[0].text,
+      /Poll each task_id to retrieve final worker outputs: gt0, gt1/,
+      "terminal group result names the per-child retrieval step",
+    );
+  });
+
+  it("rejects unsafe group ids and mutually-exclusive task_id/group_id controls", async () => {
+    const { startTask, poll, wait, cancel } = await makeToolset();
+    assert.match((await startTask.execute("bad", { ...GOOD_PARAMS, group_id: "../nope" }, undefined, undefined, CTX)).content[0].text, /invalid parameters/i);
+    assert.match((await poll.execute("p", { task_id: "t1", group_id: "group_abcdef" }, undefined, undefined, CTX)).content[0].text, /mutually exclusive/i);
+    assert.match((await wait.execute("w", {}, undefined, undefined, CTX)).content[0].text, /requires task_id or group_id/i);
+    assert.match((await cancel.execute("c", {}, undefined, undefined, CTX)).content[0].text, /requires task_id or group_id/i);
   });
 });
 
@@ -529,13 +647,16 @@ describe("async task tools model-visible surface", () => {
       assert.equal(typeof t.renderCall, "function");
       assert.equal(typeof t.renderResult, "function");
     }
-    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "description", "notify", "params", "prompt"]);
+    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "capabilityProfile", "description", "group_id", "notify", "params", "prompt"]);
     assert.equal(start.parameters.properties.notify.type, "boolean");
+    assert.deepEqual(start.parameters.properties.capabilityProfile.anyOf.map((entry) => entry.const), ["read-only", "read-write"]);
     assert.deepEqual(start.parameters.properties.agent.anyOf.map((entry) => entry.const), ["Task", "finder", "librarian"]);
     assert.equal(start.parameters.required, undefined);
-    assert.deepEqual(Object.keys(poll.parameters.properties), ["task_id"]);
-    assert.deepEqual(wait.parameters.required, ["task_id"]);
-    assert.deepEqual(cancel.parameters.required, ["task_id"]);
+    assert.deepEqual(Object.keys(poll.parameters.properties).sort(), ["group_id", "task_id"]);
+    assert.deepEqual(Object.keys(wait.parameters.properties).sort(), ["group_id", "task_id", "timeout_ms"]);
+    assert.equal(wait.parameters.required, undefined);
+    assert.deepEqual(Object.keys(cancel.parameters.properties).sort(), ["group_id", "reason", "task_id"]);
+    assert.equal(cancel.parameters.required, undefined);
     assert.match(start.description, /background/i);
     assert.match(
       start.description,
@@ -552,6 +673,15 @@ describe("async task tools model-visible surface", () => {
       "guidelines should reserve polling for elapsed-time fallback checks",
     );
     assert.ok(start.promptGuidelines.some((g) => /blocking Task/i.test(g)));
+    assert.match(
+      start.description,
+      /single grouped notification/i,
+      "start_task should document the single grouped-notification policy",
+    );
+    assert.ok(
+      start.promptGuidelines.some((g) => /open the group with start_task\(\{ group_id: 'new'/.test(g) && /task_poll\(\{ task_id \}\)/.test(g)),
+      "guidelines should give a concrete open-group-then-reuse example with the per-child retrieval call",
+    );
   });
 });
 
@@ -589,12 +719,49 @@ describe("async task tools completion push", () => {
     assert.equal(sent.length, 1, "exactly one completion push");
     assert.deepEqual(sent[0].o, { deliverAs: "followUp", triggerTurn: true });
     assert.equal(sent[0].m.customType, "mmr-subagents.async-task-completion");
-    assert.match(sent[0].m.content, /Use this notification as the default completion signal/);
+    assert.match(sent[0].m.content, /Call task_poll\(\{task_id:"t1"\}\) now to retrieve it\./);
     assert.doesNotMatch(sent[0].m.content, /Non-normal outcome:/);
     assert.equal(sent[0].m.details.outcomeText, undefined);
-    assert.doesNotMatch(sent[0].m.content, /Use task_poll\(\{task_id:/);
+    assert.doesNotMatch(sent[0].m.content, /Poll only later/);
     assert.equal(sent[0].m.display, false, "completion push is model-facing only; inline lifecycle cards own human rendering");
     assert.equal(registry.getTask("S", "t1").completionPush, "sent");
+  });
+
+  it("sends one group completion push naming the group and per-child polling, with no individual child pushes", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const registry = createMmrAsyncTaskRegistry({ idFactory: () => `gt${n++}`, groupIdFactory: () => "group_def111" });
+    const sent = [];
+    const calls = [];
+    const runner = {
+      run(options) {
+        const call = { options };
+        calls.push(call);
+        return new Promise((resolve) => { call.resolve = resolve; });
+      },
+    };
+    const deps = {
+      registry,
+      sessionKey: "S",
+      resolveInvocation: stubTaskInvocation(),
+      runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+      pi: { sendMessage: (m, o) => sent.push({ m, o }) },
+    };
+    const startTask = tools.createStartTaskTool(deps);
+    await startTask.execute("g0", { ...GOOD_PARAMS, group_id: "new" }, undefined, undefined, CTX);
+    await startTask.execute("g1", { ...GOOD_PARAMS, description: "t2", group_id: "group_def111" }, undefined, undefined, CTX);
+    calls[0].resolve(makeWorkerResult());
+    calls[1].resolve(makeWorkerResult());
+    await flush();
+
+    const groupPushes = sent.filter((s) => /task-group-notification/.test(s.m.content));
+    assert.equal(groupPushes.length, 1, "exactly one group-level completion push");
+    assert.match(groupPushes[0].m.content, /Call task_poll\(\{group_id:"group_def111"\}\)/);
+    assert.match(groupPushes[0].m.content, /task_poll\(\{task_id\}\) for each child/);
+    const childPushes = sent.filter((s) => /now to retrieve it/.test(s.m.content));
+    assert.equal(childPushes.length, 0, "grouped children must not send individual completion pushes");
   });
 
   it("includes explicit non-normal outcome text in the model-facing completion push", async () => {
@@ -647,11 +814,144 @@ describe("async task tools completion push", () => {
     await flush();
   });
 
-  it("treats a non-boolean notify as opt-out", async () => {
-    const { def, sent, startTask } = await pushHarness({ enableCompletionPush: true });
-    await startTask.execute("c0", { ...GOOD_PARAMS, notify: "yes" }, undefined, undefined, CTX);
+  it("rejects a non-boolean notify before spawn (schema is authoritative)", async () => {
+    const { startTask, registry, def } = await makeToolset();
+    const result = await startTask.execute("c0", { ...GOOD_PARAMS, notify: "yes" }, undefined, undefined, CTX);
+    assert.match(result.content[0].text, /invalid parameters/i);
+    assert.equal(result.details.taskId, undefined);
+    assert.equal(registry.listTasks("S").counts.active, 0);
+    assert.equal(def.calls.length, 0, "no worker should be spawned for a non-boolean notify");
+  });
+});
+
+describe("async control validation (shared checkMmrToolParams)", () => {
+  it("start_task rejects unknown top-level parameters", async () => {
+    const { startTask, registry, def } = await makeToolset();
+    const result = await startTask.execute("c0", { ...GOOD_PARAMS, bogus: 1 }, undefined, undefined, CTX);
+    assert.match(result.content[0].text, /invalid parameters/i);
+    assert.equal(result.details.taskId, undefined);
+    assert.equal(registry.listTasks("S").counts.active, 0);
+    assert.equal(def.calls.length, 0);
+  });
+
+  it("task_poll rejects unknown parameters", async () => {
+    const { poll } = await makeToolset();
+    const result = await poll.execute("p0", { bogus: true }, undefined, undefined, CTX);
+    assert.match(result.content[0].text, /invalid parameters/i);
+  });
+
+  it("task_wait rejects a non-integer timeout_ms", async () => {
+    const { wait } = await makeToolset();
+    const result = await wait.execute("w0", { task_id: "t1", timeout_ms: 5.5 }, undefined, undefined, CTX);
+    assert.match(result.content[0].text, /invalid parameters/i);
+  });
+
+  it("task_wait rejects an out-of-range timeout_ms", async () => {
+    const { MAX_TASK_WAIT_TIMEOUT_MS } = await importSource(REGISTRY_MODULE);
+    const { wait } = await makeToolset();
+    const negative = await wait.execute("w1", { task_id: "t1", timeout_ms: -1 }, undefined, undefined, CTX);
+    assert.match(negative.content[0].text, /invalid parameters/i);
+    const tooBig = await wait.execute("w2", { task_id: "t1", timeout_ms: MAX_TASK_WAIT_TIMEOUT_MS + 1 }, undefined, undefined, CTX);
+    assert.match(tooBig.content[0].text, /invalid parameters/i);
+  });
+
+  it("task_cancel rejects unknown parameters", async () => {
+    const { cancel } = await makeToolset();
+    const result = await cancel.execute("x0", { task_id: "t1", bogus: "y" }, undefined, undefined, CTX);
+    assert.match(result.content[0].text, /invalid parameters/i);
+  });
+});
+
+describe("start_task capability profile and group side effects", () => {
+  for (const profile of ["execute", "all"]) {
+    it(`rejects the removed ${profile} capability profile before spawn with no record or group`, async () => {
+      const { startTask, registry, def } = await makeToolset();
+      const result = await startTask.execute(
+        "c0",
+        { ...GOOD_PARAMS, capabilityProfile: profile, group_id: "group_abcdef" },
+        undefined,
+        undefined,
+        CTX,
+      );
+      assert.match(result.content[0].text, /invalid parameters/i);
+      assert.equal(result.details.taskId, undefined);
+      assert.equal(registry.getGroup("S", "group_abcdef"), undefined, "must not open a group for a rejected profile");
+      assert.equal(registry.listTasks("S").counts.active, 0);
+      assert.equal(def.calls.length, 0);
+    });
+  }
+
+  it("does not open a group when Task validation fails (no orphan group)", async () => {
+    const { startTask, registry, def } = await makeToolset();
+    const result = await startTask.execute(
+      "c0",
+      { prompt: "", description: "x", group_id: "group_abcdef" },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.match(result.content[0].text, /invalid parameters/i);
+    assert.equal(result.details.taskId, undefined);
+    assert.equal(registry.getGroup("S", "group_abcdef"), undefined, "invalid Task params must not mint an orphan group");
+    assert.equal(registry.listTasks("S").counts.active, 0);
+    assert.equal(def.calls.length, 0, "no worker should be spawned");
+  });
+
+  it("rejects capabilityProfile for non-Task agents before spawn", async () => {
+    const { startTask, def } = await makeToolset();
+    const result = await startTask.execute(
+      "c0",
+      { agent: "finder", params: { query: "x" }, capabilityProfile: "read-only" },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.match(result.content[0].text, /only supported for the Task agent/i);
+    assert.equal(def.calls.length, 0);
+  });
+
+  it("rolls back a freshly minted group when the concurrency cap rejects the start", async () => {
+    const tools = await importSource(TOOLS_MODULE);
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const registry = createMmrAsyncTaskRegistry({
+      maxRunningPerSession: 1,
+      idFactory: () => `t${n++}`,
+      groupIdFactory: () => "group_cab123",
+    });
+    const def = makeDeferredRunner();
+    const deps = {
+      registry,
+      sessionKey: "S",
+      resolveInvocation: stubTaskInvocation(),
+      runner: def.runner,
+      buildSystemPrompt: () => "WORKER PROMPT",
+    };
+    const startTask = tools.createStartTaskTool(deps);
+    // First start (no group) consumes the single running slot.
+    await startTask.execute("c0", GOOD_PARAMS, undefined, undefined, CTX);
+    // Second start opens a NEW group but is rejected by the cap.
+    const rejected = await startTask.execute("c1", { ...GOOD_PARAMS, group_id: "new" }, undefined, undefined, CTX);
+    assert.match(rejected.content[0].text, /cannot start/i);
+    assert.equal(rejected.details.taskId, undefined);
+    assert.equal(registry.getGroup("S", "group_cab123"), undefined, "cap rejection must not leave an empty orphan group");
     def.resolve(makeWorkerResult());
     await flush();
-    assert.equal(sent.length, 0);
+  });
+
+  it("rejects an invalid finder background start before spawn with no task or group", async () => {
+    const { startTask, registry, def } = await makeToolset();
+    const result = await startTask.execute(
+      "c0",
+      { agent: "finder", params: {}, group_id: "group_abcdef" },
+      undefined,
+      undefined,
+      CTX,
+    );
+    assert.match(result.content[0].text, /invalid parameters/i);
+    assert.equal(result.details.taskId, undefined);
+    assert.equal(registry.getGroup("S", "group_abcdef"), undefined, "invalid finder params must not mint a group");
+    assert.equal(registry.listTasks("S").counts.active, 0);
+    assert.equal(def.calls.length, 0);
   });
 });

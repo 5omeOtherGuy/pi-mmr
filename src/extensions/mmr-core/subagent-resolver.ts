@@ -5,6 +5,12 @@ import {
   selectMmrModelRoute,
 } from "./model-resolver.js";
 import type { MmrSubagentProfile, MmrSubagentPromptRoute } from "./subagent-profiles.js";
+import {
+  MMR_SUBAGENT_SHARED_DENY_TOOLS,
+  isMmrCapabilityProfileKey,
+  resolveMmrCapabilityAllowedTools,
+  type MmrCapabilityProfileKey,
+} from "./subagent-tool-policy.js";
 import type { MmrModelCandidateResolution, MmrModelPreference, MmrModeKey } from "./types.js";
 
 /**
@@ -46,6 +52,7 @@ export type MmrSubagentResolveCode =
   | "model.mismatch"
   | "tools.mismatch"
   | "tools.empty"
+  | "tools.capability"
   | "prompt-base.unresolved";
 
 export interface MmrSubagentResolveDiagnostic {
@@ -295,8 +302,10 @@ export interface MmrSubagentToolResolution {
   readonly registeredTools?: readonly string[];
   /** Parent host's active tools at invocation time, diagnostics only. */
   readonly parentActiveTools?: readonly string[];
-  /** Intended tools that were not registered in the host. */
+  /** Intended tools that were not registered in the host or were removed by a capability profile. */
   readonly omittedTools: readonly string[];
+  readonly capabilityProfile?: MmrCapabilityProfileKey;
+  readonly capabilityAllowedTools?: readonly string[];
 }
 
 interface MmrSubagentInvocationBase {
@@ -311,6 +320,7 @@ interface MmrSubagentInvocationBase {
   readonly promptBaseMode?: MmrModeKey;
   readonly workerTools: readonly string[];
   readonly toolResolution: MmrSubagentToolResolution;
+  readonly capabilityProfile?: MmrCapabilityProfileKey;
 }
 
 export interface MmrSubagentInvocationOk<
@@ -343,6 +353,7 @@ export interface ResolveMmrSubagentInvocationArgs<
   readonly registeredTools?: readonly string[];
   /** Parent host active tools, recorded in diagnostics only. */
   readonly parentActiveTools?: readonly string[];
+  readonly capabilityProfile?: MmrCapabilityProfileKey | string;
   readonly explicitModel?: string;
   /** Compared against the resolved `workerTools` order-independent. */
   readonly explicitTools?: readonly string[];
@@ -426,9 +437,10 @@ function buildToolResolution(
   profile: MmrSubagentProfile,
   registeredTools: readonly string[] | undefined,
   parentActiveTools: readonly string[] | undefined,
+  capabilityProfile: MmrCapabilityProfileKey | undefined,
   toolCeiling?: readonly string[],
 ): { resolution: MmrSubagentToolResolution; workerTools: readonly string[] } {
-  const deniedTools: readonly string[] = profile.denyTools ?? [];
+  const deniedTools: readonly string[] = [...new Set([...MMR_SUBAGENT_SHARED_DENY_TOOLS, ...(profile.denyTools ?? [])])];
   const denySet = new Set(deniedTools);
   const intendedTools = profile.tools.filter((t) => !denySet.has(t));
   let workerTools: readonly string[];
@@ -441,6 +453,15 @@ function buildToolResolution(
     workerTools = intendedTools.filter((t) => registeredSet.has(t));
     omittedTools = intendedTools.filter((t) => !registeredSet.has(t));
   }
+  const capabilityAllowedTools = capabilityProfile !== undefined
+    ? resolveMmrCapabilityAllowedTools(capabilityProfile, profile.tools)
+    : undefined;
+  if (capabilityAllowedTools !== undefined) {
+    const capabilitySet = new Set(capabilityAllowedTools);
+    const beforeCapability = workerTools;
+    workerTools = beforeCapability.filter((t) => capabilitySet.has(t));
+    omittedTools = [...new Set([...omittedTools, ...beforeCapability.filter((t) => !capabilitySet.has(t))])];
+  }
   if (toolCeiling !== undefined) {
     const ceilingSet = new Set(toolCeiling);
     const beforeCeiling = workerTools;
@@ -451,6 +472,8 @@ function buildToolResolution(
     intendedTools,
     deniedTools,
     omittedTools,
+    ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
+    ...(capabilityAllowedTools !== undefined ? { capabilityAllowedTools } : {}),
     ...(registeredTools !== undefined ? { registeredTools } : {}),
     ...(parentActiveTools !== undefined ? { parentActiveTools } : {}),
   };
@@ -469,11 +492,36 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
   const baseModeFailure = promptBaseRes.failure;
   const promptBaseMode = promptBaseRes.promptBaseMode;
 
+  let capabilityProfile: MmrCapabilityProfileKey | undefined;
+  if (args.capabilityProfile !== undefined) {
+    if (!isMmrCapabilityProfileKey(args.capabilityProfile)) {
+      const message = `Unknown capability profile "${String(args.capabilityProfile)}" for subagent "${profile.name}".`;
+      diagnostics.push({ code: "tools.capability", severity: "error", message });
+      const base = buildToolResolution(profile, args.registeredTools, args.parentActiveTools, undefined);
+      return {
+        ok: false,
+        profile,
+        code: "tools.capability",
+        message,
+        tools: profile.tools,
+        promptRoute: profile.promptRoute,
+        candidates: [],
+        diagnostics,
+        ...(parentMode !== undefined ? { parentMode } : {}),
+        ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
+        workerTools: base.workerTools,
+        toolResolution: base.resolution,
+      };
+    }
+    capabilityProfile = args.capabilityProfile;
+  }
+
   // 2. Resolve effective worker tool set.
   const { resolution, workerTools } = buildToolResolution(
     profile,
     args.registeredTools,
     args.parentActiveTools,
+    capabilityProfile,
     invocationContext === "child-activation" ? args.explicitTools : undefined,
   );
 
@@ -496,6 +544,7 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
       ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
       workerTools,
       toolResolution: resolution,
+      ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
     };
   }
 
@@ -522,6 +571,7 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
         ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
         workerTools,
         toolResolution: resolution,
+      ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
       };
     }
   }
@@ -546,6 +596,7 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
       ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
       workerTools,
       toolResolution: resolution,
+      ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
     };
   }
 
@@ -583,6 +634,7 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
       ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
       workerTools,
       toolResolution: resolution,
+      ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
     };
   }
 
@@ -599,6 +651,7 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
     ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
     workerTools,
     toolResolution: resolution,
+    ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
     modelArg,
   };
 }

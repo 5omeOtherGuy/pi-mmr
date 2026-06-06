@@ -109,6 +109,8 @@ interface WidgetRow {
   latestToolName?: string;
   latestToolStatus?: MmrAsyncTaskBoardEntry["latestToolStatus"];
   toolCount?: number;
+  terminalOutcome?: MmrAsyncTaskBoardEntry["terminalOutcome"];
+  groupId?: string;
 }
 
 function backgroundStatusColor(status: string): string {
@@ -182,6 +184,8 @@ function widgetMetadataParts(row: WidgetRow): string[] {
   if (typeof row.toolCount === "number" && Number.isFinite(row.toolCount) && row.toolCount > 0) {
     parts.push(`${formatMmrWorkerTokens(row.toolCount)} tool${row.toolCount === 1 ? "" : "s"}`);
   }
+  if (row.groupId) parts.push(row.groupId);
+  if (row.terminalOutcome === "partial") parts.push("partial");
   const context = formatContextUsage(row);
   if (context) parts.push(context);
   return parts;
@@ -200,6 +204,8 @@ function boardRows(board: MmrAsyncTaskBoard): WidgetRow[] {
     ...(entry.latestToolName !== undefined ? { latestToolName: entry.latestToolName } : {}),
     ...(entry.latestToolStatus !== undefined ? { latestToolStatus: entry.latestToolStatus } : {}),
     ...(entry.toolCount !== undefined ? { toolCount: entry.toolCount } : {}),
+    ...(entry.terminalOutcome !== undefined ? { terminalOutcome: entry.terminalOutcome } : {}),
+    ...(entry.groupId !== undefined ? { groupId: entry.groupId } : {}),
   });
   // Show only in-flight work (active + stalled), mirroring Pi/Claude Code's
   // bottom indicator which surfaces running agents. A finished task drops off

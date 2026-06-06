@@ -298,11 +298,43 @@ describe("hasUsableMmrWorkerFinalOutput predicate", () => {
   });
 });
 
+describe("deriveAsyncTerminalOutcome", () => {
+  it("maps clean success, truncated success, worker failures, and aborts without adding a lifecycle status", async () => {
+    const { deriveAsyncTerminalOutcome } = await importSource(RUNNER_MODULE);
+    const policy = { partialOutputPolicy: "prefer-usable-output" };
+    assert.equal(
+      deriveAsyncTerminalOutcome(makeWorkerResult({ finalOutput: "done", outputTruncated: false }), policy),
+      "success",
+    );
+    assert.equal(
+      deriveAsyncTerminalOutcome(makeWorkerResult({ finalOutput: "done", outputTruncated: true }), policy),
+      "partial",
+    );
+    assert.equal(
+      deriveAsyncTerminalOutcome(makeWorkerResult({ spawnError: "spawn ENOENT", exitCode: null, outputTruncated: true }), policy),
+      "failed",
+    );
+    assert.equal(
+      deriveAsyncTerminalOutcome(makeWorkerResult({ subagentActivationError: "profile mismatch" }), policy),
+      "failed",
+    );
+    assert.equal(
+      deriveAsyncTerminalOutcome(makeWorkerResult({ exitCode: 0, finalOutput: "", truncatedFinalOutput: "" }), policy),
+      "failed",
+    );
+    assert.equal(
+      deriveAsyncTerminalOutcome(makeWorkerResult({ aborted: true, signal: "SIGTERM", exitCode: null }), policy),
+      undefined,
+    );
+  });
+});
+
 describe("classifyMmrWorkerOutcome is exported from the package root", () => {
-  it("the classifier, predicate, and policy types are reachable through src/index.ts", async () => {
+  it("the classifier, predicate, async terminal outcome adapter, and policy types are reachable through src/index.ts", async () => {
     const root = await importSource(ROOT_MODULE);
     assert.equal(typeof root.classifyMmrWorkerOutcome, "function");
     assert.equal(typeof root.hasUsableMmrWorkerFinalOutput, "function");
+    assert.equal(typeof root.deriveAsyncTerminalOutcome, "function");
     // Smoke-test the root-exported function with one rule.
     const status = root.classifyMmrWorkerOutcome(
       makeWorkerResult({ spawnError: "spawn ENOENT" }),

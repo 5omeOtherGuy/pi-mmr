@@ -108,6 +108,36 @@ describe("async-task-registry lifecycle", () => {
     assert.equal(snap.runtimeMs, 1000);
   });
 
+  it("stores a partial terminal outcome separately from lifecycle status", async () => {
+    const { createMmrAsyncTaskRegistry, toPublicAsyncTaskSnapshot } = await importSource(REGISTRY_MODULE);
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => "t" });
+    const d = makeDeferredRun();
+    reg.startTask(startArgs({ run: d.run }));
+    d.resolve(makeWorkerResult({ outputTruncated: true, finalOutput: "full answer", truncatedFinalOutput: "clipped answer" }));
+    await flush();
+
+    const snap = reg.getTask("sess-A", "t");
+    assert.equal(snap.status, "succeeded", "partial is result quality, not a lifecycle status");
+    assert.equal(snap.terminalOutcome, "partial");
+    assert.equal(reg.listTasks("sess-A").finished[0].terminalOutcome, "partial");
+    assert.equal(toPublicAsyncTaskSnapshot(snap).terminalOutcome, "partial");
+  });
+
+  it("uses precomputed terminal outcomes for tool-result runs only", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `tool-${n++}` });
+    const done = { content: [{ type: "text", text: "done" }], details: { status: "success" } };
+
+    reg.startTask(startArgs({ originToolCallId: "with", run: async () => ({ toolResult: done, terminalOutcome: "partial" }) }));
+    await flush();
+    assert.equal(reg.getTask("sess-A", "tool-0").terminalOutcome, "partial");
+
+    reg.startTask(startArgs({ originToolCallId: "without", run: async () => ({ toolResult: done }) }));
+    await flush();
+    assert.equal(reg.getTask("sess-A", "tool-1").terminalOutcome, undefined);
+  });
+
   it("projects cheap progress metadata into the board for the background widget", async () => {
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
     let clock = 1000;
@@ -353,6 +383,7 @@ describe("async-task-registry freshness, TTL, watchdog, shutdown", () => {
     const snap = reg.getTask("sess-A", "t");
     assert.equal(snap.status, "failed");
     assert.equal(snap.terminalFreshness, "dead");
+    assert.equal(snap.terminalOutcome, "failed");
   });
 
   it("watchdog expiry remains failed/dead when the worker rejects during abort", async () => {
@@ -544,6 +575,133 @@ describe("async-task-registry audit regressions", () => {
   });
 });
 
+describe("async-task-registry worker groups", () => {
+  it("mints group ids and lets multiple startTask calls attach without idempotency collapse", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let taskN = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${taskN++}`, groupIdFactory: () => "group_abc123" });
+    const group = reg.openGroup({ sessionKey: "sess-A" });
+    assert.equal(group.groupId, "group_abc123");
+
+    const first = makeDeferredRun();
+    const second = makeDeferredRun();
+    const a = reg.startTask(startArgs({ run: first.run, originToolCallId: "c0", groupId: group.groupId }));
+    const b = reg.startTask(startArgs({ run: second.run, originToolCallId: "c1", groupId: group.groupId }));
+
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true);
+    assert.notEqual(a.snapshot.taskId, b.snapshot.taskId);
+    assert.equal(a.snapshot.groupId, group.groupId);
+    assert.equal(b.snapshot.groupId, group.groupId);
+    const snapshot = reg.getGroup("sess-A", group.groupId);
+    assert.equal(snapshot.status, "running");
+    assert.deepEqual(snapshot.taskIds, ["t0", "t1"]);
+    first.resolve(makeWorkerResult());
+    second.resolve(makeWorkerResult());
+    await flush();
+  });
+
+  it("computes group status precedence over child lifecycle and terminal outcomes", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${n++}` });
+    const groupId = "group_c0ffee";
+    const runs = [makeDeferredRun(), makeDeferredRun(), makeDeferredRun()];
+    for (let i = 0; i < runs.length; i += 1) {
+      reg.startTask(startArgs({ run: runs[i].run, originToolCallId: `c${i}`, groupId }));
+    }
+
+    runs[0].resolve(makeWorkerResult());
+    runs[1].resolve(makeWorkerResult({ outputTruncated: true }));
+    await flush();
+    assert.equal(reg.getGroup("sess-A", groupId).status, "running", "non-terminal children dominate");
+
+    runs[2].resolve(makeWorkerResult());
+    await flush();
+    assert.equal(reg.getGroup("sess-A", groupId).status, "partial", "partial beats completed after all children are terminal");
+
+    const failed = makeDeferredRun();
+    reg.startTask(startArgs({ run: failed.run, originToolCallId: "failed", groupId: "group_badbad" }));
+    failed.resolve(makeWorkerResult({ exitCode: 1, finalOutput: "", truncatedFinalOutput: "" }));
+    await flush();
+    assert.equal(reg.getGroup("sess-A", "group_badbad").status, "failed");
+  });
+
+  it("waits for all group children without observing terminal children until the whole group is terminal", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let clock = 0;
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({
+      nowMs: () => clock,
+      idFactory: () => `t${n++}`,
+      terminalTtlMs: 1000,
+      observedTerminalTtlMs: 100,
+    });
+    const groupId = "group_dedede";
+    const first = makeDeferredRun();
+    const second = makeDeferredRun();
+    reg.startTask(startArgs({ run: first.run, originToolCallId: "c0", groupId }));
+    reg.startTask(startArgs({ run: second.run, originToolCallId: "c1", groupId }));
+
+    clock = 10;
+    first.resolve(makeWorkerResult());
+    await flush();
+    const timedOut = await reg.waitForGroup({ sessionKey: "sess-A", groupId, timeoutMs: 5 });
+    assert.equal(timedOut.timedOut, true);
+    assert.equal(second.captured.signal.aborted, false, "group wait timeout must not cancel children");
+    clock = 200;
+    assert.equal(reg.listTasks("sess-A").finished.length, 1, "timed-out group wait must not shorten child TTL");
+
+    clock = 250;
+    second.resolve(makeWorkerResult());
+    await flush();
+    const settled = await reg.waitForGroup({ sessionKey: "sess-A", groupId, timeoutMs: 5 });
+    assert.equal(settled.timedOut, false);
+    assert.equal(settled.snapshot.status, "completed");
+    clock = 400;
+    assert.equal(reg.listTasks("sess-A").finished.length, 0, "terminal group wait observes all children in one pass");
+  });
+
+  it("cancels every non-terminal child in a group", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${n++}`, cancelDeadAfterMs: 30 });
+    const groupId = "group_f00baa";
+    const first = makeDeferredRun();
+    const second = makeDeferredRun();
+    reg.startTask(startArgs({ run: first.run, originToolCallId: "c0", groupId }));
+    reg.startTask(startArgs({ run: second.run, originToolCallId: "c1", groupId }));
+
+    const cancelled = reg.cancelGroup({ sessionKey: "sess-A", groupId, reason: "obsolete group" });
+    assert.equal(first.captured.signal.aborted, true);
+    assert.equal(second.captured.signal.aborted, true);
+    first.resolve(makeWorkerResult({ aborted: true, signal: "SIGTERM", exitCode: null }));
+    second.resolve(makeWorkerResult({ aborted: true, signal: "SIGTERM", exitCode: null }));
+    const result = await cancelled;
+    assert.equal(result.status, "cancelled");
+  });
+
+  it("uses one grouped completion push instead of child pushes", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    const calls = [];
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${n++}`, maxCompletionPushesPerSession: 1 });
+    const group = reg.openGroup({ sessionKey: "sess-A", groupId: "group_beaded", notify: (snap) => calls.push(snap.groupId) });
+    const first = makeDeferredRun();
+    const second = makeDeferredRun();
+    reg.startTask(startArgs({ run: first.run, originToolCallId: "c0", groupId: group.groupId, notify: (snap) => calls.push(snap.taskId) }));
+    reg.startTask(startArgs({ run: second.run, originToolCallId: "c1", groupId: group.groupId, notify: (snap) => calls.push(snap.taskId) }));
+
+    first.resolve(makeWorkerResult());
+    second.resolve(makeWorkerResult());
+    await flush();
+    assert.deepEqual(calls, ["group_beaded"]);
+    assert.equal(reg.getGroup("sess-A", "group_beaded").completionPush, "sent");
+    assert.equal(reg.getTask("sess-A", "t0").completionPush, "disabled");
+    assert.equal(reg.getTask("sess-A", "t1").completionPush, "disabled");
+  });
+});
+
 describe("toPublicAsyncTaskSnapshot", () => {
   it("projects a lean public view that omits prompt text and the full worker result", async () => {
     const { createMmrAsyncTaskRegistry, toPublicAsyncTaskSnapshot } =
@@ -566,6 +724,7 @@ describe("toPublicAsyncTaskSnapshot", () => {
     // Light indicators, not payloads.
     assert.equal(pub.promptChars, "SECRET PROMPT".length);
     assert.equal(pub.hasFinalResult, true);
+    assert.equal(pub.terminalOutcome, "success");
     // Sensitive / heavy fields are stripped.
     for (const key of ["prompt", "finalResult", "latestProgress", "cwd", "workerTools", "resolvedModel", "contextWindow"]) {
       assert.equal(key in pub, false, `public snapshot must not expose ${key}`);

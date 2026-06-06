@@ -19,6 +19,10 @@ import {
   resolveMmrSubagentInvocation,
   type MmrSubagentInvocation,
 } from "../mmr-core/subagent-resolver.js";
+import {
+  isMmrCapabilityProfileKey,
+  type MmrCapabilityProfileKey,
+} from "../mmr-core/subagent-tool-policy.js";
 import { checkMmrToolParams } from "../mmr-core/tool-params.js";
 import type { MmrModelRegistryLike, MmrRegisteredModelLike } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings } from "../mmr-core/settings.js";
@@ -89,6 +93,7 @@ export const TASK_PROMPT_GUIDELINES: readonly string[] = [
   "Write outcome-first prompts that include the goal, scope, relevant context, files or evidence to inspect first, constraints and non-goals, validation to run, and the expected return shape.",
   "Ask for compact results, not transcripts: outcome, files changed or inspected, summary, validation result, concerns or blockers, and next action.",
   "Run multiple Task workers only for genuinely independent work. Keep code-writing single-threaded unless write targets are clearly disjoint.",
+  "Use capabilityProfile (read-only or read-write) only to narrow a Task worker's tool surface; omit it to preserve the default Task behavior.",
   "When the worker finishes, inspect its diff or evidence, run any combined validation, and summarize the user-relevant result yourself.",
 ] as const;
 
@@ -107,7 +112,19 @@ export const TASK_DESCRIPTION = [
   "- Provide a short description for progress display and diagnostics.",
   "- Expect a compact final result, not a transcript. The worker should report outcome, files changed or inspected, summary, validation, and concerns or blockers.",
   "- Run workers in parallel only for independent read-only work or clearly disjoint implementation units.",
+  "- Optionally set capabilityProfile (read-only or read-write) to narrow the worker's tools; leaving it unset preserves the default Task surface.",
 ].join("\n");
+
+const TASK_CAPABILITY_PROFILE_SCHEMA = Type.Union(
+  [
+    Type.Literal("read-only"),
+    Type.Literal("read-write"),
+  ],
+  {
+    description:
+      "Optional capability profile that narrows this Task worker's tools. Unset preserves the default Task tool surface; read-only removes file-edit and shell tools (read/search/web/skill/task_list only); read-write keeps file edits but removes shell. Narrowing only; it never grants tools the default Task surface lacks.",
+  },
+);
 
 export const TASK_PARAMETERS_SCHEMA = Type.Object(
   {
@@ -117,6 +134,7 @@ export const TASK_PARAMETERS_SCHEMA = Type.Object(
     description: Type.String({
       description: "Short display label for the worker task.",
     }),
+    capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
   },
   { additionalProperties: false },
 );
@@ -314,7 +332,7 @@ export class TaskParamsError extends Error {
   }
 }
 
-const TASK_KNOWN_PARAM_KEYS: ReadonlySet<string> = new Set(["prompt", "description"]);
+const TASK_KNOWN_PARAM_KEYS: ReadonlySet<string> = new Set(["prompt", "description", "capabilityProfile"]);
 const TASK_DESCRIPTION_CONTROL_RE = /[\u0000-\u001f\u007f]/;
 
 function byteLength(value: string): number {
@@ -364,7 +382,21 @@ export function coerceTaskParams(raw: unknown): TaskParams {
   if (TASK_DESCRIPTION_CONTROL_RE.test(obj.description)) {
     throw new TaskParamsError("Task.description must not contain control characters other than space.");
   }
-  return { prompt: obj.prompt, description: obj.description };
+  if (
+    obj.capabilityProfile !== undefined
+    && !isMmrCapabilityProfileKey(obj.capabilityProfile)
+  ) {
+    throw new TaskParamsError("Task.capabilityProfile must be one of: read-only, read-write.");
+  }
+  return {
+    prompt: obj.prompt,
+    description: obj.description,
+    // Safe assertion: the guard above rejected any non-public value, so a
+    // defined capabilityProfile here is read-only | read-write.
+    ...(obj.capabilityProfile !== undefined
+      ? { capabilityProfile: obj.capabilityProfile as TaskParams["capabilityProfile"] }
+      : {}),
+  };
 }
 
 function resolveCwd(ctx: ExtensionContext | undefined): string {
@@ -585,6 +617,7 @@ export interface ResolveTaskInvocationInput {
    * {@link resolveMmrSubagentInvocation}.
    */
   modelPreferencesOverride?: readonly MmrModelPreference[];
+  capabilityProfile?: MmrCapabilityProfileKey;
 }
 
 export interface TaskToolDeps {
@@ -663,6 +696,7 @@ function defaultResolveTaskInvocation(
     ...(input.modelPreferencesOverride !== undefined
       ? { modelPreferencesOverride: input.modelPreferencesOverride }
       : {}),
+    ...(input.capabilityProfile !== undefined ? { capabilityProfile: input.capabilityProfile } : {}),
   });
 }
 
@@ -859,6 +893,7 @@ export function prepareTaskRun(
   };
   if (registeredTools !== undefined) resolverInput.registeredTools = registeredTools;
   if (settingsOverride !== undefined) resolverInput.modelPreferencesOverride = settingsOverride;
+  if (params.capabilityProfile !== undefined) resolverInput.capabilityProfile = params.capabilityProfile;
   const resolveInvocation = deps.resolveInvocation ?? defaultResolveTaskInvocation;
   const invocation = resolveInvocation(resolverInput);
 
@@ -1090,8 +1125,12 @@ export function createTaskTool(deps: TaskToolDeps = {}): ToolDefinition {
         let options = runnerOptions;
         let route = invocation.modelArg;
         if (runArgs.override) {
-          const overrideInput: ResolveTaskInvocationInput = { ctx, parentMode };
+          const overrideInput: ResolveTaskInvocationInput = {
+            ctx,
+            parentMode,
+          };
           if (registeredTools !== undefined) overrideInput.registeredTools = registeredTools;
+          if (prep.prepared.params.capabilityProfile !== undefined) overrideInput.capabilityProfile = prep.prepared.params.capabilityProfile;
           overrideInput.modelPreferencesOverride = runArgs.override;
           const overrideInvocation = resolveInvocation(overrideInput);
           if (overrideInvocation.ok) {

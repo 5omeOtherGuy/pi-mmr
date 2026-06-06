@@ -3,6 +3,11 @@ import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isThinkingLevel } from "../mmr-core/settings.js";
+import {
+  MMR_SUBAGENT_CUSTOM_DEFAULT_TOOLS,
+  MMR_SUBAGENT_READ_ONLY_TOOLS,
+  MMR_SUBAGENT_SHARED_DENY_TOOLS,
+} from "../mmr-core/subagent-tool-policy.js";
 
 export const MMR_CUSTOM_SUBAGENT_TOOL_PREFIX = "sa__";
 export const MMR_CUSTOM_SUBAGENT_MAX_TOOL_NAME_LENGTH = 64;
@@ -193,18 +198,7 @@ function readBoolean(attributes: Record<string, FrontmatterValue>, key: string):
   return attributes[key] === true;
 }
 
-export const MMR_CUSTOM_SUBAGENT_DENIED_TOOLS: ReadonlySet<string> = new Set([
-  "Task",
-  "oracle",
-  "librarian",
-  "handoff",
-  "start_task",
-  "task_poll",
-  "task_wait",
-  "task_cancel",
-  "apply_patch",
-  "read_mcp_resource",
-]);
+export const MMR_CUSTOM_SUBAGENT_DENIED_TOOLS: ReadonlySet<string> = new Set(MMR_SUBAGENT_SHARED_DENY_TOOLS);
 
 /**
  * Claude Code tool aliases mapped to the matching Pi tool name. Exported so
@@ -247,16 +241,7 @@ export const MMR_CUSTOM_SUBAGENT_TOOL_KEYS: readonly string[] = [
  * one simply drops it. The list deliberately excludes recursive/advisory
  * subagents, toolbox, and MCP tools.
  */
-export const MMR_CUSTOM_SUBAGENT_DEFAULT_TOOLS: readonly string[] = [
-  "read",
-  "bash",
-  "edit",
-  "write",
-  "find",
-  "grep",
-  "web_search",
-  "read_web_page",
-];
+export const MMR_CUSTOM_SUBAGENT_DEFAULT_TOOLS: readonly string[] = MMR_SUBAGENT_CUSTOM_DEFAULT_TOOLS;
 
 /**
  * Least-privilege read-only toolset recommended by the setup/import flow when
@@ -264,11 +249,7 @@ export const MMR_CUSTOM_SUBAGENT_DEFAULT_TOOLS: readonly string[] = [
  * recommends these rather than the broader standard default so a freshly
  * imported subagent starts with the smallest useful surface.
  */
-export const MMR_CUSTOM_SUBAGENT_RECOMMENDED_READONLY_TOOLS: readonly string[] = [
-  "read",
-  "find",
-  "grep",
-];
+export const MMR_CUSTOM_SUBAGENT_RECOMMENDED_READONLY_TOOLS: readonly string[] = ["read", "find", "grep"].filter((tool) => MMR_SUBAGENT_READ_ONLY_TOOLS.includes(tool));
 
 /** Frontmatter keys that declare a custom subagent's thinking/effort level. */
 const MMR_CUSTOM_SUBAGENT_THINKING_KEYS = ["thinkingLevel", "thinking", "effort"] as const;

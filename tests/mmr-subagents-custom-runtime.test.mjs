@@ -97,10 +97,13 @@ describe("mmr-subagents custom Markdown runtime", () => {
 
       createMmrSubagentsExtension({ customSubagents: { cwd: root, homeDir: path.join(root, "home") } })(pi);
 
+      const { MMR_SUBAGENT_SHARED_DENY_TOOLS } = await importSource("extensions/mmr-core/subagent-tool-policy.ts");
+      const profile = getMmrSubagentProfile("sa__repo_reviewer");
       assert.ok(tools.has("sa__repo_reviewer"));
       assert.ok(!tools.has("sa__ignored_claude_agent"), "legacy .claude/agents must not auto-register");
-      assert.equal(getMmrSubagentProfile("sa__repo_reviewer")?.displayName, "Repo Reviewer");
-      assert.equal(getMmrSubagentPromptBuilder("sa__repo_reviewer")?.({ profile: getMmrSubagentProfile("sa__repo_reviewer"), cwd: root, baseSystemPrompt: "" }), "Review the repository.");
+      assert.equal(profile?.displayName, "Repo Reviewer");
+      assert.deepEqual([...profile.denyTools].sort(), [...MMR_SUBAGENT_SHARED_DENY_TOOLS].sort());
+      assert.equal(getMmrSubagentPromptBuilder("sa__repo_reviewer")?.({ profile, cwd: root, baseSystemPrompt: "" }), "Review the repository.");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { MMR_SUBAGENT_SHARED_DENY_TOOLS } from "./subagent-tool-policy.js";
 import type { MmrModeKey, MmrModelPreference } from "./types.js";
 
 /**
@@ -294,18 +295,7 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
       "skill",
       "task_list",
     ],
-    denyTools: [
-      "Task",
-      "oracle",
-      "librarian",
-      "handoff",
-      // Async background task tools: a worker must not spawn or manage
-      // its own background workers (recursion control, issue #23).
-      "start_task",
-      "task_poll",
-      "task_wait",
-      "task_cancel",
-    ],
+    denyTools: MMR_SUBAGENT_SHARED_DENY_TOOLS,
     promptRoute: "mode-derived",
     baseMode: "from-parent",
     promptBuilder: "task-subagent",

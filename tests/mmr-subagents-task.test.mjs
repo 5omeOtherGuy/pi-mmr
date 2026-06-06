@@ -108,8 +108,8 @@ describe("task-subagent profile", () => {
     assert.equal(profile.baseMode, "from-parent");
     assert.equal(profile.promptBuilder, "task-subagent");
     // Per spec §5: MCP/toolbox stay false in this slice; recursive/advisory
-    // tools are listed in denyTools rather than relying on their absence
-    // from the intended tools list.
+    // plus toolbox/MCP escape hatches are listed in denyTools rather than
+    // relying on their absence from the intended tools list.
     assert.equal(profile.allowMcp, false);
     assert.equal(profile.allowToolbox, false);
     assert.deepEqual(
@@ -119,7 +119,7 @@ describe("task-subagent profile", () => {
     assert.ok(Array.isArray(profile.denyTools), "task-subagent must declare an explicit denyTools list");
     assert.deepEqual(
       [...profile.denyTools].sort(),
-      ["Task", "handoff", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+      ["Task", "apply_patch", "handoff", "librarian", "oracle", "read_mcp_resource", "start_task", "task_cancel", "task_poll", "task_wait"],
     );
     for (const recursive of ["Task", "oracle", "librarian", "handoff"]) {
       assert.equal(profile.tools.includes(recursive), false, `${recursive} must not be in the task worker allowlist`);
@@ -156,8 +156,9 @@ describe("Task tool", () => {
     assert.equal(tool.name, "Task");
     assert.equal(typeof tool.renderResult, "function");
     assert.equal(tool.parameters, TASK_PARAMETERS_SCHEMA);
-    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["description", "prompt"]);
+    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["capabilityProfile", "description", "prompt"]);
     assert.deepEqual(tool.parameters.required, ["prompt", "description"]);
+    assert.deepEqual(tool.parameters.properties.capabilityProfile.anyOf.map((entry) => entry.const), ["read-only", "read-write"]);
     assert.equal(tool.parameters.additionalProperties, false);
     assert.match(tool.description, /bounded/i);
     assert.match(tool.description, /subagent|worker/i);
@@ -202,6 +203,35 @@ describe("Task tool", () => {
     assert.equal(result.details.description, "Inspect task path");
     assert.deepEqual([...result.details.workerTools], [...TASK_WORKER_TOOLS]);
     assert.equal(result.details.model, "openai-codex/gpt-5.5");
+  });
+
+  it("threads capabilityProfile into the invocation resolver", async () => {
+    const { createTaskTool } = await importSource(TASK_MODULE);
+    const inputs = [];
+    const tool = createTaskTool({
+      resolveInvocation(input) {
+        inputs.push(input);
+        return stubTaskInvocation({ workerTools: ["read", "bash"] })();
+      },
+      runner: {
+        async run() {
+          return makeWorkerResult();
+        },
+      },
+      buildSystemPrompt: () => "WORKER PROMPT",
+    });
+
+    const result = await tool.execute(
+      "call-1",
+      { prompt: "Run a command", description: "narrow", capabilityProfile: "read-write" },
+      undefined,
+      undefined,
+      { cwd: "/tmp/repo" },
+    );
+
+    assert.equal(result.details.status, "success");
+    assert.equal(inputs[0].capabilityProfile, "read-write");
+    assert.ok(!("allowPrivilegedProfiles" in inputs[0]), "privileged-gate plumbing must not be threaded into the resolver input");
   });
 
   it("assembles a mode-derived worker prompt from the parent prompt and filtered active tools", async () => {

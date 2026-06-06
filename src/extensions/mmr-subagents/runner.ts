@@ -281,6 +281,8 @@ export type MmrWorkerOutcomeStatus =
   | "no-agent-start"
   | "empty-output";
 
+export type MmrAsyncTerminalOutcome = "success" | "partial" | "failed";
+
 /**
  * Policy controlling how nonzero exits are classified when usable final
  * text is present:
@@ -357,6 +359,26 @@ export function classifyMmrWorkerOutcome(
   if (usable) return "success";
   if (result.agentStarted === false) return "no-agent-start";
   return "empty-output";
+}
+
+export function deriveAsyncTerminalOutcome(
+  result: Pick<
+    MmrWorkerResult,
+    | "spawnError"
+    | "subagentActivationError"
+    | "aborted"
+    | "signal"
+    | "exitCode"
+    | "finalOutput"
+    | "truncatedFinalOutput"
+    | "outputTruncated"
+  > & { agentStarted?: boolean },
+  options: ClassifyMmrWorkerOutcomeOptions,
+): MmrAsyncTerminalOutcome | undefined {
+  const status = classifyMmrWorkerOutcome(result, options);
+  if (status === "aborted") return undefined;
+  if (status !== "success") return "failed";
+  return result.outputTruncated ? "partial" : "success";
 }
 
 /**

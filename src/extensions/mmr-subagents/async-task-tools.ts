@@ -4,7 +4,8 @@ import type {
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type Static, type TSchema } from "typebox";
+import { checkMmrToolParams, MmrToolParamsError } from "../mmr-core/tool-params.js";
 import { registerMmrOwnedTool } from "../mmr-core/owned-tools.js";
 import { getMmrSessionIdentitySnapshot } from "../mmr-core/runtime.js";
 import type { MmrWorkerTrailItem } from "./worker-trail.js";
@@ -18,11 +19,15 @@ import {
 } from "./task.js";
 import {
   createFinderTool,
+  FINDER_PARAMETERS_SCHEMA,
+  FINDER_TOOL_NAME,
   FINDER_WORKER_TOOLS,
   type FinderToolDeps,
 } from "./finder.js";
 import {
   createLibrarianTool,
+  LIBRARIAN_PARAMETERS_SCHEMA,
+  LIBRARIAN_TOOL_NAME,
   LIBRARIAN_WORKER_TOOLS,
   type LibrarianToolDeps,
 } from "./librarian.js";
@@ -36,7 +41,9 @@ import {
 import {
   getMmrAsyncTaskRegistry,
   MAX_TASK_WAIT_TIMEOUT_MS,
+  isValidAsyncTaskGroupId,
   type MmrAsyncTaskBoard,
+  type MmrAsyncTaskGroupSnapshot,
   type MmrAsyncTaskRegistry,
   type MmrAsyncTaskInternalSnapshot,
   type MmrAsyncTaskStatus,
@@ -60,7 +67,28 @@ export const ASYNC_TASK_TOOL_NAMES = [
 export const ASYNC_TASK_AGENT_NAMES = ["Task", "finder", "librarian"] as const;
 export type AsyncTaskAgentName = typeof ASYNC_TASK_AGENT_NAMES[number];
 
-const START_TASK_ALLOWED_TOP_LEVEL_KEYS = new Set(["agent", "params", "prompt", "description", "notify"]);
+/**
+ * Run the shared TypeBox validator and return a structured outcome instead of
+ * throwing, so each async tool can surface its own deterministic validation
+ * result. The shared helper's `"<tool>: invalid parameters: <msg>"` prefix is
+ * stripped here because the per-tool result wrappers re-add it.
+ */
+function validateAsyncToolParams<T extends TSchema>(
+  tool: string,
+  schema: T,
+  raw: unknown,
+): { ok: true; value: Static<T> } | { ok: false; message: string } {
+  try {
+    return { ok: true, value: checkMmrToolParams(tool, schema, raw) };
+  } catch (err) {
+    if (err instanceof MmrToolParamsError) {
+      const prefix = `${tool}: invalid parameters: `;
+      const message = err.message.startsWith(prefix) ? err.message.slice(prefix.length) : err.message;
+      return { ok: false, message };
+    }
+    throw err;
+  }
+}
 
 /** Discriminated details for the async task tools' results. */
 export interface AsyncTaskToolDetails {
@@ -68,7 +96,9 @@ export interface AsyncTaskToolDetails {
   tool: (typeof ASYNC_TASK_TOOL_NAMES)[number];
   agent?: AsyncTaskAgentName;
   taskId?: string;
+  groupId?: string;
   status?: MmrAsyncTaskStatus;
+  terminalOutcome?: MmrAsyncTaskInternalSnapshot["terminalOutcome"];
   freshness?: MmrAsyncTaskInternalSnapshot["freshness"];
   /** Provider-stripped by the renderer; used for the subagent-style header. */
   resolvedModel?: string;
@@ -84,6 +114,7 @@ export interface AsyncTaskToolDetails {
   final?: unknown;
   /** Board snapshot for `task_poll` list mode. */
   board?: MmrAsyncTaskBoard;
+  group?: MmrAsyncTaskGroupSnapshot;
   errorMessage?: string;
 }
 
@@ -122,6 +153,21 @@ const START_TASK_AGENT_SCHEMA = Type.Union([
     "Background agent to launch. Defaults to Task. Use params for agent-specific inputs: Task {prompt,description}, finder {query}, librarian {query,context?}. Oracle cannot run in the background; it is always blocking.",
 });
 
+const TASK_CAPABILITY_PROFILE_SCHEMA = Type.Union(
+  [Type.Literal("read-only"), Type.Literal("read-write")],
+  {
+    description:
+      "Optional capability profile for Task workers. Unset preserves today's Task tool surface; read-only removes file-edit and shell tools; read-write keeps file edits but removes shell. Narrowing only.",
+  },
+);
+
+const GROUP_ID_SCHEMA = Type.String({
+  maxLength: 256,
+  pattern: "^(new|group_[a-f0-9]{6,})$",
+  description:
+    "Optional worker-group id. Use group_id:'new' on the first start_task call to mint a group, then reuse the returned group_id on sibling start_task calls. Concrete ids must look like group_<hex>.",
+});
+
 const START_TASK_PARAMETERS = Type.Object(
   {
     agent: Type.Optional(START_TASK_AGENT_SCHEMA),
@@ -140,6 +186,8 @@ const START_TASK_PARAMETERS = Type.Object(
         "Legacy Task prompt shortcut. Equivalent to params.prompt when agent is omitted or Task.",
     })),
     description: Type.Optional(Type.String({ description: "Short display label for the background task." })),
+    capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
+    group_id: Type.Optional(GROUP_ID_SCHEMA),
     notify: Type.Optional(
       Type.Boolean({
         description:
@@ -156,16 +204,18 @@ const TASK_POLL_PARAMETERS = Type.Object(
       Type.String({
         maxLength: 256,
         description:
-          "Opaque id returned by start_task. Omit to list all background tasks for the current session.",
+          "Opaque id returned by start_task. Omit task_id and group_id to list all background tasks for the current session.",
       }),
     ),
+    group_id: Type.Optional(Type.String({ maxLength: 256, pattern: "^group_[a-f0-9]{6,}$", description: "Opaque group id returned by start_task when group_id:'new' opened a worker group." })),
   },
   { additionalProperties: false },
 );
 
 const TASK_WAIT_PARAMETERS = Type.Object(
   {
-    task_id: Type.String({ description: "Opaque id returned by start_task.", maxLength: 256 }),
+    task_id: Type.Optional(Type.String({ description: "Opaque id returned by start_task.", maxLength: 256 })),
+    group_id: Type.Optional(Type.String({ maxLength: 256, pattern: "^group_[a-f0-9]{6,}$", description: "Opaque worker group id. Mutually exclusive with task_id; waits for all current children." })),
     timeout_ms: Type.Optional(
       Type.Integer({
         minimum: 0,
@@ -179,7 +229,8 @@ const TASK_WAIT_PARAMETERS = Type.Object(
 
 const TASK_CANCEL_PARAMETERS = Type.Object(
   {
-    task_id: Type.String({ description: "Opaque id returned by start_task.", maxLength: 256 }),
+    task_id: Type.Optional(Type.String({ description: "Opaque id returned by start_task.", maxLength: 256 })),
+    group_id: Type.Optional(Type.String({ maxLength: 256, pattern: "^group_[a-f0-9]{6,}$", description: "Opaque worker group id. Mutually exclusive with task_id; cancels all non-terminal children." })),
     reason: Type.Optional(Type.String({ description: "Short cancellation reason for diagnostics.", maxLength: 512 })),
   },
   { additionalProperties: false },
@@ -193,6 +244,8 @@ const START_TASK_DESCRIPTION = [
   "Prefer the blocking Task/finder/librarian tools when you need the result before your next reasoning step.",
   "Default result path is the worker completion notification: when notify is enabled, wait for the follow-up before consuming the worker result.",
   "Use task_poll/task_wait only as an elapsed-time fallback when no notification arrives, or during fleet orchestration where multiple parallel workers need coordinated status checks.",
+  "Use group_id:'new' on the first grouped start_task call to mint a worker group, then reuse the returned group_id on sibling start_task calls and task_poll/task_wait/task_cancel. The opening call controls the single grouped notification; sibling tasks in the group do not send individual completion notifications.",
+  "For Task workers only, capabilityProfile can narrow tools to read-only or read-write (narrowing only; never widens the default Task surface).",
   "By default a background task notifies you once it finishes; pass notify:false to opt out and make task_poll/task_wait the only retrieval path.",
   "",
   "Background tasks are in-memory and session-scoped: they are lost if the Pi process exits, and they cannot spawn further background tasks.",
@@ -203,7 +256,8 @@ const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "Treat the worker completion notification as the default way to receive results; do not immediately poll just to check whether a worker completed.",
   "Use task_poll or task_wait only after a meaningful elapsed-time fallback interval with no notification, or for fleet orchestration where multiple parallel background workers need coordinated status checks; a task_wait timeout is not a failure and does not stop the worker.",
   "Call task_poll with no task_id to list this session's background tasks (active, stalled, finished) during fallback checks or multi-worker orchestration.",
-  "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task.",
+  "For grouped workers, open the group with start_task({ group_id: 'new', ... }), copy the returned group_id into each sibling start_task call, then wait/poll/cancel with group_id (mutually exclusive with task_id). When the group finishes, retrieve each child result with task_poll({ task_id }) for the ids the group result lists.",
+  "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task or group.",
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
   "A background task notifies you once when it finishes (the poke wakes an idle session or queues behind the active turn, and is bounded per session); pass start_task({ notify: false }) to opt out and pull the result with task_poll/task_wait.",
 ];
@@ -442,7 +496,8 @@ function projectRunning(
     : snapshot.latestProgress
       ? buildTaskProgressResult(snapshot.latestProgress, detailsContextFromSnapshot(snapshot)).details
       : undefined;
-  const header = `${tool}: ${snapshot.agent} task ${snapshot.taskId} is ${snapshot.status}${freshnessNote(snapshot)}.`;
+  const groupText = snapshot.groupId ? ` (group ${snapshot.groupId})` : "";
+  const header = `${tool}: ${snapshot.agent} task ${snapshot.taskId}${groupText} is ${snapshot.status}${freshnessNote(snapshot)}.`;
   const waitHint = opts.timedOut ? " Wait timed out; the worker is still running. Poll or wait again." : "";
   const body = progressText && progressText.trim().length > 0 ? `\n\n${progressText}` : "";
   return {
@@ -452,7 +507,9 @@ function projectRunning(
       tool,
       agent: snapshot.agent as AsyncTaskAgentName,
       taskId: snapshot.taskId,
+      ...(snapshot.groupId !== undefined ? { groupId: snapshot.groupId } : {}),
       status: snapshot.status,
+      ...(snapshot.terminalOutcome !== undefined ? { terminalOutcome: snapshot.terminalOutcome } : {}),
       freshness: snapshot.freshness,
       description: snapshot.description,
       prompt: snapshot.prompt,
@@ -469,7 +526,9 @@ function projectTerminal(
   tool: AsyncTaskToolDetails["tool"],
   snapshot: MmrAsyncTaskInternalSnapshot,
 ): AgentToolResult<AsyncTaskToolDetails> {
-  const statusLine = `${tool}: ${snapshot.agent} task ${snapshot.taskId} ${snapshot.status}.`;
+  const outcomeText = snapshot.terminalOutcome === "partial" ? " (partial result)" : "";
+  const groupText = snapshot.groupId ? ` (group ${snapshot.groupId})` : "";
+  const statusLine = `${tool}: ${snapshot.agent} task ${snapshot.taskId}${groupText} ${snapshot.status}${outcomeText}.`;
   let finalOutput = snapshot.errorMessage;
   let final: unknown;
   if (snapshot.finalToolResult) {
@@ -490,7 +549,9 @@ function projectTerminal(
       tool,
       agent: snapshot.agent as AsyncTaskAgentName,
       taskId: snapshot.taskId,
+      ...(snapshot.groupId !== undefined ? { groupId: snapshot.groupId } : {}),
       status: snapshot.status,
+      ...(snapshot.terminalOutcome !== undefined ? { terminalOutcome: snapshot.terminalOutcome } : {}),
       freshness: snapshot.freshness,
       description: snapshot.description,
       prompt: snapshot.prompt,
@@ -540,8 +601,8 @@ function buildCompletionNotifier(
           `<task-notification task_id="${escapeXmlAttr(snapshot.taskId)}" status="${snapshot.status}">\n` +
           `Background task "${escapeXmlAttr(snapshot.description)}" ${snapshot.status}.\n` +
           (outcomeText ? `Non-normal outcome: ${escapeXmlAttr(outcomeText)}\n` : "") +
-          `Use this notification as the default completion signal; the worker result is ready for this follow-up turn. ` +
-          `Poll only later as an elapsed-time fallback or during multi-worker orchestration.\n` +
+          `The worker result is ready. Call task_poll({task_id:"${escapeXmlAttr(snapshot.taskId)}"}) now to retrieve it. ` +
+          `Polling after completion is the intended retrieval step, not premature polling.\n` +
           `</task-notification>`,
         // The persistent background-agent widget and the eventual task_poll
         // result own the human-facing surface; this push is model-facing only
@@ -561,22 +622,52 @@ function buildCompletionNotifier(
   };
 }
 
+function buildGroupCompletionNotifier(
+  pi: AsyncTaskToolDeps["pi"],
+): ((snapshot: MmrAsyncTaskGroupSnapshot) => void) | undefined {
+  const sendMessage = (pi as { sendMessage?: ExtensionAPI["sendMessage"] } | undefined)?.sendMessage;
+  if (typeof sendMessage !== "function") return undefined;
+  return (snapshot) => {
+    sendMessage(
+      {
+        customType: ASYNC_TASK_COMPLETION_CUSTOM_TYPE,
+        content:
+          `<task-group-notification group_id="${escapeXmlAttr(snapshot.groupId)}" status="${snapshot.status}">\n` +
+          `Background task group ${escapeXmlAttr(snapshot.groupId)} ${snapshot.status}.\n` +
+          `Call task_poll({group_id:"${escapeXmlAttr(snapshot.groupId)}"}) to list the child task_ids, then task_poll({task_id}) for each child to retrieve its result. A wait timeout never cancels children.\n` +
+          `</task-group-notification>`,
+        display: false,
+        details: {
+          version: 1,
+          kind: ASYNC_TASK_COMPLETION_CUSTOM_TYPE,
+          taskId: snapshot.groupId,
+          status: snapshot.status,
+          description: `group ${snapshot.groupId}`,
+        } satisfies AsyncTaskCompletionDetails,
+      },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+  };
+}
+
 interface ParsedStartParams {
   agent: AsyncTaskAgentName;
   params: unknown;
   description: string;
   promptSummary: string;
   wantsNotify: boolean;
+  capabilityProfile?: string;
+  groupId?: string;
 }
 
 function parseStartParams(rawParams: unknown): ParsedStartParams | { error: string } {
   if (!isRecord(rawParams)) {
     return { error: "start_task expects an object." };
   }
-  const unknownKey = Object.keys(rawParams).find((key) => !START_TASK_ALLOWED_TOP_LEVEL_KEYS.has(key));
-  if (unknownKey) {
-    return { error: `start_task received unknown parameter: ${unknownKey}.` };
-  }
+  // Structural validation (unknown keys, types, capabilityProfile enum,
+  // group_id pattern, notify boolean) is enforced by checkMmrToolParams in
+  // execute(); this parser only performs agent-specific normalization and the
+  // semantic rules the schema cannot express.
   const agent = normalizeAgent(rawParams.agent);
   if (!agent) {
     return { error: "start_task.agent must be one of: Task, finder, librarian. Oracle is always blocking and cannot run in the background." };
@@ -596,14 +687,26 @@ function parseStartParams(rawParams: unknown): ParsedStartParams | { error: stri
   if (!isRecord(params)) {
     return { error: "start_task.params must be an object." };
   }
+  // Schema already constrained capabilityProfile to the read-only|read-write
+  // enum; only the Task-agent restriction is a semantic rule the schema cannot
+  // express.
+  const capabilityProfile = typeof rawParams.capabilityProfile === "string" ? rawParams.capabilityProfile : undefined;
+  if (capabilityProfile !== undefined) {
+    if (agent !== "Task") return { error: "start_task.capabilityProfile is only supported for the Task agent." };
+    params = { ...params, capabilityProfile };
+  }
+  // Schema constrained group_id to 'new' | group_<hex>; normalize to a string.
+  const groupId = typeof rawParams.group_id === "string" ? rawParams.group_id : undefined;
   return {
     agent,
     params,
     description: shortDescription(agent, params, rawParams.description),
     promptSummary: summarizeInput(agent, params),
-    wantsNotify: rawParams.notify === undefined
-      ? true
-      : typeof rawParams.notify === "boolean" ? rawParams.notify : false,
+    // Schema guarantees notify is boolean when present; default is notify-on,
+    // opt out only on an explicit false.
+    wantsNotify: rawParams.notify !== false,
+    ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
+    ...(groupId !== undefined ? { groupId } : {}),
   };
 }
 
@@ -643,10 +746,46 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       return renderMmrBackgroundTaskResult(START_TASK_TOOL_NAME, result, options, theme, context);
     },
     async execute(toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
+      // Semantic checks first so agent/Task-only guidance the schema cannot
+      // express wins (e.g. "Oracle is always blocking"); the shared schema then
+      // enforces structure (unknown keys, notify boolean, capabilityProfile
+      // enum, group_id pattern).
       const parsed = parseStartParams(rawParams);
       if ("error" in parsed) return validationResult(parsed.error);
+      const validated = validateAsyncToolParams(START_TASK_TOOL_NAME, START_TASK_PARAMETERS, rawParams);
+      if (!validated.ok) return validationResult(validated.message);
       const sessionKey = resolveSessionKey(ctx, deps);
       const onSettle = () => refreshAsyncTaskWidget(ctx, registry, sessionKey);
+      // Validate the Task payload BEFORE any registry side effect (group open)
+      // so an invalid Task start cannot mint an orphan group. Reuses the
+      // blocking Task validation/model-resolution path; a pre-spawn failure
+      // returns the same shaped result and creates no record and no group.
+      const taskPrep = parsed.agent === "Task"
+        ? prepareTaskRun(parsed.params, ctx, { ...baseToolDeps(deps), ...(deps.taskDeps ?? {}) } as TaskToolDeps)
+        : undefined;
+      if (taskPrep && !taskPrep.ok) {
+        return {
+          content: taskPrep.result.content,
+          details: {
+            worker: "mmr-subagents.async-task",
+            tool: START_TASK_TOOL_NAME,
+            agent: parsed.agent,
+            errorMessage: taskPrep.result.details?.errorMessage,
+          },
+        };
+      }
+      // Pre-validate selected-agent (finder/librarian) params before any
+      // registry side effect too, so an invalid background finder/librarian
+      // start fails closed without creating a task or minting a group — the same
+      // pre-spawn contract as Task. The run thunk still validates at execution
+      // time as defense.
+      if (parsed.agent === "finder") {
+        const v = validateAsyncToolParams(FINDER_TOOL_NAME, FINDER_PARAMETERS_SCHEMA, parsed.params);
+        if (!v.ok) return validationResult(v.message);
+      } else if (parsed.agent === "librarian") {
+        const v = validateAsyncToolParams(LIBRARIAN_TOOL_NAME, LIBRARIAN_PARAMETERS_SCHEMA, parsed.params);
+        if (!v.ok) return validationResult(v.message);
+      }
       // Two-layer gate: the session ceiling must permit push AND the caller
       // must not opt this task out. The registry adds at-most-once + a
       // per-session budget on top. Delivery is `followUp` + `triggerTurn`, so a
@@ -657,15 +796,29 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       const notify = (deps.enableCompletionPush ?? true) && parsed.wantsNotify
         ? buildCompletionNotifier(deps.pi)
         : undefined;
+      const groupNotify = (deps.enableCompletionPush ?? true) && parsed.wantsNotify
+        ? buildGroupCompletionNotifier(deps.pi)
+        : undefined;
+      // Track whether we are about to create a brand-new group, so a later
+      // start rejection (e.g. concurrency cap) can roll back only a group this
+      // call minted — never a pre-existing one.
+      const groupPreexisted = parsed.groupId !== undefined && parsed.groupId !== "new"
+        ? registry.getGroup(sessionKey, parsed.groupId) !== undefined
+        : false;
+      const groupSnapshot = parsed.groupId === "new"
+        ? registry.openGroup({ sessionKey, ...(groupNotify !== undefined ? { notify: groupNotify } : {}), onSettle })
+        : parsed.groupId !== undefined
+          ? registry.openGroup({ sessionKey, groupId: parsed.groupId, onSettle })
+          : undefined;
+      const groupId = groupSnapshot?.groupId;
+      const taskNotify = groupId === undefined ? notify : undefined;
 
       const started = parsed.agent === "Task"
         ? (() => {
-            const taskDeps = { ...baseToolDeps(deps), ...(deps.taskDeps ?? {}) } as TaskToolDeps;
-            // Reuse the blocking Task validation/model-resolution path. A pre-spawn
-            // failure returns the same shaped result and creates no record.
-            const prep = prepareTaskRun(parsed.params, ctx, taskDeps);
-            if (!prep.ok) return { result: prep.result } as const;
-            const { params, cwd, detailsContext, runnerOptionsBase, runner } = prep.prepared;
+            // Invariant: taskPrep is the ok variant here — agent === "Task"
+            // implies it was computed and any failure already returned above.
+            if (!taskPrep || !taskPrep.ok) throw new Error("unreachable: Task prep validated before group open");
+            const { params, cwd, detailsContext, runnerOptionsBase, runner } = taskPrep.prepared;
             return {
               started: registry.startTask({
                 sessionKey,
@@ -677,6 +830,8 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
                 ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
                 ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
                 workerTools: detailsContext.workerTools,
+                ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
+                ...(groupId !== undefined ? { groupId } : {}),
                 // The run thunk never throws: a spawn failure is converted into a
                 // synthetic spawn-error worker result so the background task
                 // finalizes with the SAME `spawn-error` status/shaping as blocking
@@ -688,7 +843,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
                     return buildSpawnErrorWorkerResult(err, { prompt: params.prompt, cwd });
                   }
                 },
-                ...(notify !== undefined ? { notify } : {}),
+                ...(taskNotify !== undefined ? { notify: taskNotify } : {}),
                 onSettle,
               }),
             } as const;
@@ -706,6 +861,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
                 prompt: parsed.promptSummary,
                 cwd,
                 workerTools: workerToolsForAgent(agent),
+                ...(groupId !== undefined ? { groupId } : {}),
                 run: async ({ signal, onProgress }) => {
                   const result = await tool.execute(
                     `${toolCallId}:${agent}`,
@@ -718,27 +874,21 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
                   return {
                     toolResult: result,
                     status,
+                    terminalOutcome: status === "succeeded" ? "success" : status === "failed" ? "failed" : undefined,
                     ...(status === "failed" ? { errorMessage: inferToolErrorMessage(result) } : {}),
                   };
                 },
-                ...(notify !== undefined ? { notify } : {}),
+                ...(taskNotify !== undefined ? { notify: taskNotify } : {}),
                 onSettle,
               }),
             } as const;
           })();
 
-      if ("result" in started) {
-        return {
-          content: started.result.content,
-          details: {
-            worker: "mmr-subagents.async-task",
-            tool: START_TASK_TOOL_NAME,
-            agent: parsed.agent,
-            errorMessage: started.result.details?.errorMessage,
-          },
-        };
-      }
       if (!started.started.ok) {
+        // Roll back a group this call just minted so a cap rejection cannot
+        // leave an empty orphan group; dropEmptyGroup is a no-op on a group
+        // that already holds tasks or that pre-existed.
+        if (groupId !== undefined && !groupPreexisted) registry.dropEmptyGroup(sessionKey, groupId);
         const message =
           `start_task: cannot start; ${started.started.runningCount} background task(s) already running ` +
           `(cap ${started.started.cap}). Wait for one to finish (task_wait) or stop one (task_cancel) first.`;
@@ -752,8 +902,9 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       // transcript card can stay empty (see renderMmrBackgroundTaskResult).
       refreshAsyncTaskWidget(ctx, registry, sessionKey);
       const dedupNote = started.started.deduplicated ? " (existing task for this call)" : "";
+      const groupNote = snapshot.groupId ? ` in group ${snapshot.groupId}` : "";
       const message =
-        `start_task: started background worker ${snapshot.taskId}${dedupNote} ("${snapshot.description}", agent ${snapshot.agent}). ` +
+        `start_task: started background worker ${snapshot.taskId}${dedupNote}${groupNote} ("${snapshot.description}", agent ${snapshot.agent}). ` +
         `It will notify this session on completion by default; use task_poll/task_wait only after an elapsed-time fallback ` +
         `or for multi-worker orchestration, and task_cancel to stop it. Background tasks are in-memory and lost if the session ends.`;
       return {
@@ -763,7 +914,9 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
           tool: START_TASK_TOOL_NAME,
           agent: snapshot.agent as AsyncTaskAgentName,
           taskId: snapshot.taskId,
+          ...(snapshot.groupId !== undefined ? { groupId: snapshot.groupId } : {}),
           status: snapshot.status,
+          ...(snapshot.terminalOutcome !== undefined ? { terminalOutcome: snapshot.terminalOutcome } : {}),
           freshness: snapshot.freshness,
           description: snapshot.description,
           prompt: snapshot.prompt,
@@ -796,6 +949,66 @@ function renderBoard(board: MmrAsyncTaskBoard): string {
   return lines.join("\n");
 }
 
+function renderGroup(tool: AsyncTaskToolDetails["tool"], group: MmrAsyncTaskGroupSnapshot, timedOut?: boolean): string {
+  const wait = timedOut ? " Wait timed out; the group is still running." : "";
+  const head = `${tool}: group ${group.groupId} ${group.status} (${group.counts.total} task(s): ${group.counts.succeeded} succeeded, ${group.counts.failed} failed, ${group.counts.cancelled} cancelled, ${group.counts.partial} partial).${wait}`;
+  if (group.taskIds.length === 0) return head;
+  const ids = group.taskIds.join(", ");
+  const retrieve = group.status === "running"
+    ? ` Child task_ids: ${ids}.`
+    : ` Poll each task_id to retrieve final worker outputs: ${ids}.`;
+  return `${head}${retrieve}`;
+}
+
+function groupResult(
+  tool: AsyncTaskToolDetails["tool"],
+  group: MmrAsyncTaskGroupSnapshot,
+  timedOut?: boolean,
+): AgentToolResult<AsyncTaskToolDetails> {
+  return {
+    content: [{ type: "text", text: renderGroup(tool, group, timedOut) }],
+    details: {
+      worker: "mmr-subagents.async-task",
+      tool,
+      groupId: group.groupId,
+      group,
+      ...(timedOut !== undefined ? { timedOut } : {}),
+    },
+  };
+}
+
+function invalidAsyncControlResult(
+  tool: AsyncTaskToolDetails["tool"],
+  message: string,
+): AgentToolResult<AsyncTaskToolDetails> {
+  return {
+    content: [{ type: "text", text: `${tool}: invalid parameters: ${message}` }],
+    details: { worker: "mmr-subagents.async-task", tool, errorMessage: message },
+  };
+}
+
+function groupNotFoundResult(
+  tool: AsyncTaskToolDetails["tool"],
+  groupId: string,
+): AgentToolResult<AsyncTaskToolDetails> {
+  const message = `${tool}: no background task group with id "${groupId}" in this session.`;
+  return {
+    content: [{ type: "text", text: message }],
+    details: { worker: "mmr-subagents.async-task", tool, groupId, errorMessage: message },
+  };
+}
+
+function parseTaskOrGroupControl(
+  rawParams: unknown,
+): { taskId?: string; groupId?: string; error?: string } {
+  const params = isRecord(rawParams) ? rawParams : {};
+  const taskId = typeof params.task_id === "string" && params.task_id.length > 0 ? params.task_id : undefined;
+  const groupId = typeof params.group_id === "string" && params.group_id.length > 0 ? params.group_id : undefined;
+  if (taskId && groupId) return { error: "task_id and group_id are mutually exclusive." };
+  if (groupId && !isValidAsyncTaskGroupId(groupId)) return { error: "group_id must be shaped like group_<hex>." };
+  return { ...(taskId !== undefined ? { taskId } : {}), ...(groupId !== undefined ? { groupId } : {}) };
+}
+
 export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
   return {
@@ -817,8 +1030,17 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
     },
     async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       const sessionKey = resolveSessionKey(ctx, deps);
-      const taskId = (rawParams as { task_id?: unknown })?.task_id;
-      if (typeof taskId !== "string" || taskId.length === 0) {
+      const validated = validateAsyncToolParams(TASK_POLL_TOOL_NAME, TASK_POLL_PARAMETERS, rawParams);
+      if (!validated.ok) return invalidAsyncControlResult(TASK_POLL_TOOL_NAME, validated.message);
+      const control = parseTaskOrGroupControl(rawParams);
+      if (control.error) return invalidAsyncControlResult(TASK_POLL_TOOL_NAME, control.error);
+      if (control.groupId) {
+        const group = registry.getGroup(sessionKey, control.groupId);
+        if (!group) return groupNotFoundResult(TASK_POLL_TOOL_NAME, control.groupId);
+        refreshAsyncTaskWidget(ctx, registry, sessionKey);
+        return groupResult(TASK_POLL_TOOL_NAME, group);
+      }
+      if (!control.taskId) {
         const board = registry.listTasks(sessionKey);
         refreshBackgroundTaskWidget(ctx, board);
         return {
@@ -826,8 +1048,8 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
           details: { worker: "mmr-subagents.async-task", tool: TASK_POLL_TOOL_NAME, board },
         };
       }
-      const snapshot = registry.getTask(sessionKey, taskId);
-      if (!snapshot) return notFoundResult(TASK_POLL_TOOL_NAME, taskId);
+      const snapshot = registry.getTask(sessionKey, control.taskId);
+      if (!snapshot) return notFoundResult(TASK_POLL_TOOL_NAME, control.taskId);
       refreshAsyncTaskWidget(ctx, registry, sessionKey);
       return projectSnapshot(TASK_POLL_TOOL_NAME, snapshot);
     },
@@ -855,10 +1077,24 @@ export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
     },
     async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       const sessionKey = resolveSessionKey(ctx, deps);
-      const params = rawParams as { task_id?: unknown; timeout_ms?: unknown };
-      const taskId = typeof params?.task_id === "string" ? params.task_id : "";
-      if (taskId.length === 0) return notFoundResult(TASK_WAIT_TOOL_NAME, "");
-      const timeoutMs = typeof params?.timeout_ms === "number" ? params.timeout_ms : undefined;
+      const validated = validateAsyncToolParams(TASK_WAIT_TOOL_NAME, TASK_WAIT_PARAMETERS, rawParams);
+      if (!validated.ok) return invalidAsyncControlResult(TASK_WAIT_TOOL_NAME, validated.message);
+      const control = parseTaskOrGroupControl(rawParams);
+      if (control.error) return invalidAsyncControlResult(TASK_WAIT_TOOL_NAME, control.error);
+      if (!control.taskId && !control.groupId) return invalidAsyncControlResult(TASK_WAIT_TOOL_NAME, "task_wait requires task_id or group_id.");
+      const timeoutMs = validated.value.timeout_ms;
+      if (control.groupId) {
+        const result = await registry.waitForGroup({
+          sessionKey,
+          groupId: control.groupId,
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        });
+        if (!result.found || !result.snapshot) return groupNotFoundResult(TASK_WAIT_TOOL_NAME, control.groupId);
+        refreshAsyncTaskWidget(ctx, registry, sessionKey);
+        return groupResult(TASK_WAIT_TOOL_NAME, result.snapshot, result.timedOut);
+      }
+      const taskId = control.taskId;
+      if (!taskId) return invalidAsyncControlResult(TASK_WAIT_TOOL_NAME, "task_wait requires task_id or group_id.");
       const result = await registry.waitForTask({
         sessionKey,
         taskId,
@@ -892,10 +1128,24 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
     },
     async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       const sessionKey = resolveSessionKey(ctx, deps);
-      const params = rawParams as { task_id?: unknown; reason?: unknown };
-      const taskId = typeof params?.task_id === "string" ? params.task_id : "";
-      if (taskId.length === 0) return notFoundResult(TASK_CANCEL_TOOL_NAME, "");
-      const reason = typeof params?.reason === "string" ? params.reason : undefined;
+      const validated = validateAsyncToolParams(TASK_CANCEL_TOOL_NAME, TASK_CANCEL_PARAMETERS, rawParams);
+      if (!validated.ok) return invalidAsyncControlResult(TASK_CANCEL_TOOL_NAME, validated.message);
+      const control = parseTaskOrGroupControl(rawParams);
+      if (control.error) return invalidAsyncControlResult(TASK_CANCEL_TOOL_NAME, control.error);
+      if (!control.taskId && !control.groupId) return invalidAsyncControlResult(TASK_CANCEL_TOOL_NAME, "task_cancel requires task_id or group_id.");
+      const reason = validated.value.reason;
+      if (control.groupId) {
+        const group = await registry.cancelGroup({
+          sessionKey,
+          groupId: control.groupId,
+          ...(reason !== undefined ? { reason } : {}),
+        });
+        if (!group) return groupNotFoundResult(TASK_CANCEL_TOOL_NAME, control.groupId);
+        refreshAsyncTaskWidget(ctx, registry, sessionKey);
+        return groupResult(TASK_CANCEL_TOOL_NAME, group);
+      }
+      const taskId = control.taskId;
+      if (!taskId) return invalidAsyncControlResult(TASK_CANCEL_TOOL_NAME, "task_cancel requires task_id or group_id.");
       const snapshot = await registry.cancelTask({
         sessionKey,
         taskId,
