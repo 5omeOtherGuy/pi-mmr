@@ -946,8 +946,10 @@ describe("mmr-toolbox task_list — widget animates in_progress rows", () => {
     const done = find("Spec");
     assert.ok(done.startsWith("\u001b[90m"), "completed row is muted-wrapped");
     assert.match(done, /✓/);
-    // header: accent + bold.
-    assert.equal(lines[0], "\u001b[36m\u001b[1mTasks\u001b[22m\u001b[39m");
+    // no header: task rows render directly.
+    assert.equal(lines[0], "\u001b[33m⠋\u001b[39m Building");
+    assert.ok(lines.every((line) => !line.includes("Tasks")),
+      `widget must not render a Tasks header; got ${JSON.stringify(lines)}`);
   });
 
   it("clears the previous widget's animation when Pi replaces it", async (t) => {

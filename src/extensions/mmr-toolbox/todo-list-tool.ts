@@ -200,15 +200,6 @@ function renderTodoWidgetLines(
       return value;
     }
   };
-  const safeBold = (value: string): string => {
-    if (!theme) return value;
-    try {
-      return theme.bold(value);
-    } catch {
-      return value;
-    }
-  };
-
   // Preserve submission order: the model's ordering is the source of truth
   // for display, and the widget mirrors that. While a row is in_progress the
   // glyph is the live braille loader frame so it matches Pi's working
@@ -230,8 +221,7 @@ function renderTodoWidgetLines(
   const visible = taskLines.slice(0, TASK_LIST_WIDGET_MAX_ROWS);
   const remaining = taskLines.length - visible.length;
 
-  const lines: string[] = [safeFg("accent", safeBold("Tasks"))];
-  lines.push(...visible);
+  const lines: string[] = [...visible];
   if (remaining > 0) {
     lines.push(safeFg("dim", `… ${remaining} more`));
   }
