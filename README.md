@@ -1,103 +1,142 @@
 # pi-mmr
 
-Pi Multi-Model Routing extensions.
+[![CI](https://github.com/5omeOtherGuy/pi-mmr/actions/workflows/ci.yml/badge.svg)](https://github.com/5omeOtherGuy/pi-mmr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Pi package](https://img.shields.io/badge/Pi-package-7c3aed)
 
-**AMP Code in pi - enjoy!** 
+> Mode-driven multi-model routing, worker tools, and fail-safe defaults for Pi.
 
-Inspired by Amp Code's agentic coding workflow, `pi-mmr` is a [Pi](https://github.com/earendil-works/pi-coding-agent) package that turns one keystroke into a complete, locked routing profile. Each named **mode** binds a provider-neutral model preference list, a thinking / max-output policy, a context profile, a tool allowlist, and a per-mode system-prompt rewrite — so moving from fast iteration to deep reasoning is one command, not a pile of flags.
+`pi-mmr` turns [Pi](https://github.com/earendil-works/pi-coding-agent) into a locked coding harness. Pick a mode such as `rush`, `smart`, `large`, or `deep`; `pi-mmr` applies the model route, thinking policy, context profile, active-tool set, worker profile, and prompt behavior for that job.
 
-Routing works across whichever providers and subscriptions are already registered in your installation, preferring subscription/OAuth routes over API keys and falling back across model families automatically. It is **fail-closed**: a mode never activates without a usable model and at least one active tool.
+It also brings Pi-native tools for codebase search, expert review, GitHub repository research, web lookup, prior-session recall, safe patching, todos, and subscription quota fallback — all scoped by explicit feature gates and reversible with `free` mode.
 
-Beyond routing, `pi-mmr` ships a toolbox:
+## Why pi-mmr
 
-- **Subagents & workers** — an `oracle` advisor for deep reasoning and review, a `finder` for concept-based codebase search, a `Task` worker for bounded sub-jobs, and a `librarian` for read-only GitHub repository research.
-- **Web reach** — `web_search` and `read_web_page` backed by SearXNG, Brave, or DuckDuckGo.
-- **GitHub reach** — read-only repository tools (file reads, directory and glob listings, code and commit search, ref diffs) over `owner/repo`.
-- **Session memory** — `find_session` / `read_session` to search and reuse prior Pi sessions across every local project.
-- **Editing & planning** — `apply_patch` and a session-local `task_list`.
-- **Resilient sessions** — interactive fallback when a subscription route hits a quota or rate-limit error.
+- **One command changes the whole harness.** `/mode deep` is not just a model switch; it locks routing, thinking, tools, and prompt behavior together.
+- **Provider-neutral routing.** Modes prefer subscription/OAuth routes first, then API-key routes, then other registered providers.
+- **Right-sized worker delegation.** Use `finder`, `oracle`, `Task`, and `librarian` without hand-picking child models and tools.
+- **Fail-closed safety.** A locked mode refuses to activate without a usable model and active tools; `free` releases MMR-owned locks.
+- **Optional reach.** Web, GitHub, and local session history tools stay gated until you explicitly enable them.
 
-Everything uses exact-name tool resolution, is session-scoped, and is reversible: `free` mode releases the locks and gives you back stock Pi.
+## Quick start
 
-## Extensions
-
-| Extension | Purpose | Default |
-| --- | --- | --- |
-| [`mmr-core`](src/extensions/mmr-core/README.md) | Locked modes, model resolution, tool allowlists, prompt rewrite | on |
-| [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) | `apply_patch` and session-local `task_list` | on |
-| [`mmr-subagents`](src/extensions/mmr-subagents/README.md) | `finder`, `oracle`, `Task`, `librarian` workers | on |
-| [`mmr-session-fallback`](src/extensions/mmr-session-fallback/README.md) | Interactive fallback on subscription-route quota/rate-limit errors | on |
-| [`mmr-web`](src/extensions/mmr-web/README.md) | `web_search` and `read_web_page` (SearXNG / Brave / DuckDuckGo) | off |
-| [`mmr-history`](src/extensions/mmr-history/README.md) | `find_session` / `read_session` over local Pi sessions | off |
-| [`mmr-github`](src/extensions/mmr-github/README.md) | Read-only GitHub repository tools (reads, listings, search, diffs) | off |
-
-## Where to go next
-
-| Need                              | Read                                                                          |
-| --------------------------------- | ----------------------------------------------------------------------------- |
-| Pick or debug a mode              | [`src/extensions/mmr-core/README.md`](src/extensions/mmr-core/README.md)      |
-| Use patch and todo tools          | [`src/extensions/mmr-toolbox/README.md`](src/extensions/mmr-toolbox/README.md) |
-| Use workers and subagents         | [`src/extensions/mmr-subagents/README.md`](src/extensions/mmr-subagents/README.md) |
-| Enable web search and page reads  | [`src/extensions/mmr-web/README.md`](src/extensions/mmr-web/README.md)        |
-| Read GitHub repositories          | [`src/extensions/mmr-github/README.md`](src/extensions/mmr-github/README.md)  |
-| Search and read prior sessions    | [`src/extensions/mmr-history/README.md`](src/extensions/mmr-history/README.md) |
-| Understand exports                | [`docs/public-api.md`](docs/public-api.md)                                    |
-| Understand the architecture       | [`docs/reference-architecture.md`](docs/reference-architecture.md)            |
-| Plan changes / roadmap            | [`ROADMAP.md`](ROADMAP.md)                                                    |
-| Write or review docs              | [`docs/documentation-style-guide.md`](docs/documentation-style-guide.md)      |
-
-## Install
-
-`pi-mmr` is a Pi package, not an npm app. Pi must already be installed and authenticated.
+Pi must already be installed and authenticated.
 
 ```bash
-pi -e git:github.com/5omeOtherGuy/pi-mmr --mmr-mode smart   # one-shot, no install
-pi install git:github.com/5omeOtherGuy/pi-mmr               # global install
-pi install -l git:github.com/5omeOtherGuy/pi-mmr            # project install
+pi -e git:github.com/5omeOtherGuy/pi-mmr --mmr-mode smart
 ```
 
-Pi (`@earendil-works/pi-coding-agent`) and `@earendil-works/pi-agent-core` are declared as `peerDependencies` and are not bundled.
+Install globally or per project:
 
-To enable network tools, see [Enabling `mmr-web`](src/extensions/mmr-web/README.md#configuration). To enable local session lookup, set `MMR_HISTORY_ENABLE=true`.
+```bash
+pi install git:github.com/5omeOtherGuy/pi-mmr
+pi install -l git:github.com/5omeOtherGuy/pi-mmr
+```
 
-## Modes
-
-A mode is a locked routing profile: model preference list, request thinking / max-output policy, context profile, active-tool allowlist, and an MMR-owned prompt block.
-
-| Mode       | Intent                              | Model-family fallback                                              | Tool intent              |
-| ---------- | ----------------------------------- | ------------------------------------------------------------------ | ------------------------ |
-| `smart`    | Default balanced coding             | `claude-opus-4-8` → `gpt-5.5`                                      | standard locked-mode set |
-| `smartGPT` | Smart routed through GPT            | `gpt-5.5`                                                          | standard locked-mode set |
-| `rush`     | Fast, low-token turns               | `gpt-5.5` → `claude-haiku-4-5-20251001` → `claude-haiku-4-5`       | rush-specific set        |
-| `large`    | Long-context work                   | `claude-opus-4-6` → `gpt-5.4`                                      | standard locked-mode set |
-| `deep`     | Hard reasoning, planning, review    | `gpt-5.5` → `claude-opus-4-8`                                      | deep-specific set        |
-| `free`     | Pi as if `pi-mmr` were not installed | baseline Pi model restored                                        | baseline minus pi-mmr-owned tools |
-
-Per-mode request policy, context profiles, and tool-set details: [`src/extensions/mmr-core/README.md`](src/extensions/mmr-core/README.md).
-
-- *Provider expansion.* `claude-*` → `claude-subscription`, `anthropic`; `gpt-*` → `openai-codex`, `github-copilot`, `openai`, `azure-openai-responses`; `gemini-*` / `gemma-*` → `google`, `google-vertex`. Subscription/OAuth-backed routes sort first, then API-key, then other.
-- *Tool resolution is exact-name only.* No alias or tool fallback. Tools resolve as `active`, `gated`, `disabled`, `deferred`, or `missing`; only `active` reaches Pi.
-- *Free mode* drops only `pi-mmr`-owned tool registrations; third-party tools with the same name keep working.
-- *Fail-closed.* Zero active tools or no usable model in a locked mode aborts activation before mutating Pi state.
-
-### Selecting a mode
-
-Precedence: `--mmr-mode` flag → persisted session → `mmrCore.defaultMode` → `smart`.
+Verify the active route inside Pi:
 
 ```text
-pi --mmr-mode rush
+/mmr-status
+/mode rush
+/mode free
+```
 
-/mode              # show current
-/mode deep         # switch
-/mode free         # release locks
-/mmr-status        # routing state (add `debug` for the full dump)
+Pi (`@earendil-works/pi-coding-agent`) and `@earendil-works/pi-agent-core` are peer dependencies and are not bundled.
+
+## First two minutes
+
+1. Start a session in the default locked mode:
+
+   ```bash
+   pi -e git:github.com/5omeOtherGuy/pi-mmr --mmr-mode smart
+   ```
+
+2. Inspect routing and gates:
+
+   ```text
+   /mmr-status
+   /mmr-status debug
+   ```
+
+3. Switch modes by intent:
+
+   ```text
+   /mode rush       # fast, low-token turns
+   /mode deep       # hard reasoning, planning, review
+   /mode free       # stock Pi behavior; MMR-owned tools removed
+   ```
+
+4. Ask Pi to use a worker when the job is bounded:
+
+   ```text
+   Use finder to locate where provider routing is resolved.
+   Ask oracle to review the mode activation design.
+   Use Task to update the focused docs file and run the narrow check.
+   ```
+
+5. Enable optional reach only when needed:
+
+   ```bash
+   export MMR_WEB_ENABLE=true
+   export MMR_GITHUB_ENABLE=true
+   export MMR_HISTORY_ENABLE=true
+   ```
+
+## Choose a mode
+
+| I want to... | Use | What changes |
+| --- | --- | --- |
+| Do balanced coding | `smart` | Default locked route and standard tool set |
+| Prefer GPT routing | `smartGPT` | Smart profile routed through GPT-family preferences |
+| Move quickly | `rush` | Fast model preferences, lower token posture, smaller tool set |
+| Work with long context | `large` | Long-context model preferences and standard tools |
+| Plan, debug, or review deeply | `deep` | High-reasoning route and deep-specific tools |
+| Return to stock Pi | `free` | Releases MMR locks and removes MMR-owned tools |
+
+Mode selection precedence: `--mmr-mode` flag → persisted session → `mmrCore.defaultMode` → `smart`.
+
+Useful controls:
+
+```text
+/mode              # show current mode
+/mode deep         # switch mode
+/mmr-status        # routing state
 Ctrl+Shift+S       # mode picker  (Alt+M fallback)
 Ctrl+Space         # cycle smart → smartGPT → rush → large → deep
 ```
 
-## Settings
+## Choose a tool
 
-Read from `~/.pi/agent/settings.json` (global) and `<project>/.pi/settings.json` (project). Both flat (`mmrCore`, `mmrWeb`) and nested (`mmr.core`, `mmr.web`) forms are accepted.
+| I need to... | Use | Owner |
+| --- | --- | --- |
+| Patch files safely | `apply_patch` | [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) |
+| Track session work | `task_list` | [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) |
+| Search the codebase by behavior | `finder` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
+| Ask for deep advice or review | `oracle` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
+| Run bounded child work | `Task` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
+| Research GitHub repositories | `librarian` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) + [`mmr-github`](src/extensions/mmr-github/README.md) |
+| Search the web | `web_search` | [`mmr-web`](src/extensions/mmr-web/README.md) |
+| Read public web pages | `read_web_page` | [`mmr-web`](src/extensions/mmr-web/README.md) |
+| Find old Pi sessions | `find_session` | [`mmr-history`](src/extensions/mmr-history/README.md) |
+| Reuse old session context | `read_session` | [`mmr-history`](src/extensions/mmr-history/README.md) |
+
+For command-style lookup, see the [quick reference](docs/quick-reference.md).
+
+## Feature map
+
+| Extension | Default | User value |
+| --- | --- | --- |
+| [`mmr-core`](src/extensions/mmr-core/README.md) | On | Locked modes, model resolution, tool allowlists, prompt rewrite, diagnostics |
+| [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) | On | Safe patching and session-local todo tracking |
+| [`mmr-subagents`](src/extensions/mmr-subagents/README.md) | On | `finder`, `oracle`, `Task`, and gated `librarian` workers |
+| [`mmr-session-fallback`](src/extensions/mmr-session-fallback/README.md) | On | Interactive fallback when subscription routes hit quota or rate limits |
+| [`mmr-web`](src/extensions/mmr-web/README.md) | Off | `web_search` and `read_web_page` via SearXNG, Brave, or DuckDuckGo |
+| [`mmr-history`](src/extensions/mmr-history/README.md) | Off | Search and summarize prior local Pi sessions with redaction |
+| [`mmr-github`](src/extensions/mmr-github/README.md) | Off | Read-only GitHub files, directories, search, commits, diffs, repositories |
+
+## Optional capabilities
+
+Non-secret settings live in Pi settings files. Secrets belong in environment variables.
 
 ```json
 {
@@ -110,36 +149,62 @@ Read from `~/.pi/agent/settings.json` (global) and `<project>/.pi/settings.json`
       "finder": [{ "model": "gpt-5.4-mini", "thinkingLevel": "low" }]
     }
   },
-  "mmrWeb": { "enabled": true, "searxngUrl": "http://127.0.0.1:8080" }
+  "mmrWeb": { "enabled": true }
 }
 ```
 
 ```bash
-export BRAVE_API_KEY="brv_xxx"   # env-only; never put in settings.json
+export MMR_WEB_ENABLE=true            # register web_search/read_web_page
+export MMR_GITHUB_ENABLE=true         # register read-only GitHub tools
+export MMR_HISTORY_ENABLE=true        # register find_session/read_session
+export BRAVE_API_KEY="brv_xxx"        # optional; env only
+export MMR_GITHUB_TOKEN="ghp_xxx"     # optional; env only
 ```
 
-`subagentModelPreferences` keys: `finder`, `oracle`, `librarian`, `history-reader`, `task-subagent`. Legacy `mmrCore.toolAliases` is deprecated and ignored. Full `mmrWeb.*` reference: [`src/extensions/mmr-web/README.md`](src/extensions/mmr-web/README.md#configuration).
+Settings are read from `~/.pi/agent/settings.json` and `<project>/.pi/settings.json`. Restart Pi after changing settings or env vars that gate tool registration.
+
+## Safety and privacy
+
+- Locked modes are **fail-closed**: no usable model or zero active tools aborts activation before mutating Pi state.
+- Tool resolution is exact-name based and reported as `active`, `gated`, `disabled`, `deferred`, or `missing` in `/mmr-status`.
+- `mmr-web` only runs after opt-in and rejects localhost/private/link-local reads for `read_web_page`.
+- `mmr-github` exposes read-only GitHub requests only; tokens are read from env and never echoed.
+- `mmr-history` redacts session packets and returns opaque `projectRef` values instead of raw session paths or project roots.
+- `free` mode drops only `pi-mmr`-owned tool registrations; third-party tools keep working.
 
 ## Troubleshooting
 
-Run `/mmr-status` (or `/mmr-status debug`). Common cases:
+Run `/mmr-status` first; add `debug` for the full routing dump.
 
-- `Model applied: no` → see Debug `Model candidates:` for per-candidate `registered/authenticated/applied` flags. Usually unregistered/unauthenticated provider, or Pi-side `setModel` rejection.
-- Mode flipped to Free → native `/model` or `/think` while locked auto-switches with a warning. Re-enter `/mode <key>`.
-- Tool `gated` / `deferred` → owning extension is not loaded or enabled (`librarian` needs registered `mmr-github` tools, set `MMR_GITHUB_ENABLE=true`).
-- Locked mode refused to activate → resolved zero active tools; inspect `Tool decisions:`.
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Model applied: no` | Provider missing, unauthenticated, or rejected by Pi | Inspect `/mmr-status debug` model candidates |
+| Mode flipped to Free | Native `/model` or `/think` changed a locked route | Re-enter `/mode <key>` |
+| Tool is `gated` | Owning extension is disabled or prerequisite missing | Enable the extension and restart Pi |
+| `librarian` is gated | `mmr-github` tools are not registered/source-owned | Set `MMR_GITHUB_ENABLE=true`; add `MMR_GITHUB_TOKEN` for private/search |
+| Locked mode refused activation | No usable model or zero active tools | Check model auth and tool decisions |
 
-Full field reference: [`src/extensions/mmr-core/README.md`](src/extensions/mmr-core/README.md#diagnostics--mmr-status). Provider/tool-call stream failures: [`docs/troubleshooting.md`](docs/troubleshooting.md).
+Full troubleshooting: [`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+## Documentation
+
+- **Start here:** [`docs/README.md`](docs/README.md)
+- **Quick lookup:** [`docs/quick-reference.md`](docs/quick-reference.md)
+- **Public API:** [`docs/public-api.md`](docs/public-api.md), [`docs/mmr-core-api.md`](docs/mmr-core-api.md)
+- **Architecture:** [`docs/reference-architecture.md`](docs/reference-architecture.md)
+- **Compatibility:** [`docs/extension-compatibility.md`](docs/extension-compatibility.md)
+- **Contributor map:** [`INDEX.md`](INDEX.md), [`REPOMAP.md`](REPOMAP.md), [`ROADMAP.md`](ROADMAP.md)
 
 ## Development
 
 ```bash
-npm test               # node --test tests/*.test.mjs
-npm run check          # tsc --noEmit
+npm test
+npm run check
 npm run pack:dry-run
+pi -e "$PWD" --list-models
 ```
 
-Tests are deterministic and must not make live provider/API calls. Entry points: [`INDEX.md`](INDEX.md), [`REPOMAP.md`](REPOMAP.md), [`AGENTS.md`](AGENTS.md). Documentation conventions: [`docs/documentation-style-guide.md`](docs/documentation-style-guide.md).
+Tests are deterministic and must not make live provider/API calls. Documentation conventions: [`docs/documentation-style-guide.md`](docs/documentation-style-guide.md).
 
 ## License
 

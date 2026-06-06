@@ -6,12 +6,14 @@
 
 ## Current implementation state
 
-`pi-mmr` is one installable Pi package containing modular extensions. Today the package registers five extensions:
+`pi-mmr` is one installable Pi package containing modular extensions. Today the package registers seven extensions:
 
 - `mmr-core` — implemented;
+- `mmr-session-fallback` — implemented; interactive session-scoped fallback on subscription quota/rate-limit errors;
 - `mmr-toolbox` — implemented (`apply_patch`, `task_list`); some capabilities deferred;
 - `mmr-web` — implemented; opt-in via `MMR_WEB_ENABLE`; `web_search` works no-key out of the box (DuckDuckGo HTML fallback) and prefers SearXNG (user-controlled URL) or Brave (with `BRAVE_API_KEY`) when configured; an opt-in managed SearXNG sidecar can spawn/stop a local instance on demand;
-- `mmr-subagents` — concrete workers shipped (`finder`, `oracle`, `Task`, `librarian`); owns `Task`/`finder`/`oracle`/`librarian` logical names and the `mmr-subagents` feature gate. Shipped workers use the `mmr-core` subagent execution route (`--mmr-subagent <name>`) so the child Pi process applies a profile-resolved model/thinking/tool allowlist verbatim; `librarian` remains `gated` until both mmr-web tools are registered and active; the feature gate reports `enabled` with the active capability list.
+- `mmr-github` — implemented; opt-in read-only GitHub repository tools used directly and by the `librarian` worker gate;
+- `mmr-subagents` — concrete workers shipped (`finder`, `oracle`, `Task`, `librarian`) plus custom Markdown subagents; owns `Task`/`finder`/`oracle`/`librarian` logical names and the `mmr-subagents` feature gate. Shipped workers use the `mmr-core` subagent execution route (`--mmr-subagent <name>`) so the child Pi process applies a profile-resolved model/thinking/tool allowlist verbatim; `librarian` remains `gated` until the required read-only GitHub tools are registered and source-owned by `mmr-github`; the feature gate reports `enabled` with the active capability list.
 - `mmr-history` — opt-in global local Pi session lookup; registers `find_session` and `read_session` when enabled. `read_session` runs through the in-process `history-reader` subagent with a deterministically redacted packet, falling back to lexical extraction on worker failure.
 
 Implemented in `mmr-core`:
@@ -45,12 +47,12 @@ Implemented in `mmr-web`:
 
 Not implemented yet:
 
-- custom repository-provider variants and custom subagent registration (`mmr-subagents`);
+- non-GitHub repository-provider variants for `librarian`;
 - handoff support and richer session indexing (`mmr-history`);
 - callable skill loading (`mmr-skills`);
 - remaining toolbox tool: `chart`;
 - MCP bridging (`mmr-toolbox-mcp`);
-- provider payload rewrites (`mmr-provider-parity`).
+- provider payload rewrites beyond the current mode-owned request policy (`mmr-provider-parity`).
 
 ## Architecture principle
 
@@ -69,9 +71,11 @@ Other extensions own higher-risk or higher-variance capabilities and plug into c
 | Extension | Owns | Status |
 |---|---|---|
 | `mmr-core` | Mode registry, mode commands/flags, model and thinking routing, request-policy hook, tool allowlist enforcement, mode prompt rewrite, mode state, session-identity primitive, shared contracts. | Implemented. |
+| `mmr-session-fallback` | Session-scoped quota/rate-limit fallback picker, managed model update, persisted override, retry-message rewrite. | Implemented. |
 | `mmr-toolbox` | Local utility tools that are not routing, history, web, subagents, or provider payload work: `apply_patch`, `task_list`, deferred `chart`. | Implemented (deferred capabilities still deferred). |
 | `mmr-web` | `web_search`, `read_web_page`, web/network policy, pluggable SearXNG/Brave/DuckDuckGo backends, custom reader with Readability + Turndown, and the opt-in managed SearXNG sidecar. | Implemented (opt-in). |
-| `mmr-subagents` | `Task`, `finder`, `oracle`, `librarian`, worker runner, custom-agent loading. Expanded librarian coverage still needs repository-provider tools (GitHub/Bitbucket). | Partial — worker runner + `finder`, `oracle`, `Task`, and public-web `librarian` shipped; librarian gated until mmr-web prerequisites are active. |
+| `mmr-github` | Read-only GitHub repository tools, token/env handling, response bounds, source-owned tool registration for `librarian`. | Implemented (opt-in). |
+| `mmr-subagents` | `Task`, `finder`, `oracle`, `librarian`, worker runner, custom Markdown subagents. Non-GitHub repository-provider variants remain deferred. | Implemented with gated `librarian`. |
 | `mmr-history` | `find_session`, `read_session`, future `handoff`, local session indexing, privacy gates. | Initial gated session lookup slice implemented. |
 | `mmr-skills` | Callable `skill` tool that loads and applies skill bodies through Pi-compatible skill discovery. | Planned. |
 | `mmr-toolbox-mcp` | MCP resource/tool discovery and `read_mcp_resource`. Diagnostics belong to user-configured MCP/IDE tools, not a canonical pi-mmr logical tool. | Planned. |
@@ -85,8 +89,10 @@ Preferred direction:
 
 ```text
 mmr-core
+  <- mmr-session-fallback
   <- mmr-toolbox
   <- mmr-web
+  <- mmr-github
   <- mmr-subagents
   <- mmr-history
   <- mmr-skills
@@ -164,7 +170,14 @@ All tool names below are concrete Pi tool names. Modes, subagent profiles, custo
 | `Task` | `mmr-subagents` | Active in `smart`/`smartGPT`/`rush`/`large`/`deep` modes. Mode-derived bounded worker routed through `mmr-core`'s `task-subagent` profile. |
 | `finder` | `mmr-subagents` | Active in `smart`/`smartGPT`/`rush`/`large`/`deep` modes. Read-only worker (`--tools grep,find,read`) routed through `mmr-core`'s subagent execution profile. |
 | `oracle` | `mmr-subagents` | Active in `smart`/`smartGPT`/`rush`/`large`/`deep` modes. Advisory worker routed through `mmr-core`'s `oracle` profile. |
-| `librarian` | `mmr-subagents` | Gated behind the `mmr-subagents` feature gate; full support also requires repository-provider tools. |
+| `librarian` | `mmr-subagents` | Gated behind source-owned read-only `mmr-github` tools; routes remote repository research through the `librarian` profile. |
+| `read_github` | `mmr-github` | Active when GitHub access is enabled; reads files or lists directories. |
+| `list_directory_github` | `mmr-github` | Active when GitHub access is enabled; lists directory entries. |
+| `glob_github` | `mmr-github` | Active when GitHub access is enabled; matches repository paths. |
+| `search_github` | `mmr-github` | Active when GitHub access is enabled and a token is available; searches code in one repository. |
+| `commit_search` | `mmr-github` | Active when GitHub access is enabled; searches/lists commits. |
+| `diff_github` | `mmr-github` | Active when GitHub access is enabled; compares refs and optional bounded patches. |
+| `list_repositories` | `mmr-github` | Active when GitHub access is enabled; discovers token-accessible and public repositories. |
 | `handoff` | `mmr-history` | Deferred. |
 | `read_session` | `mmr-history` | Active when `MMR_HISTORY_ENABLE=true`; resolves any local Pi session by id; always tries the `history-reader` worker first with a redacted packet, falls back to redacted lexical extraction. |
 | `find_session` | `mmr-history` | Active when `MMR_HISTORY_ENABLE=true`; enumerates every local Pi session on disk; returns matches with an opaque `projectRef` per session and never raw cwd / file paths. |
@@ -190,6 +203,10 @@ When `mmr-toolbox` is not loaded, deep mode's `apply_patch` request resolves as 
 
 Owns network reads/searches. Network policy, provider selection, rate limits, and privacy prompts live here, not in core. The extension registers `web_search` and `read_web_page` only when configured and safe to use.
 
+### `mmr-github`
+
+Owns read-only GitHub repository access. Token handling, response bounds, repository input parsing, and source-owned tool registration live here, not in `mmr-subagents`. `librarian` depends on this provider rather than owning GitHub API behavior itself.
+
 ### `mmr-skills`
 
 Owns callable skill loading. Pi already has native skill resources; this module should bridge `skill` tool calls to Pi-compatible skill discovery without duplicating the whole skill system.
@@ -212,7 +229,7 @@ Owns MCP-specific discovery and resource reads. Keep this separate from `mmr-too
 
 1. Keep hardening `mmr-core` public contracts and docs.
 2. Continue hardening implemented `mmr-toolbox` tools (`apply_patch`, `task_list`) and add deferred local utilities only when needed.
-3. Continue `mmr-subagents` by hardening shipped workers and designing deferred repository-provider variants for `librarian` behind explicit gates.
+3. Continue `mmr-github`/`mmr-subagents` by hardening source-owned librarian gating and designing deferred non-GitHub repository-provider variants behind explicit gates.
 4. Continue `mmr-history` with handoff support and richer local or remote session indexing behind explicit privacy gates.
 5. Implement `mmr-skills` as an opt-in capability module.
 6. Implement `mmr-toolbox-mcp` only after deciding Pi-native MCP versus package-owned MCP bridge.

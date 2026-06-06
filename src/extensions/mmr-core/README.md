@@ -42,7 +42,7 @@ Exact-name resolution against Pi's live tool inventory through the tool-provider
 | Status | Meaning |
 | --- | --- |
 | `active` | Registered and reachable in this mode. |
-| `gated` | Owner is loaded but a prerequisite is unmet (`librarian` waits on active mmr-web-owned `web_search` + `read_web_page`). |
+| `gated` | Owner is loaded but a prerequisite is unmet (`librarian` waits on source-owned `mmr-github` tools). |
 | `disabled` | Owner is loaded but turned off or has no active capability. |
 | `deferred` | Recognized name reserved in the status catalog; concrete tool not shipped. |
 | `missing` | No extension claimed the name; Pi has not registered it. |
@@ -116,7 +116,7 @@ Registered profiles:
 | `finder`         | standalone, `finder`   | `[grep, find, read]`                                                                                                                               | `antigravity/gemini-3.5-flash-extra-low` → `gpt-5.4-mini` → `claude-haiku-4-5` (Gemini primary is provider-pinned; fallbacks expand with provider hints) | `minimal` | false / false |
 | `history-reader` | standalone             | `[]` (`maxTurns: 1`)                                                                                                                               | `gpt-5.4-mini` → `claude-haiku-4-5`                                                                                                            | `low`    | false / false |
 | `oracle`         | standalone, `oracle`   | `[read, grep, find, web_search, read_web_page, read_session, find_session]` (child filters out unregistered sibling-extension tools)                | `gpt-5.5` → `claude-opus-4-6`                                                                                                                  | `high`   | false / false |
-| `librarian`      | standalone, `librarian`| `[web_search, read_web_page]`                                                                                                                      | `claude-opus-4-6` → `gpt-5.4`                                                                                                                  | `medium` | false / false |
+| `librarian`      | standalone, `librarian`| `[read_github, list_directory_github, glob_github, search_github, commit_search, diff_github, list_repositories]`                                  | `claude-opus-4-6` → `gpt-5.4`                                                                                                                  | `medium` | false / false |
 | `task-subagent`  | mode-derived, `Task`   | `[read, bash, edit, write, read_web_page, web_search, finder, skill, task_list]` minus `denyTools: [Task, oracle, librarian, handoff]` | `claude-opus-4-8` high → `gpt-5.5` medium → `claude-opus-4-6` high → Haiku 4.5 low; Rush override: `gpt-5.5` off → Haiku 4.5 off                | varies   | false / false |
 
 Pure route resolver lives in [`subagent-resolver.ts`](subagent-resolver.ts).
@@ -167,7 +167,7 @@ Common symptoms:
 - **Settings warning naming a block.** The block was discarded but the rest of the file (and the sibling file) still loaded. Fix the shape against the example in [`../../../README.md`](../../../README.md#settings). A `toolAliases` warning means the deprecated alias setting was found and ignored.
 - **Tool stays `missing` / `deferred`.** `Tool decisions:` shows each request's provider and chosen tool. Resolution is identity-only: `missing` means no extension has claimed it and Pi has not registered the name; `deferred` means the catalog credits an owner that has not shipped/registered the concrete tool.
 - **Locked mode refused to activate.** The resolver returned zero active tools; the previous state is kept. Inspect `Tool decisions:` on the previous state.
-- **Feature gate `missing` / `disabled` / `gated`.** `missing` = no provider claimed it; `disabled` = owner loaded but off or no active capability; `gated` names the prerequisite (e.g. `librarian` waits on active mmr-web-owned `web_search` and `read_web_page`).
+- **Feature gate `missing` / `disabled` / `gated`.** `missing` = no provider claimed it; `disabled` = owner loaded but off or no active capability; `gated` names the prerequisite (e.g. `librarian` waits on source-owned `mmr-github` tools).
 
 All diagnostic codes come from `getMmrPolicyDiagnostics(state)` so `/mmr-status` and mode-change warning notifications stay in sync. Full list: [`docs/mmr-core-api.md`](../../../docs/mmr-core-api.md#policy-diagnostics).
 

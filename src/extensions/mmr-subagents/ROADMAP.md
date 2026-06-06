@@ -10,6 +10,7 @@ Sibling extension roadmaps:
 - [`../mmr-core/ROADMAP.md`](../mmr-core/ROADMAP.md)
 - [`../mmr-toolbox/ROADMAP.md`](../mmr-toolbox/ROADMAP.md)
 - [`../mmr-web/ROADMAP.md`](../mmr-web/ROADMAP.md)
+- [`../mmr-github/README.md`](../mmr-github/README.md)
 
 ## Owned logical tools
 
@@ -17,12 +18,12 @@ Sibling extension roadmaps:
   investigation.
 - `finder` — read-only worker for repository search.
 - `oracle` — advisory worker that reads files and external context.
-- `librarian` — read-only public-web repository research worker; custom
+- `librarian` — read-only GitHub repository research worker; non-GitHub
   repository-provider variants are deferred.
 
 ## Current status
 
-Shell and public-web worker slices shipped:
+Shell and GitHub-backed worker slices shipped:
 
 - ✅ Extension shell, package metadata, and package/root exports
   implemented.
@@ -31,13 +32,13 @@ Shell and public-web worker slices shipped:
   `oracle`, and `Task` resolve through `{ kind: "active" }`
   and are reported as **active** in modes that request them (`smart`,
   `smartGPT`, `rush`, `large`, `deep`); `librarian` resolves active only
-  while both `web_search` and `read_web_page` are registered and active,
-  otherwise it is provider-attributed `gated` behind the `mmr-subagents`
-  feature gate with the per-tool mmr-web prerequisite reason.
+  while the required read-only GitHub tools are registered by `mmr-github`
+  and source-owned, otherwise it is provider-attributed `gated` behind the
+  `mmr-subagents` feature gate with the per-tool `mmr-github` prerequisite reason.
 - ✅ `mmr-subagents` registers a feature-gate provider that reports the
   `mmr-subagents` gate as **enabled** with the active capability list
-  (currently `finder, oracle, Task`, plus `librarian` when both mmr-web
-  tools are active).
+  (currently `finder, oracle, Task`, plus `librarian` when the required
+  `mmr-github` tools are active and source-owned).
 - ✅ `/mmr-status` credits `mmr-subagents` for those decisions instead of
   falling through to `mmr-core`'s reserved-gate fallback or to the
   default deferred rule.
@@ -131,11 +132,11 @@ Concrete worker tools registered: `finder`, `oracle`, `Task`, and
    `{ prompt: string; description: string }` for implementation,
    verification, or focused investigation. **(Satisfied: `Task` shipped;
    durable task-list coordination remains a separate future decision.)**
-6. ✅ Keep `librarian` honest: active only when its public-web repository
-   research tools are registered and active; otherwise gated with a clear
-   diagnostic. **(Satisfied for the MVP: `librarian` ships with exactly
-   `web_search` and `read_web_page`, and custom GitHub/Bitbucket provider
-   tools remain deferred.)**
+6. ✅ Keep `librarian` honest: active only when its read-only GitHub
+   repository tools are registered by `mmr-github` and source-owned;
+   otherwise gated with a clear diagnostic. **(Satisfied: `librarian`
+   uses the `mmr-github` provider; non-GitHub repository providers remain
+   deferred.)**
 
 ## Acceptance criteria for the next concrete-tool slice
 
@@ -147,9 +148,9 @@ Concrete worker tools registered: `finder`, `oracle`, `Task`, and
   gated (verified by the existing negative-injection invariant).
 - `Task` remains bounded to explicit worker prompts; parent agents remain
   responsible for reviewing diffs and combined validation.
-- `librarian` remains honest: active only with its public-web prerequisites
-  or future repository-provider support; otherwise gated/deferred with a
-  clear diagnostic.
+- `librarian` remains honest: active only with source-owned `mmr-github`
+  prerequisites or future repository-provider support; otherwise gated/deferred
+  with a clear diagnostic.
 - No subagent state is written inside the workspace. Any durable state
   follows [`../../../docs/data-storage-conventions.md`](../../../docs/data-storage-conventions.md).
 
@@ -159,8 +160,8 @@ These hold across every slice of `mmr-subagents`:
 
 - The tool provider only ever claims logical names in
   `MMR_SUBAGENTS_OWNED_TOOLS`; it returns `undefined` for everything else
-  so unrelated providers (`mmr-core`, `mmr-web`, `mmr-toolbox`, user
-  aliases) are never shadowed.
+  so unrelated providers (`mmr-core`, `mmr-web`, `mmr-github`, `mmr-toolbox`,
+  user aliases) are never shadowed.
 - The feature-gate provider only ever claims the `mmr-subagents` gate; it
   returns `undefined` for everything else.
 - Each entrypoint registers its absolute path through

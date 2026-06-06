@@ -1,91 +1,107 @@
 # mmr-github
 
-`mmr-github` ships read-only GitHub repository tools for `pi-mmr`. These tools
-are the repository-provider surface used by the `mmr-subagents` `librarian`
-worker, and they are also available to any caller that enables the extension.
+Read-only GitHub repository tools for `pi-mmr`. `mmr-github` is also the repository-provider prerequisite for the `mmr-subagents` `librarian` worker.
+
+Package overview: [`../../../README.md`](../../../README.md). Planning: [`../../../ROADMAP.md`](../../../ROADMAP.md). Public API: [`../../../docs/public-api.md`](../../../docs/public-api.md).
+
+## At a glance
+
+| Default | Provides | Requires | Diagnostics |
+| --- | --- | --- | --- |
+| Off | GitHub read/list/search/diff tools | `MMR_GITHUB_ENABLE=true`; token for search/private | `/mmr-status`, tool result `details` |
+
+## When to use it
+
+- Read files, directories, commit history, or diffs from GitHub without cloning.
+- Let `librarian` research public or token-accessible repositories.
+- Inspect private repositories already available to `MMR_GITHUB_TOKEN`.
+- Keep GitHub access read-only and feature-gated.
+
+## Status and enablement
+
+Disabled by default. Set `MMR_GITHUB_ENABLE=true` or `mmrGithub.enabled=true` and restart Pi to register the tools.
+
+A token is optional for public file reads/listings, but required for code search, private repositories, and higher rate limits. Tokens are read from the environment only; settings-file tokens are ignored with a warning.
 
 ## Tools
 
-All tools are **read-only**. There is no mutation surface: no issue, pull
-request, branch, or write endpoints are exposed.
+All tools are **read-only**. There is no issue, pull request, branch, or write endpoint surface.
 
 | Tool | Purpose |
 | --- | --- |
-| `read_github` | Read a file (with line numbers, optional `read_range`) or fall back to a directory listing. |
-| `list_directory_github` | List a directory's entries; subdirectories are marked with a trailing `/`. |
-| `glob_github` | Find files whose paths match a `filePattern` glob (`*`, `**`, `?`, `{a,b}`, `[...]`) over the repository tree. Fails fast if the tree is too large to list recursively. |
-| `search_github` | Code search within one repository, grouped by file with context fragments (each capped at 2048 chars). Requires a token. |
-| `commit_search` | Search commit messages (`query`), or list recent commits filtered by path, author, or date. A `query`+`path` combination filters the listing client-side. |
-| `diff_github` | Compare two refs and return file-level change stats; set `includePatches` to also return unified diff hunks (each patch truncated to ~4 KB). |
-| `list_repositories` | Discover repositories by name `pattern`, `organization`, and `language`. Prioritizes repositories the token can access and supplements with public repository search. |
+| `read_github` | Read a file with optional `read_range`, or list a directory. |
+| `list_directory_github` | List directory entries; directories end with `/`. |
+| `glob_github` | Match repository paths with `*`, `**`, `?`, `{a,b}`, and character classes. |
+| `search_github` | Search code within one repository; requires a token. |
+| `commit_search` | Search commit messages or list recent commits filtered by path, author, or date. |
+| `diff_github` | Compare refs and return file-level stats; optionally include bounded patches. |
+| `list_repositories` | Discover repositories by pattern, organization, and language. |
 
-`diff_github` is deliberately named with a `_github` suffix (rather than a bare
-`diff`) to avoid colliding with unrelated tool names.
+`diff_github` deliberately keeps a `_github` suffix to avoid colliding with unrelated tool names.
 
 ## Configuration
 
-Settings load from the standard MMR settings files (`~/.pi/agent/settings.json`,
-`<cwd>/.pi/settings.json`) under the `mmrGithub` key, overlaid by environment
-variables. Network access is **off by default**; nothing reaches GitHub until
-the extension is explicitly enabled.
+Non-secret settings live in Pi settings files. Secrets live in environment variables.
+
+```json
+{
+  "mmrGithub": { "enabled": true }
+}
+```
+
+```bash
+export MMR_GITHUB_ENABLE=true
+export MMR_GITHUB_TOKEN="ghp_xxx"   # optional; env only
+```
 
 | Setting | Env | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | `MMR_GITHUB_ENABLE` | `false` | Master switch for outbound GitHub access. |
-| `token` | `MMR_GITHUB_TOKEN` / `GITHUB_TOKEN` | _unset_ | **Env only.** Settings-file tokens are ignored with a warning. Required for code search, private repos, and higher rate limits. |
-| `apiBaseUrl` | `MMR_GITHUB_API_URL` | `https://api.github.com` | Override for tests; GitHub Enterprise Server is not a supported target in this slice. |
+| `token` | `MMR_GITHUB_TOKEN` / `GITHUB_TOKEN` | unset | Env only; required for search/private/higher limits. |
+| `apiBaseUrl` | `MMR_GITHUB_API_URL` | `https://api.github.com` | Test override; GitHub Enterprise Server is not supported in this slice. |
 | `requestTimeoutMs` | `MMR_GITHUB_TIMEOUT_MS` | `30000` | Per-request timeout. |
-| `maxResultBytes` | `MMR_GITHUB_MAX_RESULT_BYTES` | `200000` | Hard cap on bytes read from a single response. `read_github` uses a larger dedicated ceiling (~1.5 MB) for the contents endpoint so a whole file can be fetched and sliced with `read_range`. |
+| `maxResultBytes` | `MMR_GITHUB_MAX_RESULT_BYTES` | `200000` | Response cap; file contents have a larger bounded path before slicing. |
 
-Settings are sampled once at extension load. Like `mmr-web`, toggling access
-mid-process is not supported because the Pi tool registry is one-directional;
-enabling or disabling GitHub access requires restarting the Pi process.
+Settings are sampled once at extension load. Restart Pi after changing fields that gate registration.
 
-## Ownership and gating
+## Behavior
 
-The extension records its entrypoint `sourceInfo.path` so consumers can confirm
-that a live GitHub tool registration still belongs to `mmr-github` by source
-path, not just by name. The `librarian` worker is gated on every GitHub tool
-being **registered and source-owned** by `mmr-github`; a same-named tool from a
-third-party extension does not satisfy the gate. The GitHub tools are not part
-of any user-facing mode's active tool set — the librarian worker activates them
-by name through its profile allowlist.
+### Ownership and librarian gating
 
-## Reading large files
+`mmr-github` records its extension entrypoint path so consumers can confirm that a live GitHub tool registration belongs to this extension by source path, not just by name.
 
-`read_github` fetches the whole file (bounded by GitHub's contents API, which
-only serves files up to 1 MB inline), applies `read_range` first, and then
-gates the resulting slice at 128 KiB. A large file is therefore readable as
-long as `read_range` selects a slice under the gate; an oversized slice returns
-a clear "retry with a smaller read_range" error that reports the file's total
-line count. Files larger than GitHub's 1 MB inline ceiling are reported as too
-large. Directory listings are gated the same way; `list_directory_github`
-accepts a `limit` to bound large directories.
+`librarian` stays `gated` until every required GitHub tool is registered and source-owned by `mmr-github`. Same-named tools from other extensions do not satisfy the gate.
 
-## Safety
+### Reading large files
 
-- Read-only: GET requests only; no mutation endpoints.
-- `list_repositories` prioritizes repositories the configured token can already
-  access (`/user/repos`) and supplements with public repository search. It only
-  ever surfaces repositories the token is already entitled to see, and works
-  without a token by falling back to public search.
-- `read_github` fetches whole files only within GitHub's 1 MB contents-API
-  ceiling, applies `read_range`, then gates the slice at 128 KiB.
-- Repository inputs accept exactly one `owner/repo` or
-  `https://github.com/owner/repo`; search, organization, and profile pages are
-  rejected.
-- Tokens are read from the environment only and are never logged or echoed.
+`read_github` fetches the whole file within GitHub's contents-API ceiling, applies `read_range` first, then gates the resulting slice at 128 KiB. If the requested slice is too large, the tool returns a clear retry-with-smaller-range error and reports the file's total line count.
+
+Directory listings accept `limit` to bound large directories. Files larger than GitHub's inline contents-API limit are reported as too large.
+
+## Safety and privacy
+
+- Only read-only GitHub requests are exposed; mutation endpoints are not registered.
+- Repository inputs accept exactly `owner/repo` or `https://github.com/owner/repo`; search, organization, and profile pages are rejected.
+- `list_repositories` surfaces repositories the configured token can already access and works without a token by falling back to public search.
+- Tokens are read from environment variables only and are never logged or echoed.
+- Response sizes, file slices, search fragments, patches, and directory listings are bounded.
+
+## Diagnostics and troubleshooting
+
+- **Tools are `missing`.** `MMR_GITHUB_ENABLE` is unset or Pi was not restarted after enabling it.
+- **Tools are `gated`.** The extension is known but disabled; set `MMR_GITHUB_ENABLE=true` or `mmrGithub.enabled=true` and restart.
+- **`search_github` fails.** Code search requires `MMR_GITHUB_TOKEN` or `GITHUB_TOKEN`.
+- **Private repo read fails.** The token is missing or does not have access to that repository.
+- **`librarian` stays `gated`.** Ensure `mmr-github` tools are registered by this extension, then inspect `/mmr-status debug`.
+- **Large file read fails.** Retry with a smaller `read_range`.
 
 ## Public API
 
-Re-exported from `pi-mmr`:
+Re-exported from `pi-mmr`: `createMmrGithubExtension`, settings helpers, feature-gate and tool-provider helpers, ownership predicates, tool-name constants, parser/client errors, and tool registration helpers. Canonical catalog: [`../../../docs/public-api.md`](../../../docs/public-api.md).
 
-- `createMmrGithubExtension(overrides?)`, default export factory.
-- `loadMmrGithubSettings(cwd, options?)`, `MMR_GITHUB_ENABLE_ENV`, defaults.
-- `createMmrGithubFeatureGateProvider`, `createMmrGithubToolProvider`,
-  `MMR_GITHUB_PROVIDER_NAME`, `MMR_GITHUB_FEATURE_GATE`.
-- `MMR_GITHUB_TOOL_NAMES`, `hasMmrGithubOwnedTools`, `isMmrGithubOwnedToolInfo`,
-  `isMmrGithubToolName`.
-- `createGithubClient`, `parseGithubRepository`, `GithubApiError`,
-  `GithubRepoParseError`.
-- `registerMmrGithubTools`, `MMR_GITHUB_PROMPT_GUIDELINES`.
+## Developer notes
+
+- Keep GitHub tools read-only; do not add mutation endpoints to this extension.
+- Keep `librarian` gating source-owned, not name-only.
+- Keep tokens env-only; settings-file token handling should stay reject-with-warning.
+- Update effective-surface fixtures when tool descriptions, schemas, or prompt guidelines change.

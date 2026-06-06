@@ -8,25 +8,25 @@ Package overview: [`../../../README.md`](../../../README.md). Planning: [`ROADMA
 
 | Default | Provides | Requires | Diagnostics |
 | --- | --- | --- | --- |
-| On | `finder`, `oracle`, `Task`, `librarian` (gated) | `mmr-web` active for `librarian` | `/mmr-status`, tool result `details`, subagent fixtures |
+| On | `finder`, `oracle`, `Task`, `librarian` (gated) | `mmr-github` active for `librarian` | `/mmr-status`, tool result `details`, subagent fixtures |
 
 ## When to use it
 
 - Bounded multi-step work in a child Pi worker via `Task`.
 - Read-only code search across the workspace via `finder`.
 - Standalone advisory worker for plans, reviews, debugging via `oracle`.
-- Public remote-repository research via `librarian` (when `mmr-web` is active).
+- Remote GitHub repository research via `librarian` (when `mmr-github` is active).
 - User-authored Markdown subagents enabled through config as `sa__*` tools (Pi-owned roots; `.claude/agents` is import-only).
 
 ## Status and enablement
 
-Finder, oracle, Task, and the public-web MVP of librarian ship as concrete Pi tools.
+Finder, oracle, Task, and the GitHub-backed librarian ship as concrete Pi tools.
 
-- The feature-gate provider reports `mmr-subagents` **enabled** with the active capability list (`finder, oracle, Task`, plus `librarian` only when both mmr-web tools are active).
+- The feature-gate provider reports `mmr-subagents` **enabled** with the active capability list (`finder, oracle, Task`, plus `librarian` only when the required `mmr-github` tools are active and source-owned).
 - `finder`, `oracle`, `Task` resolve `{ kind: "active" }` and surface as `active` in modes that request them.
-- `librarian` resolves `{ kind: "active" }` only when `web_search` and `read_web_page` are both registered by `mmr-web` (source-owned, not just same-named) and active in the parent process. Otherwise it stays `gated` with the reason `librarian: requires mmr-web with web_search and read_web_page active.`. Execute-time checks repeat the prerequisite and fail closed with `status: "provider-gated"` if the active tool set changes before the call runs.
+- `librarian` resolves `{ kind: "active" }` only when the required read-only GitHub tools are registered by `mmr-github` (source-owned, not just same-named) and active in the parent process. Otherwise it stays `gated` with the reason `librarian: requires mmr-github read-only GitHub tools (set MMR_GITHUB_ENABLE=true).`. Execute-time checks repeat the prerequisite and fail closed with `status: "provider-gated"` if the active tool set changes before the call runs.
 
-Deferred repository-provider variants of `librarian` (GitHub, Bitbucket, …): [`ROADMAP.md`](ROADMAP.md).
+Deferred repository-provider variants of `librarian` beyond GitHub (Bitbucket, …): [`ROADMAP.md`](ROADMAP.md).
 
 ## Tools
 
@@ -34,7 +34,7 @@ Deferred repository-provider variants of `librarian` (GitHub, Bitbucket, …): [
 | ----------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `finder`    | standalone                       | `[grep, find, read]`                                                                                          |
 | `oracle`    | standalone                       | `[read, grep, find, web_search, read_web_page, read_session, find_session]` (child intersects with registered) |
-| `librarian` | standalone, gated on `mmr-web`   | `[web_search, read_web_page]`                                                                                  |
+| `librarian` | standalone, gated on `mmr-github` | read-only GitHub repository tools                                                                               |
 | `Task`      | mode-derived from parent mode    | `[read, bash, edit, write, read_web_page, web_search, finder, skill, task_list]` minus `denyTools` |
 
 The internal `history-reader` profile is used by `mmr-history.read_session`; it is not a model-visible Pi tool. See `mmr-core` for the profile table.
@@ -77,10 +77,10 @@ Concrete prompts live in [`prompts.ts`](prompts.ts):
 ### Librarian
 
 - Profile/tool name: `librarian`. Standalone; builder `librarian`. Model prefs `claude-opus-4-6` → `gpt-5.4`, thinking `medium`.
-- Profile tool intent and effective worker tools: `[web_search, read_web_page]`. `allowMcp: false`, `allowToolbox: false`.
-- Prerequisite: parent process must have `web_search` and `read_web_page` registered by `mmr-web` (same-named third-party tools are not sufficient) and active. The provider gates model visibility on this; `execute()` checks again before spawning.
-- Parameters: `{ query: string, context?: string }`. The worker prompt is public-remote-repository research only; local workspace work should use direct tools or `finder`.
-- Parent spawn passes resolver-selected `--model`, effective `--tools web_search,read_web_page`, and exact system-prompt replacement.
+- Profile tool intent and effective worker tools: read-only GitHub repository tools from `mmr-github`. `allowMcp: false`, `allowToolbox: false`.
+- Prerequisite: parent process must have the required GitHub tools registered by `mmr-github` (same-named third-party tools are not sufficient) and active. The provider gates model visibility on this; `execute()` checks again before spawning.
+- Parameters: `{ query: string, context?: string }`. The worker prompt is remote-repository research only; local workspace work should use direct tools or `finder`.
+- Parent spawn passes resolver-selected `--model`, effective read-only GitHub `--tools`, and exact system-prompt replacement.
 - Status values: `success`, `validation-error`, `provider-gated`, `activation-error`, `context-window-exhausted`, `aborted`, `spawn-error`, `worker-error`, `empty-output`. A clean exit before the agent loop is normalized to `worker-error`.
 
 ### Task
@@ -148,7 +148,7 @@ Subagent model preferences are configured through `mmr-core`'s `/mmr-config` flo
 
 ## Diagnostics and troubleshooting
 
-- **`librarian` stays `gated`.** `mmr-web` is not active or its `web_search` / `read_web_page` are not registered by `mmr-web` itself. Enable network access (`MMR_WEB_ENABLE=true` or `mmrWeb.enabled=true`) and restart Pi.
+- **`librarian` stays `gated`.** `mmr-github` is not active or its read-only GitHub tools are not registered by `mmr-github` itself. Enable GitHub access (`MMR_GITHUB_ENABLE=true` or `mmrGithub.enabled=true`) and restart Pi.
 - **`Task` activation failed.** Parent mode is `free` or missing; Task only runs from a locked mode. Check `/mmr-status` for `Mode:`.
 - **Worker reported `subagentActivationError`.** Profile/route mismatch (unknown profile, no model route, explicit `--model` or `--tools` mismatch, invalid `--mmr-parent-mode`). The reason appears in stderr as `pi-mmr: subagent activation failed: <reason>` and in `details.subagentActivationError`.
 - **Worker exited 0 but the parent reported failure.** The runner intentionally detects the activation-failure stderr marker and converts it to a hard failure even on exit-0. This is fail-closed behavior, not a bug.
