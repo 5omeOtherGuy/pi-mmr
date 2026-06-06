@@ -108,6 +108,33 @@ describe("async-task-registry lifecycle", () => {
     assert.equal(snap.runtimeMs, 1000);
   });
 
+  it("projects cheap progress metadata into the board for the background widget", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let clock = 1000;
+    const reg = createMmrAsyncTaskRegistry({ nowMs: () => clock, idFactory: () => "task_x" });
+    const d = makeDeferredRun();
+    reg.startTask(startArgs({ run: d.run, contextWindow: 200_000 }));
+
+    clock = 66_000;
+    d.captured.onProgress(makeWorkerResult({
+      usage: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 50_000, turns: 2 },
+      model: "openai/gpt-5.5",
+      trail: [
+        { type: "tool", toolCallId: "tool-1", toolName: "read", status: "completed" },
+        { type: "tool", toolCallId: "tool-2", toolName: "bash", status: "running" },
+      ],
+    }));
+
+    const entry = reg.listTasks("sess-A").active[0];
+    assert.equal(entry.runtimeMs, 65_000);
+    assert.equal(entry.resolvedModel, "openai/gpt-5.5");
+    assert.equal(entry.contextWindow, 200_000);
+    assert.deepEqual(entry.usage, { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 50_000, turns: 2 });
+    assert.equal(entry.latestToolName, "bash");
+    assert.equal(entry.latestToolStatus, "running");
+    assert.equal(entry.toolCount, 2);
+  });
+
   it("does NOT bind the worker to any external signal; the registry owns the AbortController", async () => {
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
     const reg = createMmrAsyncTaskRegistry();

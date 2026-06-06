@@ -1,6 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import type { MmrWorkerProgressSnapshot, MmrWorkerResult } from "./runner.js";
+import type {
+  MmrWorkerProgressSnapshot,
+  MmrWorkerResult,
+  MmrWorkerTrailItem,
+  MmrWorkerUsageStats,
+} from "./runner.js";
 
 /**
  * In-memory, session-scoped registry for async background subagent tasks
@@ -257,6 +262,12 @@ export interface MmrAsyncTaskBoardEntry {
   completedAtMs?: number;
   runtimeMs: number;
   lastProgressAgeMs?: number;
+  resolvedModel?: string;
+  contextWindow?: number;
+  usage?: MmrWorkerUsageStats;
+  latestToolName?: string;
+  latestToolStatus?: Extract<MmrWorkerTrailItem, { type: "tool" }>["status"];
+  toolCount?: number;
   errorMessage?: string;
 }
 
@@ -361,6 +372,20 @@ function isToolRunResult(value: MmrAsyncTaskRunResult): value is MmrAsyncTaskToo
     && value !== null
     && "toolResult" in value
     && isAgentToolResult((value as { toolResult?: unknown }).toolResult);
+}
+
+function latestToolFromProgress(
+  progress: MmrWorkerProgressSnapshot | undefined,
+): Extract<MmrWorkerTrailItem, { type: "tool" }> | undefined {
+  if (!progress) return undefined;
+  let latest: Extract<MmrWorkerTrailItem, { type: "tool" }> | undefined;
+  let latestRunning: Extract<MmrWorkerTrailItem, { type: "tool" }> | undefined;
+  for (const item of progress.trail) {
+    if (item.type !== "tool") continue;
+    latest = item;
+    if (item.status === "running") latestRunning = item;
+  }
+  return latestRunning ?? latest;
 }
 
 class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
@@ -956,6 +981,9 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   private boardEntry(record: MmrAsyncTaskRecord): MmrAsyncTaskBoardEntry {
     const now = this.nowMs();
     const lastProgressAt = record.lastProgressAtMs;
+    const progress = record.latestProgress;
+    const latestTool = latestToolFromProgress(progress);
+    const toolCount = progress?.trail.filter((item) => item.type === "tool").length;
     return {
       taskId: record.taskId,
       status: record.status,
@@ -969,6 +997,15 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       ...(record.completedAtMs !== undefined ? { completedAtMs: record.completedAtMs } : {}),
       runtimeMs: (record.completedAtMs ?? now) - record.startedAtMs,
       ...(lastProgressAt !== undefined ? { lastProgressAgeMs: now - lastProgressAt } : {}),
+      ...(progress?.model !== undefined || record.resolvedModel !== undefined
+        ? { resolvedModel: progress?.model ?? record.resolvedModel }
+        : {}),
+      ...(record.contextWindow !== undefined ? { contextWindow: record.contextWindow } : {}),
+      ...(progress?.usage !== undefined ? { usage: { ...progress.usage } } : {}),
+      ...(latestTool !== undefined
+        ? { latestToolName: latestTool.toolName, latestToolStatus: latestTool.status }
+        : {}),
+      ...(toolCount !== undefined ? { toolCount } : {}),
       ...(record.errorMessage !== undefined ? { errorMessage: record.errorMessage } : {}),
     };
   }

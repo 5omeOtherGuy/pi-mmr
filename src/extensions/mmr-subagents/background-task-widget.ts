@@ -16,6 +16,10 @@
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { MmrAsyncTaskBoard, MmrAsyncTaskBoardEntry } from "./async-task-registry.js";
+import {
+  formatMmrWorkerTokens,
+  stripMmrWorkerModelProvider,
+} from "./worker-usage-format.js";
 
 /**
  * Stable widget id used with `ctx.ui.setWidget(...)`. Process-wide unique to
@@ -98,6 +102,13 @@ interface WidgetRow {
   freshness: string;
   agent: string;
   description: string;
+  runtimeMs: number;
+  resolvedModel?: string;
+  contextWindow?: number;
+  usage?: MmrAsyncTaskBoardEntry["usage"];
+  latestToolName?: string;
+  latestToolStatus?: MmrAsyncTaskBoardEntry["latestToolStatus"];
+  toolCount?: number;
 }
 
 function backgroundStatusColor(status: string): string {
@@ -129,12 +140,66 @@ function compactOneLine(value: string, limit: number): string {
   return `${compact.slice(0, Math.max(0, limit - 1))}…`;
 }
 
+function formatElapsed(ms: number): string | undefined {
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  const seconds = Math.floor(ms / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (hours > 0) return `${hours}h${minutes > 0 ? `${minutes}m` : ""}`;
+  if (minutes > 0) return `${minutes}m${remainingSeconds > 0 ? `${remainingSeconds}s` : ""}`;
+  return `${remainingSeconds}s`;
+}
+
+function formatContextUsage(row: WidgetRow): string | undefined {
+  const contextWindow = row.contextWindow;
+  const contextTokens = row.usage?.contextTokens;
+  if (
+    typeof contextWindow !== "number" ||
+    !Number.isFinite(contextWindow) ||
+    contextWindow <= 0 ||
+    typeof contextTokens !== "number" ||
+    !Number.isFinite(contextTokens) ||
+    contextTokens <= 0
+  ) {
+    return undefined;
+  }
+  return `${((contextTokens / contextWindow) * 100).toFixed(1)}% ctx`;
+}
+
+function widgetMetadataParts(row: WidgetRow): string[] {
+  const parts: string[] = [];
+  const elapsed = formatElapsed(row.runtimeMs);
+  if (elapsed) parts.push(elapsed);
+  const model = stripMmrWorkerModelProvider(row.resolvedModel);
+  if (model) parts.push(model);
+  if (row.latestToolName) {
+    const suffix = row.latestToolStatus === "running" ? "…" : "";
+    parts.push(`${row.latestToolName}${suffix}`);
+  }
+  const turns = row.usage?.turns ?? 0;
+  if (turns > 0) parts.push(`${turns} turn${turns === 1 ? "" : "s"}`);
+  if (typeof row.toolCount === "number" && Number.isFinite(row.toolCount) && row.toolCount > 0) {
+    parts.push(`${formatMmrWorkerTokens(row.toolCount)} tool${row.toolCount === 1 ? "" : "s"}`);
+  }
+  const context = formatContextUsage(row);
+  if (context) parts.push(context);
+  return parts;
+}
+
 function boardRows(board: MmrAsyncTaskBoard): WidgetRow[] {
   const toRow = (entry: MmrAsyncTaskBoardEntry): WidgetRow => ({
     status: entry.status,
     freshness: entry.freshness,
     agent: entry.agent,
     description: entry.description,
+    runtimeMs: entry.runtimeMs,
+    ...(entry.resolvedModel !== undefined ? { resolvedModel: entry.resolvedModel } : {}),
+    ...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
+    ...(entry.usage !== undefined ? { usage: entry.usage } : {}),
+    ...(entry.latestToolName !== undefined ? { latestToolName: entry.latestToolName } : {}),
+    ...(entry.latestToolStatus !== undefined ? { latestToolStatus: entry.latestToolStatus } : {}),
+    ...(entry.toolCount !== undefined ? { toolCount: entry.toolCount } : {}),
   });
   // Show only in-flight work (active + stalled), mirroring Pi/Claude Code's
   // bottom indicator which surfaces running agents. A finished task drops off
@@ -165,10 +230,14 @@ function renderRowLine(
   const desc = row.description
     ? ` ${safeFg("muted", compactOneLine(row.description, 60))}`
     : "";
+  const metadataParts = widgetMetadataParts(row);
+  const metadata = metadataParts.length > 0
+    ? ` ${safeFg("dim", `· ${metadataParts.join(" · ")}`)}`
+    : "";
   const fresh = row.freshness === "stalled" || row.freshness === "dead"
     ? ` ${safeFg(row.freshness === "dead" ? "error" : "warning", `[${row.freshness}]`)}`
     : "";
-  return `${glyph} ${agent}${desc}${fresh}`;
+  return `${glyph} ${agent}${desc}${metadata}${fresh}`;
 }
 
 function renderWidgetLines(

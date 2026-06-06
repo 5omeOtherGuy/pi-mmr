@@ -88,6 +88,33 @@ describe("background-task widget", () => {
     assert.doesNotMatch(text, /task_1/, "raw task ids must not lead the widget UI");
   });
 
+  it("renders available progress metadata without requiring a widget redesign", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({
+          runtimeMs: 65_000,
+          resolvedModel: "openai/gpt-5.5",
+          contextWindow: 200_000,
+          usage: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 50_000, turns: 2 },
+          latestToolName: "bash",
+          toolCount: 3,
+        })],
+      }),
+    );
+    const widget = calls.at(-1).value(undefined, theme);
+    const text = widget.render(160).join("\n");
+    assert.match(text, /1m5s/);
+    assert.match(text, /gpt-5\.5/);
+    assert.match(text, /bash/);
+    assert.match(text, /2 turns/);
+    assert.match(text, /3 tools/);
+    assert.match(text, /25\.0%/);
+  });
+
   it("clears the widget when only finished (or no) agents remain", async () => {
     const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
     const { ctx, calls } = makeCtx();
