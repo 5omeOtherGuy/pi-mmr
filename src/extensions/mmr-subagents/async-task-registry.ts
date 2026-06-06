@@ -43,7 +43,7 @@ export type MmrAsyncTaskFreshness =
   | "terminal";
 
 /** Default per-session cap on concurrently running background tasks. */
-export const DEFAULT_ASYNC_TASK_MAX_RUNNING_PER_SESSION = 3;
+export const DEFAULT_ASYNC_TASK_MAX_RUNNING_PER_SESSION = 10;
 /** A run with no progress for this long is classified `stalled` (advisory). */
 export const ASYNC_TASK_STALLED_AFTER_MS = 5 * 60_000;
 /** Hard wall-clock cap; the watchdog requests cancellation past this. */

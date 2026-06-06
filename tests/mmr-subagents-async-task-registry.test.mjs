@@ -73,6 +73,11 @@ describe("async-task-registry singleton", () => {
 });
 
 describe("async-task-registry lifecycle", () => {
+  it("defaults to ten concurrently running background task agents per session", async () => {
+    const mod = await importSource(REGISTRY_MODULE);
+    assert.equal(mod.DEFAULT_ASYNC_TASK_MAX_RUNNING_PER_SESSION, 10);
+  });
+
   it("starts a task, surfaces progress, and stores a succeeded terminal result", async () => {
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
     let clock = 1000;

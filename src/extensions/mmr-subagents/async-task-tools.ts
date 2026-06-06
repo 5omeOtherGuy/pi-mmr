@@ -143,7 +143,7 @@ const START_TASK_PARAMETERS = Type.Object(
     notify: Type.Optional(
       Type.Boolean({
         description:
-          "Completion notification. ON by default: when this task finishes the parent is poked once so it can read the result. Pass false to opt out (pull-only via task_poll/task_wait). The poke wakes an idle session or queues behind the active turn; it never interrupts streaming, and it is bounded per session.",
+          "Completion notification. ON by default: when this task finishes the parent is poked once so it can consume the result. Pass false to opt out and make task_poll/task_wait the only retrieval path. The poke wakes an idle session or queues behind the active turn; it never interrupts streaming, and it is bounded per session.",
       }),
     ),
   },
@@ -191,16 +191,18 @@ const START_TASK_DESCRIPTION = [
   "Use start_task only for independent work that can proceed while you do other things (long analysis, broad search, a self-contained implementation unit).",
   "Set agent to choose the background worker: Task (default), finder, or librarian. Use params for the selected tool's normal input shape. Oracle cannot run in the background; it is always blocking.",
   "Prefer the blocking Task/finder/librarian tools when you need the result before your next reasoning step.",
-  "Always follow start_task with task_poll or task_wait before relying on the result; the parent remains responsible for integration and the final answer.",
-  "By default a background task notifies you once it finishes so you can read its result; pass notify:false to opt out and pull via task_poll/task_wait instead.",
+  "Default result path is the worker completion notification: when notify is enabled, wait for the follow-up before consuming the worker result.",
+  "Use task_poll/task_wait only as an elapsed-time fallback when no notification arrives, or during fleet orchestration where multiple parallel workers need coordinated status checks.",
+  "By default a background task notifies you once it finishes; pass notify:false to opt out and make task_poll/task_wait the only retrieval path.",
   "",
   "Background tasks are in-memory and session-scoped: they are lost if the Pi process exits, and they cannot spawn further background tasks.",
 ].join("\n");
 
 const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "Use start_task only for independent work that can run while you continue; prefer the blocking Task/finder/librarian tools when you need the result immediately. Oracle is always blocking and cannot be a background agent.",
-  "After start_task, use task_poll (with the task_id) or task_wait to check on the worker; a task_wait timeout is not a failure and does not stop the worker.",
-  "Call task_poll with no task_id to list this session's background tasks (active, stalled, finished).",
+  "Treat the worker completion notification as the default way to receive results; do not immediately poll just to check whether a worker completed.",
+  "Use task_poll or task_wait only after a meaningful elapsed-time fallback interval with no notification, or for fleet orchestration where multiple parallel background workers need coordinated status checks; a task_wait timeout is not a failure and does not stop the worker.",
+  "Call task_poll with no task_id to list this session's background tasks (active, stalled, finished) during fallback checks or multi-worker orchestration.",
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task.",
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
   "A background task notifies you once when it finishes (the poke wakes an idle session or queues behind the active turn, and is bounded per session); pass start_task({ notify: false }) to opt out and pull the result with task_poll/task_wait.",
@@ -502,7 +504,8 @@ function buildCompletionNotifier(
         content:
           `<task-notification task_id="${escapeXmlAttr(snapshot.taskId)}" status="${snapshot.status}">\n` +
           `Background task "${escapeXmlAttr(snapshot.description)}" ${snapshot.status}. ` +
-          `Use task_poll({task_id:"${escapeXmlAttr(snapshot.taskId)}"}) to read the result.\n` +
+          `Use this notification as the default completion signal; the worker result is ready for this follow-up turn. ` +
+          `Poll only later as an elapsed-time fallback or during multi-worker orchestration.\n` +
           `</task-notification>`,
         // The persistent background-agent widget and the eventual task_poll
         // result own the human-facing surface; this push is model-facing only
@@ -714,8 +717,8 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       const dedupNote = started.started.deduplicated ? " (existing task for this call)" : "";
       const message =
         `start_task: started background worker ${snapshot.taskId}${dedupNote} ("${snapshot.description}", agent ${snapshot.agent}). ` +
-        `Use task_poll({task_id:"${snapshot.taskId}"}) to check progress, task_wait to block briefly, ` +
-        `or task_cancel to stop it. Background tasks are in-memory and lost if the session ends.`;
+        `It will notify this session on completion by default; use task_poll/task_wait only after an elapsed-time fallback ` +
+        `or for multi-worker orchestration, and task_cancel to stop it. Background tasks are in-memory and lost if the session ends.`;
       return {
         content: [{ type: "text", text: message }],
         details: {

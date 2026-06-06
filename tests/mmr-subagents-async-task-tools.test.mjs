@@ -537,6 +537,20 @@ describe("async task tools model-visible surface", () => {
     assert.deepEqual(wait.parameters.required, ["task_id"]);
     assert.deepEqual(cancel.parameters.required, ["task_id"]);
     assert.match(start.description, /background/i);
+    assert.match(
+      start.description,
+      /Default result path is the worker completion notification/i,
+      "start_task should teach notification-first result handling",
+    );
+    assert.doesNotMatch(
+      start.description,
+      /Always follow start_task with task_poll or task_wait/i,
+      "start_task must not make polling the default completion path",
+    );
+    assert.ok(
+      start.promptGuidelines.some((g) => /notification/i.test(g) && /fallback/i.test(g) && /elapsed/i.test(g)),
+      "guidelines should reserve polling for elapsed-time fallback checks",
+    );
     assert.ok(start.promptGuidelines.some((g) => /blocking Task/i.test(g)));
   });
 });
@@ -568,7 +582,9 @@ describe("async task tools completion push", () => {
     assert.equal(sent.length, 1, "exactly one completion push");
     assert.deepEqual(sent[0].o, { deliverAs: "followUp", triggerTurn: true });
     assert.equal(sent[0].m.customType, "mmr-subagents.async-task-completion");
-    assert.equal(sent[0].m.display, false, "completion push is model-facing only; the widget + poll cards own human rendering");
+    assert.match(sent[0].m.content, /Use this notification as the default completion signal/);
+    assert.doesNotMatch(sent[0].m.content, /Use task_poll\(\{task_id:/);
+    assert.equal(sent[0].m.display, false, "completion push is model-facing only; inline lifecycle cards own human rendering");
     assert.equal(registry.getTask("S", "t1").completionPush, "sent");
   });
 
