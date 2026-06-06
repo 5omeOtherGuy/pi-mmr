@@ -21,11 +21,14 @@ import {
   extractObjectiveRelevantExcerpts,
 } from "./excerpts.js";
 import type { CustomReaderOptions } from "./reader/direct.js";
-import type { SearchResultEntry } from "./search/types.js";
+import type { AppliedFilter, Recency, SearchResultEntry } from "./search/types.js";
 
 export const DEFAULT_MAX_RESULTS = 5;
 export const MAX_MAX_RESULTS = 10;
 export const MIN_MAX_RESULTS = 1;
+/** Cap on the number of domains accepted per include/exclude list. */
+export const MAX_DOMAIN_FILTERS = 20;
+export const RECENCY_VALUES = ["day", "week", "month", "year"] as const;
 
 export const WEB_SEARCH_PARAMETERS_SCHEMA = Type.Object({
   objective: Type.String({
@@ -42,6 +45,27 @@ export const WEB_SEARCH_PARAMETERS_SCHEMA = Type.Object({
     Type.Number({
       description: `Soft cap on returned results, clamped to [${MIN_MAX_RESULTS}, ${MAX_MAX_RESULTS}]. Default ${DEFAULT_MAX_RESULTS}.`,
     }),
+  ),
+  include_domains: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        "Best-effort allowlist of domains to restrict results to (e.g. [\"example.com\"]). Scheme/`www.`/path are stripped and the host is matched suffix-aware (a domain also matches its subdomains). Enforced natively or by local post-filter depending on the backend; see details.filters.",
+    }),
+  ),
+  exclude_domains: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        "Best-effort blocklist of domains to drop from results. Same normalization and suffix-aware matching as include_domains. A domain cannot appear in both lists. See details.filters for actual enforcement.",
+    }),
+  ),
+  recency: Type.Optional(
+    Type.Union(
+      RECENCY_VALUES.map((value) => Type.Literal(value)),
+      {
+        description:
+          "Restrict to results published within this window (day/week/month/year). Honored natively where the backend supports it; backends without reliable result dates (e.g. DuckDuckGo) report it as unsupported in details.filters rather than faking it.",
+      },
+    ),
   ),
 });
 
@@ -84,7 +108,9 @@ export const READ_WEB_PAGE_PROMPT_GUIDELINES = [
 
 export const WEB_SEARCH_DESCRIPTION =
   "Search the web for information relevant to a research objective. Use when you need up-to-date or precise documentation. Use `read_web_page` to fetch full content from a specific URL. " +
-  "The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.";
+  "The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). " +
+  "Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains) and `recency` (day/week/month/year) restricts by publication window. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. " +
+  "Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.";
 export const READ_WEB_PAGE_DESCRIPTION =
   "Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. If the user asks for the latest or recent contents, pass `forceRefetch: true` to ensure the latest content is fetched. " +
   "Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.";
@@ -111,6 +137,11 @@ export interface WebSearchDetails {
   truncated: boolean;
   bytes: number;
   totalBytes: number;
+  /**
+   * Truthful per-filter enforcement report for any domain/recency filters
+   * the caller requested. Empty when no filters were supplied.
+   */
+  filters: AppliedFilter[];
 }
 
 export interface ReadWebPageDetails {
@@ -132,6 +163,36 @@ export interface ReadWebPageDetails {
    */
   readableContentFound?: boolean;
   extractionReason?: "requires_javascript" | "placeholder_only" | "empty";
+}
+
+/**
+ * Normalize a user-supplied domain to a bare lowercase host: drop scheme,
+ * userinfo, path/query/fragment, port, a leading `www.`, and a trailing dot.
+ * Returns "" when nothing usable remains.
+ */
+export function normalizeDomainInput(value: string): string {
+  let host = value.trim().toLowerCase();
+  if (!host) return "";
+  host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
+  host = host.split(/[/?#]/, 1)[0] ?? "";
+  const at = host.lastIndexOf("@");
+  if (at >= 0) host = host.slice(at + 1);
+  host = host.replace(/:\d+$/, "");
+  host = host.replace(/^www\./, "");
+  host = host.replace(/\.+$/, "");
+  return host;
+}
+
+function normalizeDomainList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const host = normalizeDomainInput(entry);
+    if (host && !out.includes(host)) out.push(host);
+    if (out.length >= MAX_DOMAIN_FILTERS) break;
+  }
+  return out;
 }
 
 function clampMaxResults(value: unknown): number {
@@ -241,6 +302,15 @@ export function createWebSearchTool(deps: MmrWebToolDeps): ToolDefinition {
       const settings = deps.getSettings();
       const maxResults = clampMaxResults(params.max_results);
       const query = pickQuery(params.objective, params.search_queries);
+      const includeDomains = normalizeDomainList(params.include_domains);
+      const excludeDomains = normalizeDomainList(params.exclude_domains);
+      const conflict = includeDomains.find((domain) => excludeDomains.includes(domain));
+      if (conflict) {
+        throw new Error(
+          `web_search: "${conflict}" cannot appear in both include_domains and exclude_domains.`,
+        );
+      }
+      const recency = params.recency as Recency | undefined;
       const combined = getCombinedOptions(deps);
       const backend = getSearchBackend(settings, splitSearchOverrides(combined));
       if (!backend) {
@@ -254,6 +324,9 @@ export function createWebSearchTool(deps: MmrWebToolDeps): ToolDefinition {
         signal,
         maxResultBytes: settings.maxResultBytes,
         timeoutMs: settings.searchTimeoutMs,
+        ...(includeDomains.length > 0 ? { includeDomains } : {}),
+        ...(excludeDomains.length > 0 ? { excludeDomains } : {}),
+        ...(recency ? { recency } : {}),
       });
       return {
         content: [{ type: "text", text: formatSearchResults(query, response.results, response.rawText) }],
@@ -266,6 +339,7 @@ export function createWebSearchTool(deps: MmrWebToolDeps): ToolDefinition {
           truncated: response.truncated,
           bytes: response.bytes,
           totalBytes: response.totalBytes,
+          filters: response.appliedFilters,
         },
       };
     },

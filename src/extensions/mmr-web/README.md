@@ -29,7 +29,9 @@ Disabled by default. All locked modes report `web_search` and `read_web_page` as
 | `web_search`     | Search via SearXNG / Brave / DuckDuckGo          | Backend-selected once at load |
 | `read_web_page`  | Fetch a public http(s) page and return Markdown   | Custom in-process reader     |
 
-Schemas: `web_search` requires `objective`; optional `search_queries`, `max_results`. `read_web_page` requires `url`; optional `objective`, `forceRefetch` (accepted for compatibility — the custom reader already performs a live fetch).
+Schemas: `web_search` requires `objective`; optional `search_queries`, `max_results`, `include_domains`, `exclude_domains`, `recency`. `read_web_page` requires `url`; optional `objective`, `forceRefetch` (accepted for compatibility — the custom reader already performs a live fetch).
+
+Filters are best-effort per backend and never silently dropped. `include_domains`/`exclude_domains` are normalized to bare hosts (scheme/`www.`/path/port stripped, lowercased, deduped, capped at 20) and matched suffix-aware, so a domain also matches its subdomains; a domain may not appear in both lists. `recency` (`day`/`week`/`month`/`year`) maps natively to Brave `freshness` and SearXNG `time_range`; domains are post-filtered on result hostnames over a widened candidate pool. DuckDuckGo post-filters domains but reports `recency` as unsupported because its HTML results carry no reliable dates. Every requested filter is reported in the tool result `details.filters[]` as `native` / `post_filter` / `unsupported` with `full` / `partial` / `none` enforcement.
 
 ### `web_search` backend `auto` precedence
 

@@ -701,12 +701,26 @@ Prompt guidelines:
 - Use web_search only for public, non-sensitive research; do not include secrets, API keys, or private data in web_search.objective or web_search.search_queries.
 
 Description:
-Search the web for information relevant to a research objective. Use when you need up-to-date or precise documentation. Use `read_web_page` to fetch full content from a specific URL. The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.
+Search the web for information relevant to a research objective. Use when you need up-to-date or precise documentation. Use `read_web_page` to fetch full content from a specific URL. The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains) and `recency` (day/week/month/year) restricts by publication window. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.
 
 Parameters:
 ```json
 {
   "properties": {
+    "exclude_domains": {
+      "description": "Best-effort blocklist of domains to drop from results. Same normalization and suffix-aware matching as include_domains. A domain cannot appear in both lists. See details.filters for actual enforcement.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "include_domains": {
+      "description": "Best-effort allowlist of domains to restrict results to (e.g. [\"example.com\"]). Scheme/`www.`/path are stripped and the host is matched suffix-aware (a domain also matches its subdomains). Enforced natively or by local post-filter depending on the backend; see details.filters.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "max_results": {
       "description": "Soft cap on returned results, clamped to [1, 10]. Default 5.",
       "type": "number"
@@ -714,6 +728,27 @@ Parameters:
     "objective": {
       "description": "A natural-language description of the broader task or research goal, including any source or freshness guidance.",
       "type": "string"
+    },
+    "recency": {
+      "anyOf": [
+        {
+          "const": "day",
+          "type": "string"
+        },
+        {
+          "const": "week",
+          "type": "string"
+        },
+        {
+          "const": "month",
+          "type": "string"
+        },
+        {
+          "const": "year",
+          "type": "string"
+        }
+      ],
+      "description": "Restrict to results published within this window (day/week/month/year). Honored natively where the backend supports it; backends without reliable result dates (e.g. DuckDuckGo) report it as unsupported in details.filters rather than faking it."
     },
     "search_queries": {
       "description": "Optional keyword queries to ensure matches for specific terms are prioritized. The first non-empty query is sent to the upstream search engine.",
