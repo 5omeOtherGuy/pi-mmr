@@ -937,7 +937,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       taskIds: children.map((child) => child.taskId),
       counts: {
         running: children.filter((child) => !isTerminalStatus(child.status)).length,
-        succeeded: children.filter((child) => child.status === "succeeded").length,
+        succeeded: children.filter((child) => child.status === "succeeded" && child.terminalOutcome !== "partial").length,
         failed: children.filter((child) => child.status === "failed").length,
         cancelled: children.filter((child) => child.status === "cancelled").length,
         partial: children.filter((child) => child.terminalOutcome === "partial").length,

@@ -130,6 +130,138 @@ describe("background-task widget", () => {
     assert.equal(calls.at(-1).value, undefined, "a board of only finished tasks clears the widget");
   });
 
+  it("groups entries into sections with a status header and indented rows", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        generatedAtMs: 1000,
+        counts: { active: 1, stalled: 0, finished: 1 },
+        active: [makeEntry({
+          taskId: "task_a", agent: "Task", description: "Explore order services",
+          groupId: "group_aaa111", capabilityProfile: "read-only", createdAtMs: 10,
+        })],
+        finished: [makeEntry({
+          taskId: "task_b", agent: "Task", description: "Diff recent deploys", status: "succeeded",
+          freshness: "terminal", groupId: "group_aaa111", capabilityProfile: "read-write",
+          createdAtMs: 5, completedAtMs: 1000,
+        })],
+      }),
+    );
+    const lines = calls.at(-1).value(undefined, theme).render(120);
+    const text = lines.join("\n");
+    // Header carries the group id + synthesized status/counts (1 of 2 settled).
+    assert.match(text, /▸ group_aaa111/);
+    assert.match(text, /running/);
+    assert.match(text, /1\/2/);
+    // Capability profile is a row chip; the group id is NOT repeated per row.
+    assert.match(text, /read-only/);
+    assert.match(text, /read-write/);
+    const rowLines = lines.filter((l) => /Explore order services|Diff recent deploys/.test(l));
+    assert.equal(rowLines.length, 2, "both grouped rows render");
+    for (const l of rowLines) assert.match(l, /^ {2}\S/, "group members are indented under the header");
+    for (const l of rowLines) {
+      assert.equal((l.match(/group_aaa111/g) ?? []).length, 0, "group id is not a per-row chip");
+    }
+    // Settled wave sorts above... no — running sorts above settled within a group.
+    assert.ok(text.indexOf("Explore order services") < text.indexOf("Diff recent deploys"),
+      "non-terminal rows sort above settled rows inside a group");
+  });
+
+  it("uses the resolved group snapshot for the header when provided", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        generatedAtMs: 1000,
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({ groupId: "group_bbb222", description: "Explore pricing engine" })],
+      }),
+      (groupId) => groupId === "group_bbb222"
+        ? { status: "partial", counts: { running: 1, succeeded: 2, failed: 0, cancelled: 0, partial: 1, total: 4 } }
+        : undefined,
+    );
+    const text = calls.at(-1).value(undefined, theme).render(120).join("\n");
+    assert.match(text, /▸ group_bbb222/);
+    assert.match(text, /partial/);
+    assert.match(text, /3\/4/, "settled count = succeeded + failed + cancelled + partial");
+  });
+
+  it("retains a freshly finished group row but drops a stale one", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    // Fresh: completed 1s before the board was generated -> within the window.
+    refreshBackgroundTaskWidget(ctx, makeBoard({
+      generatedAtMs: 10_000,
+      counts: { active: 0, stalled: 0, finished: 1 },
+      finished: [makeEntry({ status: "succeeded", freshness: "terminal", description: "Check cache hit rates", completedAtMs: 9_000 })],
+    }));
+    assert.equal(typeof calls.at(-1).value, "function", "a just-settled row lingers briefly");
+    assert.match(calls.at(-1).value(undefined, theme).render(120).join("\n"), /Check cache hit rates/);
+
+    // Stale: completed 20s before the board -> past the 8s window -> dropped.
+    refreshBackgroundTaskWidget(ctx, makeBoard({
+      generatedAtMs: 30_000,
+      counts: { active: 0, stalled: 0, finished: 1 },
+      finished: [makeEntry({ status: "succeeded", freshness: "terminal", description: "Check cache hit rates", completedAtMs: 10_000 })],
+    }));
+    assert.equal(calls.at(-1).value, undefined, "a finished row past the retention window clears the widget");
+  });
+
+  it("auto-clears a finished-only widget after the retention window", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { refreshBackgroundTaskWidget, BACKGROUND_TASK_WIDGET_ID } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(ctx, makeBoard({
+      generatedAtMs: 10_000,
+      counts: { active: 0, stalled: 0, finished: 1 },
+      finished: [makeEntry({ status: "succeeded", freshness: "terminal", description: "Done", completedAtMs: 9_000 })],
+    }));
+
+    const widget = calls.at(-1).value(undefined, theme);
+    assert.equal(typeof widget.render, "function");
+    t.mock.timers.tick(6_999);
+    assert.equal(calls.length, 1, "retained row stays visible until its drop-off deadline");
+    t.mock.timers.tick(1);
+    assert.deepEqual(calls.at(-1), {
+      id: BACKGROUND_TASK_WIDGET_ID,
+      value: undefined,
+      options: { placement: "belowEditor" },
+    });
+  });
+
+  it("keeps the grouped widget within the visible row cap including the overflow line", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(ctx, makeBoard({
+      counts: { active: 9, stalled: 0, finished: 0 },
+      active: Array.from({ length: 9 }, (_, i) => makeEntry({
+        taskId: `task_${i}`,
+        groupId: `group_abc00${i}`,
+        description: `grouped task ${i}`,
+        createdAtMs: i,
+      })),
+    }));
+
+    const lines = calls.at(-1).value(undefined, theme).render(120);
+    assert.ok(lines.length <= 8, `expected at most 8 visible rows, got ${lines.length}`);
+    assert.match(lines.at(-1), /… \d+ more/);
+  });
+
+  it("renders a flat headerless list when no task belongs to a group", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(ctx, makeBoard({
+      counts: { active: 1, stalled: 0, finished: 0 },
+      active: [makeEntry({ description: "ungrouped scout" })],
+    }));
+    const lines = calls.at(-1).value(undefined, theme).render(120);
+    assert.doesNotMatch(lines.join("\n"), /▸/, "no section header when nothing is grouped");
+    assert.match(lines[0], /^\S/, "ungrouped-only rows stay flush-left");
+  });
+
   it("does nothing on a non-TUI surface", async () => {
     const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
     const calls = [];

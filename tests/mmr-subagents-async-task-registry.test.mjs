@@ -618,7 +618,13 @@ describe("async-task-registry worker groups", () => {
 
     runs[2].resolve(makeWorkerResult());
     await flush();
-    assert.equal(reg.getGroup("sess-A", groupId).status, "partial", "partial beats completed after all children are terminal");
+    const partialGroup = reg.getGroup("sess-A", groupId);
+    assert.equal(partialGroup.status, "partial", "partial beats completed after all children are terminal");
+    assert.deepEqual(
+      partialGroup.counts,
+      { running: 0, succeeded: 2, failed: 0, cancelled: 0, partial: 1, total: 3 },
+      "partial children must not also count as succeeded",
+    );
 
     const failed = makeDeferredRun();
     reg.startTask(startArgs({ run: failed.run, originToolCallId: "failed", groupId: "group_badbad" }));
