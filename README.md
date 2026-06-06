@@ -6,9 +6,11 @@
 
 > Amp Code-style mode routing, worker tools, and fail-safe defaults for Pi.
 
-`pi-mmr` is for Pi users who want Amp Code-style, one-command coding profiles without leaving Pi. It deliberately mirrors that workflow shape: pick a mode such as `rush`, `smart`, `large`, or `deep`, and `pi-mmr` applies the model route, thinking policy, context profile, active-tool set, worker profile, and prompt behavior for that job.
+`pi-mmr` is for Pi users who want Amp Code-style, one-command coding profiles without leaving Pi. Pick a mode — `smart`, `smartGPT`, `rush`, `large`, or `deep` — and `pi-mmr` applies that mode's provider-neutral model preferences, thinking policy, context profile, active-tool set, worker profile, and prompt behavior in a single switch. Change modes mid-session, and use `free` to release the locks and return to stock Pi at any time.
 
-It also brings Pi-native tools for codebase search, expert review, GitHub repository research, web lookup, prior-session recall, safe patching, todos, and subscription quota fallback — all scoped by explicit feature gates and reversible with `free` mode.
+It is a modular Pi extension package, not a fork or a separate IDE: it builds on Pi's native behavior instead of replacing it. Each mode's prompt is assembled from its own fragments and surgically swapped into Pi's auto-rendered prompt head, preserving Pi's own tool list, guidelines, documentation, and tail. Tool resolution is exact-name based and runtime state is session-scoped.
+
+Beyond routing, `pi-mmr` adds Pi-native tools for codebase search, expert review, GitHub repository research, web lookup, prior-session recall, safe patching, todos, and subscription quota fallback — all behind explicit feature gates and listed in the tables below. Bounded work can be delegated to workers (`finder`, `oracle`, `librarian`, `Task`) and to your own Markdown subagents, each running in its own context and returning just the result; longer jobs can run in the background. Workers render in the Pi TUI with their tool, model, status, output previews, an expandable trail, usage counters, and a grouped background-task board, so you can watch what runs instead of guessing. Locked modes are fail-closed, everything is reversible with `free`, and the deterministic test suite never makes live provider calls.
 
 ## Why pi-mmr
 
