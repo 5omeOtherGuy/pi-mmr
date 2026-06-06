@@ -3,6 +3,7 @@ import type {
   ExtensionAPI,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { domainToASCII } from "node:url";
 import { Type, type Static } from "typebox";
 import { registerMmrOwnedTool } from "../mmr-core/owned-tools.js";
 import { checkMmrToolParams } from "../mmr-core/tool-params.js";
@@ -166,9 +167,15 @@ export interface ReadWebPageDetails {
 }
 
 /**
- * Normalize a user-supplied domain to a bare lowercase host: drop scheme,
- * userinfo, path/query/fragment, port, a leading `www.`, and a trailing dot.
- * Returns "" when nothing usable remains.
+ * Normalize a user-supplied domain to a single canonical bare host so it can
+ * be compared suffix-aware against result hostnames produced by `URL`.
+ *
+ * Drops scheme, userinfo, path/query/fragment, and port; strips a leading
+ * `*.` wildcard label, leading dots, a leading `www.`, and trailing dots;
+ * lowercases; and canonicalizes IDN labels to ASCII/punycode via
+ * `domainToASCII` so a Unicode filter still matches a punycoded result host.
+ * Returns "" when nothing usable remains (the caller rejects such input
+ * rather than silently dropping it).
  */
 export function normalizeDomainInput(value: string): string {
   let host = value.trim().toLowerCase();
@@ -177,20 +184,52 @@ export function normalizeDomainInput(value: string): string {
   host = host.split(/[/?#]/, 1)[0] ?? "";
   const at = host.lastIndexOf("@");
   if (at >= 0) host = host.slice(at + 1);
-  host = host.replace(/:\d+$/, "");
-  host = host.replace(/^www\./, "");
+  host = host.replace(/^\*\./, "");
+  host = host.replace(/^\.+/, "");
   host = host.replace(/\.+$/, "");
-  return host;
+  // Strip a trailing :port for a bracketed IPv6 literal or a single-colon
+  // host:port. A bare IPv6 literal (multiple colons, unbracketed) is left
+  // intact and rejected below by domainToASCII.
+  host = host.replace(/^(\[[0-9a-f:]+\]):\d+$/, "$1");
+  if (!host.includes("]") && (host.match(/:/g)?.length ?? 0) === 1) {
+    host = host.replace(/:\d+$/, "");
+  }
+  host = host.replace(/^www\./, "");
+  if (!host) return "";
+  // domainToASCII returns "" for inputs that are not a valid domain/IP host
+  // (e.g. embedded spaces, bare IPv6, invalid ports). It is permissive about
+  // pure-punctuation input, so also reject a result with no alphanumeric
+  // label character. The caller treats "" as an invalid filter entry.
+  const ascii = domainToASCII(host);
+  if (!ascii || !/[a-z0-9]/.test(ascii)) return "";
+  return ascii;
 }
 
-function normalizeDomainList(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
+function normalizeDomainList(
+  raw: unknown,
+  field: "include_domains" | "exclude_domains",
+): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(`web_search.${field} must be an array of domain strings.`);
+  }
   const out: string[] = [];
   for (const entry of raw) {
-    if (typeof entry !== "string") continue;
+    if (typeof entry !== "string") {
+      throw new Error(`web_search.${field} entries must be strings.`);
+    }
     const host = normalizeDomainInput(entry);
-    if (host && !out.includes(host)) out.push(host);
-    if (out.length >= MAX_DOMAIN_FILTERS) break;
+    if (!host) {
+      throw new Error(
+        `web_search.${field} contains an invalid domain: ${JSON.stringify(entry)}.`,
+      );
+    }
+    if (!out.includes(host)) out.push(host);
+  }
+  if (out.length > MAX_DOMAIN_FILTERS) {
+    throw new Error(
+      `web_search.${field} accepts at most ${MAX_DOMAIN_FILTERS} domains (received ${out.length} unique).`,
+    );
   }
   return out;
 }
@@ -302,8 +341,8 @@ export function createWebSearchTool(deps: MmrWebToolDeps): ToolDefinition {
       const settings = deps.getSettings();
       const maxResults = clampMaxResults(params.max_results);
       const query = pickQuery(params.objective, params.search_queries);
-      const includeDomains = normalizeDomainList(params.include_domains);
-      const excludeDomains = normalizeDomainList(params.exclude_domains);
+      const includeDomains = normalizeDomainList(params.include_domains, "include_domains");
+      const excludeDomains = normalizeDomainList(params.exclude_domains, "exclude_domains");
       const conflict = includeDomains.find((domain) => excludeDomains.includes(domain));
       if (conflict) {
         throw new Error(
