@@ -2,11 +2,15 @@
  * Shared helpers for deriving a subagent worker's runtime context from the Pi
  * host: the working directory and the worker tool manifest.
  *
- * These were previously duplicated verbatim across the subagent tool modules
- * (`task`, `finder`, `librarian`, `oracle`, `async-task-tools`). Consolidating
- * them keeps a single source of truth so the cwd-resolution and manifest-build
- * behavior cannot drift between tools. This module imports nothing from the
- * tool modules (avoid import cycles); tool modules import from here.
+ * Both helpers were previously duplicated verbatim across subagent tool
+ * modules and are consolidated here as a single source of truth so their
+ * behavior cannot drift between tools:
+ *   - `resolveWorkerCwd` was copied across `task`, `finder`, `librarian`,
+ *     `oracle`, and `async-task-tools`.
+ *   - `buildWorkerToolManifest` (and the `ToolHostLike` type) was copied
+ *     across `task` and `librarian`.
+ * This module imports nothing from the tool modules (avoid import cycles);
+ * tool modules import from here.
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../mmr-core/internal/json.js";

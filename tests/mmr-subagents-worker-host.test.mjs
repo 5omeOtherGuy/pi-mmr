@@ -1,17 +1,20 @@
 // Regression proof for the PR 2 helper deduplication
 // (src/extensions/mmr-subagents/worker-host.ts).
 //
-// `resolveCwd` and `buildWorkerToolManifest` were previously duplicated
+// `resolveWorkerCwd` and `buildWorkerToolManifest` were previously duplicated
 // verbatim across the subagent tool modules. `buildWorkerToolManifest`
 // controls the worker prompt tool manifest, so the plan gates its extraction
 // on a focused regression test proving the produced manifest is BYTE-IDENTICAL
 // before/after for representative Task and librarian inputs.
 //
 // This test embeds the pre-extraction implementation verbatim as a reference
-// and asserts the extracted shared function returns deep-equal output across a
-// matrix of inputs (including the librarian read-only tool set and the Task
-// read-write tool set, plus edge cases: no host, empty tools, non-record
-// entries, missing description, promptSnippet fallback, getAllTools throwing).
+// and asserts the extracted shared function returns output that is both
+// deep-equal AND serialized-byte-equal (JSON.stringify, which also catches
+// property insertion-order drift that deep equality cannot) to the reference
+// across a matrix of inputs: the Task read-write set, the finder read-only
+// set, the librarian GitHub read-only set, and edge cases (no host, empty
+// tools, non-record entries, missing description, promptSnippet fallback,
+// non-string guideline filtering, getAllTools throwing/non-array).
 //
 // These are pure, deterministic checks — no live provider/runner calls.
 
@@ -87,6 +90,31 @@ function buildInventory() {
     { description: "nameless tool is dropped" },
     { name: "bash", description: "Run a shell command." },
     { name: "unused", description: "Not requested by any worker set." },
+    // Librarian worker tools are the read-only GitHub provider tools from the
+    // `librarian` subagent profile, not generic code-search tools. Include
+    // them with varied metadata so the librarian path exercises the same
+    // branches: full desc+params, promptSnippet fallback, guideline filtering,
+    // and a tool with no parameters (schema -> {}).
+    {
+      name: "read_github",
+      description: "Read a file from a remote repository.",
+      parameters: { type: "object", properties: { path: { type: "string" } } },
+    },
+    {
+      name: "list_directory_github",
+      promptSnippet: "List a remote repository directory.",
+      parameters: { type: "object" },
+    },
+    {
+      name: "glob_github",
+      description: "Glob remote repository paths.",
+      promptGuidelines: ["Use glob_github for path patterns.", 7],
+      parameters: { type: "object" },
+    },
+    { name: "search_github", description: "Search remote repository code.", parameters: { type: "object" } },
+    { name: "commit_search", description: "Search commit history.", parameters: { type: "object" } },
+    { name: "diff_github", description: "Diff two refs.", parameters: { type: "object" } },
+    { name: "list_repositories", description: "List accessible repositories." },
   ];
 }
 
@@ -96,6 +124,16 @@ function buildInventory() {
 // order, so the reference and shared impl must agree regardless.
 const WORKER_TOOL_SETS = [
   ["grep", "find", "read"], // finder-style read-only
+  // Librarian GitHub read-only set (mirrors the `librarian` profile tools).
+  [
+    "read_github",
+    "list_directory_github",
+    "glob_github",
+    "search_github",
+    "commit_search",
+    "diff_github",
+    "list_repositories",
+  ],
   ["read", "grep", "find", "bash", "edit", "write"], // Task read-write-style
   ["read", "missing-tool", "bash"], // includes an unregistered name (dropped)
   ["write"], // single tool, description-only (no snippet)
@@ -128,10 +166,16 @@ describe("worker-host buildWorkerToolManifest — byte-identical regression", ()
       for (const workerTools of WORKER_TOOL_SETS) {
         const actual = buildWorkerToolManifest(pi, workerTools);
         const expected = reference(pi, workerTools);
-        assert.deepEqual(
-          actual,
-          expected,
-          `manifest drift for host=${label} workerTools=${JSON.stringify(workerTools)}`,
+        const where = `host=${label} workerTools=${JSON.stringify(workerTools)}`;
+        // Structural equality (strict via node:assert/strict).
+        assert.deepStrictEqual(actual, expected, `manifest drift for ${where}`);
+        // Serialized-byte equality also catches property insertion-order
+        // differences that deep equality cannot — this is what backs the
+        // "byte-identical" claim.
+        assert.equal(
+          JSON.stringify(actual),
+          JSON.stringify(expected),
+          `manifest byte drift for ${where}`,
         );
       }
     }
@@ -143,7 +187,7 @@ describe("worker-host buildWorkerToolManifest — byte-identical regression", ()
     const manifest = buildWorkerToolManifest(pi, ["grep", "find", "read"]);
     // Inventory order is preserved; non-string guideline entries are dropped;
     // missing description falls back to promptSnippet then "".
-    assert.deepEqual(manifest, [
+    assert.deepStrictEqual(manifest, [
       {
         name: "read",
         owner: "runtime",
@@ -170,10 +214,79 @@ describe("worker-host buildWorkerToolManifest — byte-identical regression", ()
     ]);
   });
 
+  it("produces the expected manifest for the librarian GitHub read-only set", async () => {
+    const { buildWorkerToolManifest } = await importSource(WORKER_HOST_MODULE);
+    const pi = { getAllTools: () => buildInventory() };
+    const manifest = buildWorkerToolManifest(pi, [
+      "read_github",
+      "list_directory_github",
+      "glob_github",
+      "search_github",
+      "commit_search",
+      "diff_github",
+      "list_repositories",
+    ]);
+    // Inventory order is preserved; list_directory_github has no description
+    // so it falls back to its promptSnippet; glob_github drops the non-string
+    // guideline entry; list_repositories has no parameters so schema -> {}.
+    assert.deepStrictEqual(manifest, [
+      {
+        name: "read_github",
+        owner: "runtime",
+        promptGuidelines: [],
+        description: "Read a file from a remote repository.",
+        schema: { type: "object", properties: { path: { type: "string" } } },
+      },
+      {
+        name: "list_directory_github",
+        owner: "runtime",
+        promptSnippet: "List a remote repository directory.",
+        promptGuidelines: [],
+        description: "List a remote repository directory.",
+        schema: { type: "object" },
+      },
+      {
+        name: "glob_github",
+        owner: "runtime",
+        promptGuidelines: ["Use glob_github for path patterns."],
+        description: "Glob remote repository paths.",
+        schema: { type: "object" },
+      },
+      {
+        name: "search_github",
+        owner: "runtime",
+        promptGuidelines: [],
+        description: "Search remote repository code.",
+        schema: { type: "object" },
+      },
+      {
+        name: "commit_search",
+        owner: "runtime",
+        promptGuidelines: [],
+        description: "Search commit history.",
+        schema: { type: "object" },
+      },
+      {
+        name: "diff_github",
+        owner: "runtime",
+        promptGuidelines: [],
+        description: "Diff two refs.",
+        schema: { type: "object" },
+      },
+      {
+        name: "list_repositories",
+        owner: "runtime",
+        promptGuidelines: [],
+        description: "List accessible repositories.",
+        schema: {},
+      },
+    ]);
+  });
+
   it("returns [] for empty worker tools and absent host", async () => {
     const { buildWorkerToolManifest } = await importSource(WORKER_HOST_MODULE);
-    assert.deepEqual(buildWorkerToolManifest({ getAllTools: () => buildInventory() }, []), []);
-    assert.deepEqual(buildWorkerToolManifest(undefined, ["read"]), []);
+    assert.deepStrictEqual(buildWorkerToolManifest({ getAllTools: () => buildInventory() }, []), []);
+    assert.deepStrictEqual(buildWorkerToolManifest(undefined, ["read"]), []);
   });
 });
 
