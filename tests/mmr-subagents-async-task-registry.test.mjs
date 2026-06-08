@@ -166,6 +166,31 @@ describe("async-task-registry lifecycle", () => {
     assert.equal(entry.toolCount, 2);
   });
 
+  it("derives board generatedAtMs and active-entry runtimeMs from one now", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    // An incrementing clock surfaces any path that samples now more than once
+    // per board projection: a shared now keeps runtime == generatedAt - started.
+    let clock = 1_000;
+    const reg = createMmrAsyncTaskRegistry({
+      nowMs: () => {
+        const value = clock;
+        clock += 1_000;
+        return value;
+      },
+    });
+    const d = makeDeferredRun();
+    const started = reg.startTask(startArgs({ run: d.run }));
+    assert.equal(started.ok, true);
+
+    const board = reg.listTasks("sess-A");
+    assert.equal(board.active.length, 1, "the running task projects onto the active board");
+    assert.equal(
+      board.active[0].runtimeMs,
+      board.generatedAtMs - started.snapshot.startedAtMs,
+      "runtimeMs and generatedAtMs share the same listTasks now",
+    );
+  });
+
   it("does NOT bind the worker to any external signal; the registry owns the AbortController", async () => {
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
     const reg = createMmrAsyncTaskRegistry();

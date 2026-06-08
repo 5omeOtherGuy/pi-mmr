@@ -102,6 +102,8 @@ function rowFromDetails(details: BackgroundTaskDetails): WidgetRow {
     description: details.description ?? "",
     runtimeMs: 0,
     createdAtMs: 0,
+    // Frozen replay snapshot: no live board, so the elapsed chip stays static.
+    boardGeneratedAtMs: 0,
     ...(details.terminalOutcome !== undefined ? { terminalOutcome: details.terminalOutcome as WidgetRow["terminalOutcome"] } : {}),
     ...(details.resolvedModel !== undefined ? { resolvedModel: details.resolvedModel } : {}),
     ...(details.contextWindow !== undefined ? { contextWindow: details.contextWindow } : {}),

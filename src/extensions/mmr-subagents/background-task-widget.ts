@@ -124,7 +124,7 @@ function boardSections(
       buckets.set(key, bucket);
       order.push(key);
     }
-    bucket.push(toRow(entry));
+    bucket.push(toRow(entry, board.generatedAtMs));
   }
 
   const grouped: { section: WidgetSection; minCreated: number }[] = [];

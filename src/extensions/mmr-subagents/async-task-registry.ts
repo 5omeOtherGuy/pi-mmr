@@ -1167,7 +1167,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     if (!map) return board;
     // Listing is NOT a final observation; it must not shorten retention.
     for (const record of map.values()) {
-      const entry = this.boardEntry(record);
+      const entry = this.boardEntry(record, now);
       if (isTerminalStatus(record.status)) {
         board.finished.push(entry);
       } else if (entry.freshness === "healthy") {
@@ -1450,8 +1450,8 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     return snapshotOf(record, this.nowMs(), this.freshnessConfig);
   }
 
-  private boardEntry(record: MmrAsyncTaskRecord): MmrAsyncTaskBoardEntry {
-    return boardEntryOf(record, this.nowMs(), this.freshnessConfig);
+  private boardEntry(record: MmrAsyncTaskRecord, now = this.nowMs()): MmrAsyncTaskBoardEntry {
+    return boardEntryOf(record, now, this.freshnessConfig);
   }
 }
 

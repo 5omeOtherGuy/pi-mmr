@@ -101,6 +101,19 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Fixed
 
+- `mmr-subagents`: the below-editor background-task widget's per-worker elapsed
+  chip now advances with wall time between worker progress snapshots instead of
+  freezing at the last snapshot's runtime. A `liveRuntimeMs` helper in
+  `background-task-view.ts` adds the time since the board snapshot
+  (`boardGeneratedAtMs`, now carried on each `WidgetRow`) to a running/stalled
+  row's `runtimeMs`, so the chip ticks up on the widget's existing 80ms
+  re-render cadence; terminal rows keep their final runtime and a
+  missing/zero/non-finite board timestamp falls back to the static value. The
+  registry's `listTasks` board projection now derives `generatedAtMs` and each
+  entry's `runtimeMs` from a single `now`. Covered by added live-advance,
+  terminal-freeze, and fallback cases in
+  `tests/mmr-subagents-background-task-widget.test.mjs` and a single-`now`
+  invariant test in `tests/mmr-subagents-async-task-registry.test.mjs`.
 - `mmr-history`: redact common compressed public IPv6 addresses that previously
   leaked through the catalog/packet redaction layer. The IPv6 matcher in
   `redaction.ts` recognized only full 8-group form plus `::1`/`::`/`fe80::`

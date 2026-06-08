@@ -374,6 +374,72 @@ describe("background-task widget", () => {
     assert.equal(calls.length, 0);
   });
 
+  it("advances the displayed elapsed chip across render ticks for an active row", async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 1_000 });
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        generatedAtMs: 1_000,
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({ runtimeMs: 0 })],
+      }),
+    );
+    const widget = calls.at(-1).value({ requestRender() {} }, theme);
+    assert.match(widget.render(80).join("\n"), /· 0s/, "chip starts at the snapshot runtime");
+    t.mock.timers.tick(1_000);
+    assert.match(widget.render(80).join("\n"), /· 1s/, "chip ticks up 1s after a 1000ms tick");
+    t.mock.timers.tick(64_000);
+    assert.match(widget.render(80).join("\n"), /· 1m5s/, "chip reflects 65s of elapsed wall time");
+    widget.dispose();
+  });
+
+  it("freezes the elapsed chip of a terminal row across render ticks", async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 1_000 });
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        generatedAtMs: 1_000,
+        // One active row keeps the animation timer alive; the terminal row is
+        // freshly settled so it lingers within the retention window.
+        counts: { active: 1, stalled: 0, finished: 1 },
+        active: [makeEntry({ taskId: "task_live", description: "still running", runtimeMs: 0 })],
+        finished: [makeEntry({
+          taskId: "task_done", description: "all finished", status: "succeeded",
+          freshness: "terminal", runtimeMs: 5_000, completedAtMs: 1_000,
+        })],
+      }),
+    );
+    const widget = calls.at(-1).value({ requestRender() {} }, theme);
+    const doneLine = () => widget.render(120).find((l) => /all finished/.test(l));
+    assert.match(doneLine(), /· 5s/, "terminal row shows its final runtime");
+    t.mock.timers.tick(64_000);
+    assert.match(doneLine(), /· 5s/, "terminal row's chip does NOT advance with wall time");
+    widget.dispose();
+  });
+
+  it("falls back to the static runtime when the board timestamp is missing", async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 50_000 });
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const { ctx, calls } = makeCtx();
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({
+        generatedAtMs: 0,
+        counts: { active: 1, stalled: 0, finished: 0 },
+        active: [makeEntry({ runtimeMs: 3_000 })],
+      }),
+    );
+    const widget = calls.at(-1).value({ requestRender() {} }, theme);
+    assert.match(widget.render(80).join("\n"), /· 3s/, "a zero/garbage board timestamp falls back to static runtime");
+    t.mock.timers.tick(64_000);
+    assert.match(widget.render(80).join("\n"), /· 3s/, "no live delta is applied without a valid board timestamp");
+    widget.dispose();
+  });
+
   it("animates active rows on a timer and stops on dispose", async (t) => {
     t.mock.timers.enable({ apis: ["setInterval"] });
     const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);

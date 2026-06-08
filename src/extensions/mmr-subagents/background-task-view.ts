@@ -94,6 +94,12 @@ export interface WidgetRow {
   description: string;
   runtimeMs: number;
   createdAtMs: number;
+  /**
+   * The board snapshot's `generatedAtMs`, captured when this row was built from
+   * a board. Lets a non-terminal chip advance with wall time between snapshots
+   * (see {@link liveRuntimeMs}). `0` when unknown — the chip stays static.
+   */
+  boardGeneratedAtMs: number;
   resolvedModel?: string;
   contextWindow?: number;
   usage?: MmrAsyncTaskBoardEntry["usage"];
@@ -203,10 +209,24 @@ function formatContextUsage(row: WidgetRow): string | undefined {
  */
 export type RowMetadataLevel = "full" | "minimal" | "none";
 
+/**
+ * Elapsed runtime to display for a row. Running/stalled rows advance with wall
+ * time since the board snapshot (`runtimeMs` measured at `boardGeneratedAtMs`),
+ * so the chip ticks up between registry progress snapshots; terminal rows keep
+ * their final `runtimeMs`. A missing/zero/non-finite board timestamp falls back
+ * to the static `runtimeMs`, and the live delta is never negative.
+ */
+export function liveRuntimeMs(row: WidgetRow): number {
+  if (isTerminalRowStatus(row.status)) return row.runtimeMs;
+  const generatedAt = row.boardGeneratedAtMs;
+  if (!Number.isFinite(generatedAt) || generatedAt <= 0) return row.runtimeMs;
+  return row.runtimeMs + Math.max(0, Date.now() - generatedAt);
+}
+
 function widgetMetadataParts(row: WidgetRow, level: RowMetadataLevel): string[] {
   if (level === "none") return [];
   const parts: string[] = [];
-  const elapsed = formatElapsed(row.runtimeMs);
+  const elapsed = formatElapsed(liveRuntimeMs(row));
   if (elapsed) parts.push(elapsed);
   const model = stripMmrWorkerModelProvider(row.resolvedModel);
   if (model) parts.push(model);
@@ -229,7 +249,7 @@ function widgetMetadataParts(row: WidgetRow, level: RowMetadataLevel): string[] 
   return parts;
 }
 
-export function toRow(entry: MmrAsyncTaskBoardEntry): WidgetRow {
+export function toRow(entry: MmrAsyncTaskBoardEntry, boardGeneratedAtMs: number): WidgetRow {
   return {
     taskId: entry.taskId,
     status: entry.status,
@@ -238,6 +258,7 @@ export function toRow(entry: MmrAsyncTaskBoardEntry): WidgetRow {
     description: entry.description,
     runtimeMs: entry.runtimeMs,
     createdAtMs: entry.createdAtMs,
+    boardGeneratedAtMs,
     ...(entry.resolvedModel !== undefined ? { resolvedModel: entry.resolvedModel } : {}),
     ...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
     ...(entry.usage !== undefined ? { usage: entry.usage } : {}),
@@ -431,7 +452,7 @@ export function groupMembersFromBoard(board: MmrAsyncTaskBoard, groupId: string)
   const entries = [...board.active, ...board.stalled, ...board.finished];
   return entries
     .filter((entry) => entry.groupId === groupId)
-    .map(toRow)
+    .map((entry) => toRow(entry, board.generatedAtMs))
     .sort(compareRows);
 }
 
@@ -440,5 +461,5 @@ export function singleRowFromBoard(board: MmrAsyncTaskBoard, taskId: string): Wi
   const entry = [...board.active, ...board.stalled, ...board.finished].find(
     (candidate) => candidate.taskId === taskId,
   );
-  return entry ? toRow(entry) : undefined;
+  return entry ? toRow(entry, board.generatedAtMs) : undefined;
 }
