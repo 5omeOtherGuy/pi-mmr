@@ -206,7 +206,7 @@ describe("renderMmrSubagentCall", () => {
 });
 
 describe("ToolExecutionComponent integration", () => {
-  it("replaces a background start call with one result-owned running lifecycle card", async () => {
+  it("replaces a background start call with one borderless result-owned live row", async () => {
     const renderers = await importSource(PROGRESS_RENDERING_MODULE);
     const args = {
       agent: "finder",
@@ -231,18 +231,22 @@ describe("ToolExecutionComponent integration", () => {
       },
     };
 
+    // One consolidated borderless row owns the lifecycle: the call card is
+    // blanked when the result lands, so the description renders exactly once.
+    // No box "background ⠋ running" header, no raw started-worker text, and a
+    // single row never dumps the full worker prompt.
     const collapsed = renderBackgroundToolExecutionFrame(args, result, { renderers, expanded: false });
-    assert.equal(countOccurrences(collapsed, "background ⠋ running"), 1, collapsed);
-    assert.match(collapsed, /finder • gemini-3\.5-flash-extra-low • background ⠋ running/);
-    assert.match(collapsed, /Find widget placement call sites/);
-    assert.match(collapsed, /ctrl\+o to expand/i);
+    assert.equal(countOccurrences(collapsed, "Find widget placement call sites"), 1, collapsed);
+    assert.match(collapsed, /⠋ finder Find widget placement call sites/);
+    assert.match(collapsed, /gemini-3\.5-flash-extra-low/);
+    assert.doesNotMatch(collapsed, /background ⠋ running/);
+    assert.doesNotMatch(collapsed, /ctrl\+o to expand/i);
     assert.doesNotMatch(collapsed, /start_task: started background worker/);
     assert.doesNotMatch(collapsed, /renders aboveEditor and the background-task widget renders belowEditor/);
 
     const expanded = renderBackgroundToolExecutionFrame(args, result, { renderers, expanded: true });
-    assert.equal(countOccurrences(expanded, "background ⠋ running"), 1, expanded);
-    assert.match(expanded, /renders aboveEditor and the background-task widget renders belowEditor/);
-    assert.doesNotMatch(expanded, /ctrl\+o to expand/i);
+    assert.equal(countOccurrences(expanded, "Find widget placement call sites"), 1, expanded);
+    assert.doesNotMatch(expanded, /renders aboveEditor and the background-task widget renders belowEditor/);
   });
 
   it("lets the result renderer own partial rows and suppresses worker prompt echoes for every subagent", async () => {
@@ -1006,7 +1010,7 @@ describe("renderMmrSubagentResult", () => {
 });
 
 describe("background task rendering", () => {
-  it("renders an immediate collapsed running card for a start_task call", async () => {
+  it("renders a borderless single starting row for a start_task call", async () => {
     const { renderMmrBackgroundTaskCall } = await importSource(PROGRESS_RENDERING_MODULE);
     const component = renderMmrBackgroundTaskCall(
       "start_task",
@@ -1024,13 +1028,15 @@ describe("background task rendering", () => {
     );
     const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder • background ⠋ running/);
-    assert.match(rendered, /Find widget placement call sites/);
-    assert.match(rendered, /ctrl\+o to expand/i);
+    // Borderless GROK-style row: status glyph + agent + description, no box
+    // header, no "background" badge, no ctrl+o body, and never the full prompt.
+    assert.match(rendered, /⠋ finder Find widget placement call sites/);
+    assert.doesNotMatch(rendered, /• background ⠋ running/);
+    assert.doesNotMatch(rendered, /ctrl\+o to expand/i);
     assert.doesNotMatch(rendered, /renders aboveEditor and the background-task widget renders belowEditor/);
   });
 
-  it("expands the immediate start_task call card to the full prompt", async () => {
+  it("keeps the start_task call row compact even when expanded (never dumps the prompt)", async () => {
     const { renderMmrBackgroundTaskCall } = await importSource(PROGRESS_RENDERING_MODULE);
     const component = renderMmrBackgroundTaskCall(
       "start_task",
@@ -1048,12 +1054,11 @@ describe("background task rendering", () => {
     );
     const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder • background ⠋ running/);
-    assert.match(rendered, /renders aboveEditor and the background-task widget renders belowEditor/);
-    assert.doesNotMatch(rendered, /ctrl\+o to expand/i);
+    assert.match(rendered, /⠋ finder Find widget placement call sites/);
+    assert.doesNotMatch(rendered, /renders aboveEditor and the background-task widget renders belowEditor/);
   });
 
-  it("renders the start_task result as a running background lifecycle card", async () => {
+  it("renders an ungrouped start_task result as a borderless live row", async () => {
     const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
     const component = renderMmrBackgroundTaskResult(
       "start_task",
@@ -1070,6 +1075,7 @@ describe("background task rendering", () => {
             "Confirm the task_list widget renders aboveEditor and the background-task widget renders belowEditor. " +
             "Return file paths and line numbers for both ctx.ui.setWidget placement options.",
           resolvedModel: "google/gemini-3.5-flash-extra-low",
+          sessionKey: "s1",
         },
       },
       { expanded: false, isPartial: false },
@@ -1078,11 +1084,64 @@ describe("background task rendering", () => {
     );
     const rendered = normalize(renderText(component));
 
-    assert.match(rendered, /finder • gemini-3\.5-flash-extra-low • background ⠋ running/);
-    assert.match(rendered, /Find widget placement call sites/);
-    assert.match(rendered, /ctrl\+o to expand/i);
+    assert.equal(component.constructor.name, "BackgroundCardComponent");
+    assert.match(rendered, /⠋ finder Find widget placement call sites/);
+    assert.match(rendered, /gemini-3\.5-flash-extra-low/);
+    assert.doesNotMatch(rendered, /• background ⠋ running/);
+    assert.doesNotMatch(rendered, /ctrl\+o to expand/i);
     assert.doesNotMatch(rendered, /start_task: started background worker/);
     assert.doesNotMatch(rendered, /renders aboveEditor and the background-task widget renders belowEditor/);
+  });
+
+  it("renders a grouped start_task opener as a live group card and siblings as nothing", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const board = {
+      version: 1,
+      generatedAtMs: 0,
+      counts: { active: 2, stalled: 0, finished: 2 },
+      active: [
+        { taskId: "t1", status: "running", freshness: "healthy", agent: "finder", description: "mmr-core integration points", createdAtMs: 1, startedAtMs: 1, updatedAtMs: 1, runtimeMs: 5000, groupId: "group_abc123" },
+        { taskId: "t2", status: "running", freshness: "healthy", agent: "finder", description: "subagents wiring", createdAtMs: 2, startedAtMs: 2, updatedAtMs: 2, runtimeMs: 4000, groupId: "group_abc123" },
+      ],
+      stalled: [],
+      finished: [
+        { taskId: "t3", status: "succeeded", freshness: "terminal", agent: "finder", description: "tool registration", createdAtMs: 3, startedAtMs: 3, updatedAtMs: 3, runtimeMs: 9000, completedAtMs: 0, groupId: "group_abc123" },
+        { taskId: "t4", status: "succeeded", freshness: "terminal", agent: "finder", description: "package wiring", createdAtMs: 4, startedAtMs: 4, updatedAtMs: 4, runtimeMs: 8000, completedAtMs: 0, groupId: "group_abc123" },
+      ],
+    };
+    const group = { groupId: "group_abc123", status: "running", label: "swarm review", generatedAtMs: 0, createdAtMs: 0, updatedAtMs: 0, completionPush: "pending", taskIds: ["t1", "t2", "t3", "t4"], counts: { running: 2, succeeded: 2, failed: 0, cancelled: 0, partial: 0, total: 4 } };
+    const extras = { resolveBoard: () => board, resolveGroup: () => group };
+
+    const opener = normalize(renderText(renderMmrBackgroundTaskResult(
+      "start_task",
+      {
+        content: [{ type: "text", text: "start_task: started background worker t1 in group group_abc123" }],
+        details: { worker: "mmr-subagents.async-task", tool: "start_task", agent: "finder", taskId: "t1", status: "running", description: "mmr-core integration points", groupId: "group_abc123", groupOpener: true, sessionKey: "s1" },
+      },
+      { expanded: false, isPartial: false },
+      fakeTheme,
+      makeContext({ agent: "finder" }),
+      extras,
+    )));
+
+    // One borderless group card: a section header with status + settled/total,
+    // then a row per member that flips ⠋→✓ as children finish.
+    assert.match(opener, /▸ swarm review · group_abc123 +● running · 2\/4/);
+    assert.match(opener, /⠋ finder mmr-core integration points/);
+    assert.match(opener, /✓ finder tool registration/);
+    assert.match(opener, /✓ finder package wiring/);
+    assert.doesNotMatch(opener, /start_task: started background worker/);
+
+    // A sibling start in the same group renders nothing — one card per group.
+    const sibling = renderMmrBackgroundTaskResult(
+      "start_task",
+      { content: [{ type: "text", text: "x" }], details: { worker: "mmr-subagents.async-task", tool: "start_task", agent: "finder", taskId: "t2", status: "running", description: "subagents wiring", groupId: "group_abc123", sessionKey: "s1" } },
+      { expanded: false, isPartial: false },
+      fakeTheme,
+      makeContext({ agent: "finder" }),
+      extras,
+    );
+    assert.equal(normalize(renderText(sibling)).trim(), "");
   });
 
   it("uses the short description when collapsed and the full prompt when expanded", async () => {
@@ -1252,6 +1311,65 @@ describe("background task rendering", () => {
       /aborted by watchdog/,
       "a neutral cancel must not surface an error diagnostic",
     );
+  });
+
+  it("renders a group task_poll as a member-list card, never the verbose group text", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const board = {
+      version: 1,
+      generatedAtMs: 0,
+      counts: { active: 0, stalled: 0, finished: 4 },
+      active: [],
+      stalled: [],
+      finished: [
+        { taskId: "t1", status: "succeeded", freshness: "terminal", agent: "finder", description: "mmr-core integration points", createdAtMs: 1, startedAtMs: 1, updatedAtMs: 1, runtimeMs: 5000, completedAtMs: 0, groupId: "group_abc123" },
+        { taskId: "t2", status: "succeeded", freshness: "terminal", agent: "finder", description: "subagents wiring", createdAtMs: 2, startedAtMs: 2, updatedAtMs: 2, runtimeMs: 4000, completedAtMs: 0, groupId: "group_abc123" },
+        { taskId: "t3", status: "succeeded", freshness: "terminal", agent: "finder", description: "tool registration", createdAtMs: 3, startedAtMs: 3, updatedAtMs: 3, runtimeMs: 9000, completedAtMs: 0, groupId: "group_abc123" },
+        { taskId: "t4", status: "succeeded", freshness: "terminal", agent: "finder", description: "package wiring", createdAtMs: 4, startedAtMs: 4, updatedAtMs: 4, runtimeMs: 8000, completedAtMs: 0, groupId: "group_abc123" },
+      ],
+    };
+    const group = { groupId: "group_abc123", status: "completed", label: "swarm review", generatedAtMs: 0, createdAtMs: 0, updatedAtMs: 0, completionPush: "observed", taskIds: ["t1", "t2", "t3", "t4"], counts: { running: 0, succeeded: 4, failed: 0, cancelled: 0, partial: 0, total: 4 } };
+    const verbose =
+      "task_poll: group group_abc123 completed (4 task(s): 4 succeeded, 0 failed, 0 cancelled, 0 partial). " +
+      "Group status observed. This does not include child final outputs. Retrieve each needed child once with " +
+      "task_poll({task_id}): t1, t2, t3, t4. If a later group notification appears, treat it as stale.";
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      { content: [{ type: "text", text: verbose }], details: { worker: "mmr-subagents.async-task", tool: "task_poll", groupId: "group_abc123", group, sessionKey: "s1" } },
+      { expanded: false, isPartial: false },
+      fakeTheme,
+      makeContext({ group_id: "group_abc123" }),
+      { resolveBoard: () => board, resolveGroup: () => group },
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /▸ swarm review · group_abc123 +● completed · 4\/4/);
+    assert.match(rendered, /✓ finder mmr-core integration points/);
+    assert.match(rendered, /✓ finder package wiring/);
+    // The verbose model-facing retrieval text must never reach the transcript.
+    assert.doesNotMatch(rendered, /Group status observed/);
+    assert.doesNotMatch(rendered, /Retrieve each needed child/);
+    assert.doesNotMatch(rendered, /task_poll\(\{task_id\}\)/);
+    assert.doesNotMatch(rendered, /treat it as stale/);
+  });
+
+  it("falls back to a header with a task count when no live registry is available", async () => {
+    const { renderMmrBackgroundTaskResult } = await importSource(PROGRESS_RENDERING_MODULE);
+    const group = { groupId: "group_abc123", status: "completed", label: "swarm review", generatedAtMs: 0, createdAtMs: 0, updatedAtMs: 0, completionPush: "observed", taskIds: ["t1", "t2", "t3", "t4"], counts: { running: 0, succeeded: 4, failed: 0, cancelled: 0, partial: 0, total: 4 } };
+    const component = renderMmrBackgroundTaskResult(
+      "task_poll",
+      { content: [{ type: "text", text: "task_poll: group group_abc123 completed ... Group status observed ... treat it as stale." }], details: { worker: "mmr-subagents.async-task", tool: "task_poll", groupId: "group_abc123", group, sessionKey: "s1" } },
+      { expanded: false, isPartial: false },
+      fakeTheme,
+      makeContext({ group_id: "group_abc123" }),
+      // No extras → replay path; the card draws the header + a muted count.
+    );
+    const rendered = normalize(renderText(component));
+
+    assert.match(rendered, /▸ swarm review · group_abc123 +● completed · 4\/4/);
+    assert.match(rendered, /4 tasks/);
+    assert.doesNotMatch(rendered, /Group status observed/);
+    assert.doesNotMatch(rendered, /treat it as stale/);
   });
 
   it("renders a no-id poll as a grouped board with native status glyphs", async () => {

@@ -447,6 +447,7 @@ export function groupResult(
   tool: AsyncTaskToolDetails["tool"],
   group: MmrAsyncTaskGroupSnapshot,
   timedOut?: boolean,
+  sessionKey?: string,
 ): AgentToolResult<AsyncTaskToolDetails> {
   return {
     content: [{ type: "text", text: renderGroup(tool, group, timedOut) }],
@@ -455,6 +456,9 @@ export function groupResult(
       tool,
       groupId: group.groupId,
       group,
+      // Renderer-only: lets the consolidated group card read live member rows.
+      // Not consumed by the model (which reads `content`).
+      ...(sessionKey !== undefined ? { sessionKey } : {}),
       ...(timedOut !== undefined ? { timedOut } : {}),
     },
   };

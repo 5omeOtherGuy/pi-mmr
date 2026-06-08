@@ -8,6 +8,33 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Changed
 
+- `mmr-subagents`: redesign the inline rendering of background subagents into a
+  borderless, minimalist live card and consolidate every group spawn into a
+  single card instead of one heavy boxed card per `start_task`. A new
+  `background-task-view.ts` is the single source of truth for the row/group-
+  header/glyph/colour vocabulary and the loader animation clock; both the pinned
+  belowEditor widget and the inline transcript card now render identical rows
+  from it (the widget keeps lifecycle/placement/retention, while the duplicated
+  row and status helpers in `background-task-widget.ts` and
+  `background-task-rendering.ts` are removed in favour of the shared module).
+  `start_task` now renders a borderless live row (single task) or one
+  consolidated group section for the group-opening call — sibling starts in the
+  same group render nothing, so a fanned-out swarm is one card whose rows flip
+  ⠋→✓ in place as children finish. The card reads live group/board state via a
+  registry resolver (renderer-only `details.sessionKey`/`details.groupOpener`),
+  animating in lockstep with the widget's re-render tick; replayed transcripts
+  with no live registry fall back to the static snapshot. A group
+  `task_poll`/`task_wait`/`task_cancel` now draws the same consolidated
+  member-list card, and the verbose model-facing group text ("Group status
+  observed … Retrieve each needed child once with task_poll …") is never drawn
+  into the transcript — it stays in the tool result `content` for the model only.
+  Single-task `task_poll`/`task_wait` keep their rich result card (output +
+  trail), and the no-id board view is unchanged. New model guidance
+  (`START_TASK_GROUP_FANOUT_GUIDANCE`) tells the model to fan out a group in a
+  single step without narrating each spawn. Covered by updated
+  `tests/mmr-subagents-progress-rendering.test.mjs` (borderless rows, live group
+  card, sibling-renders-nothing, group-card-replaces-verbose-text, replay
+  fallback) and the unchanged `tests/mmr-subagents-background-task-widget.test.mjs`.
 - `mmr-toolbox`: split the 877-line `todo-list-tool.ts` into focused leaf
   modules with the entry file kept as a thin compatibility shell, mirroring the
   async-task split pattern. Schema, strict defense-in-depth validation, and
