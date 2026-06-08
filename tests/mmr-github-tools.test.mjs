@@ -186,6 +186,40 @@ describe("glob_github", () => {
     const result = await tool.execute("c", { repository: "acme/repo", filePattern: "**/*.ts" }, undefined);
     assert.match(text(result), /tree is too large/);
   });
+
+  it("returns a clear glob-syntax error result (does not throw) for a malformed class", async () => {
+    const { tool } = await makeTool("createGlobGithubTool", {
+      getTree: async () => ({ ref: "main", truncated: false, entries: [{ path: "src/a.ts", type: "blob" }] }),
+    });
+    const result = await tool.execute("c", { repository: "acme/repo", filePattern: "src/[z-a].ts" }, undefined);
+    assert.match(text(result), /glob_github: unsupported glob pattern/);
+    assert.equal(result.details.error !== undefined, true);
+    assert.doesNotMatch(text(result), /Invalid regular expression/i);
+  });
+});
+
+describe("mmr-github error convention", () => {
+  it("returns error-shaped results (details.error) rather than throwing across failure paths", async () => {
+    // Invalid params via coerce (non-object).
+    const glob = await makeTool("createGlobGithubTool", {});
+    const badParams = await glob.tool.execute("c", "not-an-object", undefined);
+    assert.equal(badParams.details.error !== undefined, true);
+    assert.match(text(badParams), /glob_github:/);
+
+    // Repository parse error.
+    const parse = await makeTool("createReadGithubTool", {});
+    const badRepo = await parse.tool.execute("c", { repository: "https://github.com/search?q=x", path: "a" }, undefined);
+    assert.equal(badRepo.details.error !== undefined, true);
+    assert.match(text(badRepo), /read_github:/);
+
+    // Malformed glob.
+    const glob2 = await makeTool("createGlobGithubTool", {
+      getTree: async () => ({ ref: "main", truncated: false, entries: [{ path: "a.ts", type: "blob" }] }),
+    });
+    const badGlob = await glob2.tool.execute("c", { repository: "acme/repo", filePattern: "[z-a]" }, undefined);
+    assert.equal(badGlob.details.error !== undefined, true);
+    assert.match(text(badGlob), /glob_github: unsupported glob pattern/);
+  });
 });
 
 describe("search_github", () => {
@@ -379,5 +413,46 @@ describe("glob matcher", () => {
     assert.equal(matchGlob("**/*.{js,ts}", "src/a.md"), false);
     assert.equal(matchGlob("src/[a-z]*.ts", "src/abc.ts"), true);
     assert.equal(matchGlob("src/[a-z]*.ts", "src/Abc.ts"), false);
+  });
+
+  it("supports negated character classes via ! and ^", async () => {
+    const { matchGlob } = await importSource(GLOB_MODULE);
+    // `!` and `^` both negate: match a single char NOT in the class.
+    assert.equal(matchGlob("src/[!a-z].ts", "src/A.ts"), true);
+    assert.equal(matchGlob("src/[!a-z].ts", "src/b.ts"), false);
+    assert.equal(matchGlob("src/[^0-9].ts", "src/a.ts"), true);
+    assert.equal(matchGlob("src/[^0-9].ts", "src/5.ts"), false);
+  });
+
+  it("throws a typed glob error for a reversed character-class range without leaking regex text", async () => {
+    const { matchGlob, globToRegExp, GlobPatternError } = await importSource(GLOB_MODULE);
+    for (const compile of [() => globToRegExp("src/[z-a].ts"), () => matchGlob("src/[z-a].ts", "src/a.ts")]) {
+      assert.throws(compile, (err) => {
+        assert.ok(err instanceof GlobPatternError, "expected a GlobPatternError");
+        assert.ok(/\[z-a\]|z-a/.test(err.message), "message should name the offending pattern");
+        assert.doesNotMatch(err.message, /Invalid regular expression/i);
+        assert.doesNotMatch(err.message, /\^\.\*\$|\/\^/);
+        return true;
+      });
+    }
+  });
+
+  it("rejects an empty character class as unsupported", async () => {
+    const { globToRegExp, GlobPatternError } = await importSource(GLOB_MODULE);
+    assert.throws(() => globToRegExp("src/[].ts"), (err) => {
+      assert.ok(err instanceof GlobPatternError);
+      assert.match(err.message, /empty/i);
+      assert.doesNotMatch(err.message, /Invalid regular expression/i);
+      return true;
+    });
+  });
+
+  it("rejects class characters outside the documented subset", async () => {
+    const { globToRegExp, GlobPatternError } = await importSource(GLOB_MODULE);
+    assert.throws(() => globToRegExp("src/[a&b].ts"), (err) => {
+      assert.ok(err instanceof GlobPatternError);
+      assert.doesNotMatch(err.message, /Invalid regular expression/i);
+      return true;
+    });
   });
 });
