@@ -80,6 +80,14 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
   collapsing the eight prior `## Rush ...` headings. Model-visible prompt
   behavior change; covered by updated `tests/mmr-core-prompt-templates.test.mjs`
   assertions and regenerated `rush` prompt and effective-surface fixtures.
+- `mmr-core`: harden the prompt-tail drift invariant with stricter tests. New
+  `tests/mmr-core-prompt-reassembly.test.mjs` asserts byte-stable idempotence
+  per prompted mode (re-assembling an already MMR-rewritten prompt reproduces
+  the same bytes and stays a real rewrite, not a passthrough) and a cross-mode
+  strip (a `deep` parent re-assembled as a `smart` Task base carries the smart
+  tail exactly once with no leftover deep posture). No model-visible prompt
+  bytes change; this guards `assembleActiveSurface`'s forward render and the
+  backward `PREVIOUS_MMR_TAILS` strip table against silent divergence.
 - `mmr-core`: the `smart` context-cap reassertion now defers to an active
   MMR-managed model override (e.g. a session fallback) instead of re-capping
   underneath its owner, matching the `before_provider_request` hook which
