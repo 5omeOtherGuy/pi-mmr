@@ -431,6 +431,66 @@ describe("mmr-history redaction — IPv4 / IPv6 addresses", () => {
     assert.equal(out, "std::cout and Module::method");
   });
 
+  it("redacts compressed public / unique-local IPv6 addresses", async () => {
+    const { redactText, REDACTION_IP } = await importSource(REDACTION_MODULE);
+    for (const [input, leak] of [
+      ["node 2001:db8::1 up", "2001:db8"],
+      ["dns 2001:4860:4860::8888 ok", "4860"],
+      ["ula fd00::1234 here", "fd00"],
+      ["mixed 2001:db8:0:0:0:0:2:1 end", "2001:db8"],
+    ]) {
+      const out = redactText(input, { user: "" });
+      assert.ok(out.includes(REDACTION_IP), `expected [ip] in: ${input} -> ${out}`);
+      assert.ok(!out.includes(leak), `leaked ${leak} in: ${out}`);
+    }
+  });
+
+  it("redacts IPv4-mapped IPv6 as a single [ip] with no leaked hextets", async () => {
+    const { redactText, REDACTION_IP } = await importSource(REDACTION_MODULE);
+    const out = redactText("peer ::ffff:192.168.1.1 seen", { user: "" });
+    assert.equal(out, `peer ${REDACTION_IP} seen`);
+    assert.ok(!out.includes("ffff"));
+    assert.ok(!out.includes("192.168"));
+  });
+
+  it("redacts zoned IPv6 including the %zone suffix", async () => {
+    const { redactText, REDACTION_IP } = await importSource(REDACTION_MODULE);
+    const out = redactText("bind 2001:db8::1%eth0 now", { user: "" });
+    assert.ok(out.includes(REDACTION_IP));
+    assert.ok(!out.includes("2001:db8"));
+    assert.ok(!out.includes("%eth0"));
+  });
+
+  it("redacts an IPv6 address embedded in prose without eating words", async () => {
+    const { redactText, REDACTION_IP } = await importSource(REDACTION_MODULE);
+    const out = redactText("connect to 2001:db8::1 now", { user: "" });
+    assert.equal(out, `connect to ${REDACTION_IP} now`);
+  });
+
+  it("does NOT redact language :: syntax or non-address colon text", async () => {
+    const { redactText } = await importSource(REDACTION_MODULE);
+    for (const s of [
+      "std::cout and Module::method",
+      "Foo::Bar::baz",
+      "hex word cafe and dead",
+      "time 12:34 today",
+      "mac-ish de:ad:be:ef list",
+    ]) {
+      assert.equal(redactText(s, { user: "" }), s, `unexpected redaction of: ${s}`);
+    }
+  });
+
+  it("redacts bare single-group IPv6 literals (over-redaction over namespace lookalikes)", async () => {
+    const { redactText, REDACTION_IP } = await importSource(REDACTION_MODULE);
+    // `x::y` is a valid IPv6 literal (isIP === 6). The redactor's
+    // over-redaction stance redacts it rather than leak a routable
+    // address, and keeps `0::1` consistent with `::1`.
+    assert.equal(redactText("a::b", { user: "" }), REDACTION_IP);
+    assert.equal(redactText("0::1", { user: "" }), REDACTION_IP);
+    assert.equal(redactText("host 1::2 here", { user: "" }), `host ${REDACTION_IP} here`);
+    assert.equal(redactText("loop 0::1 vs ::1", { user: "" }), `loop ${REDACTION_IP} vs ${REDACTION_IP}`);
+  });
+
   it("is idempotent for IP addresses", async () => {
     const { redactText } = await importSource(REDACTION_MODULE);
     const inputs = [
@@ -439,6 +499,11 @@ describe("mmr-history redaction — IPv4 / IPv6 addresses", () => {
       "link fe80::1ff:fe23:4567:890a",
       "v6 2001:0db8:85a3:0000:0000:8a2e:0370:7334",
       "bind :: please",
+      "compressed 2001:db8::1 done",
+      "mapped ::ffff:192.168.1.1 done",
+      "zoned 2001:db8::1%eth0 done",
+      "single a::b done",
+      "loop 0::1 done",
     ];
     for (const input of inputs) {
       const once = redactText(input, { user: "" });

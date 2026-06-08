@@ -6,6 +6,21 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ## Unreleased
 
+### Fixed
+
+- `mmr-history`: redact common compressed public IPv6 addresses that previously
+  leaked through the catalog/packet redaction layer. The IPv6 matcher in
+  `redaction.ts` recognized only full 8-group form plus `::1`/`::`/`fe80::`
+  link-local, so compressed global-unicast and unique-local addresses
+  (e.g. `2001:db8::1`, `fd00::1234`), partial/mixed forms, IPv4-mapped
+  (`::ffff:192.168.1.1`), and zoned addresses (`2001:db8::1%eth0`) passed
+  through unredacted despite the documented IPv6 coverage. IPv6 detection now
+  extracts broad address candidates and validates each with `node:net.isIP()`,
+  redacting only validated IPv6 (`isIP === 6`) to `[ip]`. Language syntax such
+  as C++ `std::cout` and Ruby/Rust `Module::method` is still left intact, and
+  redaction stays idempotent. Covered by expanded compressed/mixed/IPv4-mapped/
+  zone-id and must-not-redact cases in `tests/mmr-history-redaction.test.mjs`.
+
 ### Removed
 
 - `mmr-subagents` / `mmr-core`: remove the hidden `cthulu` advisor easter egg and its R'lyehian rendering entirely. Deletes the `cthulu` Pi tool, its standalone subagent profile/prompt builder, the `cthulu` entries from the `mmr-subagents` tool provider/feature capabilities and the `mmr-core` tool-ownership registry, and the `cthulu` name from the `smart`, `smartGPT`, `rush`, `large`, and `deep` locked-mode tool allowlists. The `## The Sunken Rite` roleplay gate and `## Lingering style` blocks are dropped from every locked-mode prompt, and the `MMR_CTHULU_SUMMON_GATE` / `MMR_CTHULU_RITE_ANCHORS` exports and all `CTHULU_*` / `createCthuluTool` / `registerCthuluTool` / `buildCthuluWorkerSystemPrompt` package-root exports are removed. Prompt-assembly re-entrancy is preserved by replacing the gate-as-sentinel idempotency check with an exact structural match of the previously-injected MMR tail (shared tool guidance + shared coding guidance + mode posture + response style) across all known mode templates, so re-assembling an already-rewritten prompt still strips the prior MMR tail instead of duplicating it (including the cross-mode `deep`→`smart` Task base case). Regenerated `mmr-core-prompts`, `mmr-effective-surface`, and `mmr-subagent-surface` fixtures; removed `tests/mmr-subagents-cthulu.test.mjs` and `tests/mmr-subagents-rlyehian.test.mjs`; updated `tests/mmr-subagents-extension.test.mjs`, `tests/mmr-subagents-provider.test.mjs`, `tests/mmr-subagents-progress-rendering.test.mjs`, and `tests/mmr-tool-execution-mode.test.mjs`.

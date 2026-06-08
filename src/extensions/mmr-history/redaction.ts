@@ -41,6 +41,7 @@
  * is safe to call from packet assembly and from result formatting.
  */
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { userInfo } from "node:os";
 
 /** Marker inserted in place of a Pi session JSONL file path. */
@@ -191,19 +192,37 @@ const EMAIL_PATTERN =
 const IPV4_PATTERN =
   /\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}\b/g;
 
-// IPv6 forms we recognize:
-//   - Full 8-group form `0:0:0:0:0:0:0:1`.
-//   - Loopback `::1` not adjacent to identifier characters.
-//   - Unspecified `::` not adjacent to identifier characters (so C++
-//     `std::cout` / Ruby `Module::method` are left alone).
-//   - Link-local `fe80::…` with at least one hex group after the
-//     double colon.
-const IPV6_PATTERNS: readonly RegExp[] = [
-  /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){7}\b/gi,
-  /(?<![A-Za-z0-9_:])::1\b/g,
-  /(?<![A-Za-z0-9_:])::(?![A-Za-z0-9_:])/g,
-  /\bfe80::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*\b/gi,
-];
+// IPv6 detection: broad candidate extraction validated by
+// `node:net.isIP()`. Curated per-form regexes only recognized the full
+// 8-group form plus `::1`/`::`/`fe80::`, so compressed global-unicast
+// and unique-local addresses leaked. Instead we slice plausible IPv6
+// spans out of free text and let stdlib decide: only candidates that
+// validate as IPv6 (`isIP() === 6`) are redacted. Consequences:
+//   - Compressed/mixed/IPv4-mapped/full forms all collapse to `[ip]`.
+//   - Multi-character language `::` syntax (C++ `std::cout`, Ruby/Rust
+//     `Module::method`, `Foo::Bar::baz`) and non-address colon text
+//     (`12:34`, `de:ad:be:ef`) are either never extracted (the leading
+//     group must be hex, preceded by a non-identifier boundary) or fail
+//     `isIP` validation, so they are left intact.
+//   - A bare single-group `x::y` (e.g. `a::b`, `0::1`) is a valid IPv6
+//     literal and IS redacted: the over-redaction stance favors never
+//     leaking a routable address over preserving a rare single-letter
+//     namespace token, and keeps `0::1` consistent with `::1`.
+// The two branches cover (1) addresses starting with a hex group and
+// (2) addresses starting with the `::` compression. Both allow an
+// optional dotted IPv4 tail (mapped forms) and an optional `%zone`
+// suffix. Hex groups are bounded to {1,4} and group/octet repetition is
+// bounded, so there is no catastrophic-backtracking risk on large input.
+const IPV6_CANDIDATE_PATTERN =
+  /(?<![0-9A-Za-z_.%])(?=[0-9a-f]*:)[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){1,7}(?:\.[0-9]{1,3}){0,3}(?:%[0-9A-Za-z._-]+)?(?![0-9A-Za-z_])|(?<![0-9A-Za-z_.%])::(?:[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){0,7})?(?:\.[0-9]{1,3}){0,3}(?:%[0-9A-Za-z._-]+)?(?![0-9A-Za-z_])/gi;
+
+// `net.isIP` rejects a trailing zone id, so strip it before validating.
+const IPV6_ZONE_SUFFIX = /%[0-9A-Za-z._-]+$/;
+
+function redactIfIPv6(match: string): string {
+  const address = match.replace(IPV6_ZONE_SUFFIX, "");
+  return isIP(address) === 6 ? REDACTION_IP : match;
+}
 
 // `~/.pi/agent/sessions/<encoded-cwd>/<file>.jsonl` — the exact storage
 // path for Pi session JSONL files.
@@ -274,7 +293,9 @@ export function redactText(input: string, opts?: RedactOptions): string {
   //    addresses don't get rewritten as `[abs-path]/...` via the
   //    generic absolute-path rules.
   out = out.replace(EMAIL_PATTERN, REDACTION_EMAIL);
-  for (const pattern of IPV6_PATTERNS) out = out.replace(pattern, REDACTION_IP);
+  // IPv6 before IPv4 so IPv4-mapped forms (`::ffff:1.2.3.4`) collapse to
+  // a single `[ip]` instead of leaving a `::ffff:` prefix.
+  out = out.replace(IPV6_CANDIDATE_PATTERN, redactIfIPv6);
   out = out.replace(IPV4_PATTERN, REDACTION_IP);
 
   // 4. Remaining path family — home dirs before generic absolute paths
