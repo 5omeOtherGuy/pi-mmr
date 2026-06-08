@@ -22,6 +22,7 @@ import { resolveMmrModeSelection } from "./routing.js";
 import {
   MMR_EVENT_STATE_CHANGED,
   clearMmrManagedModelOverride,
+  getMmrManagedModelOverride,
   getMmrModeState,
   getMmrSubagentState,
   isMmrManagedModelUpdateActive,
@@ -521,6 +522,8 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
    *   - active mode is `smart`
    *   - no subagent worker is active
    *   - no MMR-managed model update is in flight and we are not mid-apply
+   *   - no MMR-managed model override is in effect (defer to its owner; the
+   *     `before_provider_request` hook likewise skips policy under an override)
    *   - the active model still matches the locked-mode provider/id
    *   - capping the active model would actually change its window
    */
@@ -529,6 +532,9 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
     if (!state || state.mode !== "smart") return;
     if (getMmrSubagentState()) return;
     if (applyingMmrMode || isMmrManagedModelUpdateActive()) return;
+    // A managed model override means another MMR path owns the active model;
+    // do not re-cap underneath it, even when provider/id still match.
+    if (getMmrManagedModelOverride()) return;
 
     const active = ctx.model;
     if (!active) return;
@@ -542,9 +548,11 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
     try {
       await pi.setModel(capped);
     } finally {
-      // Mirror applyMode's microtask defer so any model_select Pi delivers
-      // synchronously after setModel still sees applyingMmrMode === true and
-      // bypasses the native-control opt-out.
+      // Mirror applyMode's microtask defer so the `model_select` Pi delivers
+      // synchronously during setModel's await still sees applyingMmrMode ===
+      // true and bypasses the native-control opt-out. (Re-capping the same
+      // provider/id leaves the thinking level unchanged, so the fire-and-forget
+      // `thinking_level_select` path is not exercised here.)
       await Promise.resolve();
       applyingMmrMode = false;
     }

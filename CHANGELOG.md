@@ -8,6 +8,11 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Changed
 
+- `mmr-core`: the `smart` context-cap reassertion now defers to an active
+  MMR-managed model override (e.g. a session fallback) instead of re-capping
+  underneath its owner, matching the `before_provider_request` hook which
+  already skips policy under an override. Covered by an added regression test
+  in `tests/mmr-core-context-cap.test.mjs`.
 - `mmr-core`: `smart` mode now runs with a 300k context window instead of the
   registered route's native window (e.g. 1M on Opus 4.8). The active model's
   `contextWindow` is capped via a shallow clone at the `setModel` call site

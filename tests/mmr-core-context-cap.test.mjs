@@ -21,6 +21,7 @@ beforeEach(async () => {
   const runtime = await importRuntime();
   runtime.setMmrModeState(undefined);
   runtime.setMmrSubagentState?.(undefined);
+  runtime.setMmrManagedModelOverride?.(undefined);
 });
 
 describe("withMmrModeContextCap (pure)", () => {
@@ -212,5 +213,36 @@ describe("mmr-core defensive reassertion", () => {
 
     assert.equal(setModelCalls.length, baseline + 1, "must not fight a genuine native model change");
     assert.equal(setModelCalls.at(-1), models[1]);
+  });
+
+  it("does not reassert while an MMR-managed model override is in effect", async () => {
+    const runtime = await importRuntime();
+    const extension = (await importSource("extensions/mmr-core/index.ts")).default;
+    const models = [
+      { provider: "claude-subscription", id: "claude-opus-4-8", contextWindow: 1_000_000, maxTokens: 32_000 },
+    ];
+    const handlers = new Map();
+    const setModelCalls = [];
+    const pi = buildPi(setModelCalls, handlers, undefined);
+    const ctx = buildCtx(models, setModelCalls);
+
+    extension(pi);
+    await handlers.get("session_start")({ type: "session_start", reason: "new" }, ctx);
+    const baseline = setModelCalls.length;
+
+    // Drift back to uncapped, then install a managed override (another MMR path
+    // owns the active model). Reassertion must defer to the override owner even
+    // though provider/id still match the locked-mode state.
+    setModelCalls.push(models[0]);
+    runtime.setMmrManagedModelOverride({
+      kind: "session-fallback",
+      provider: "claude-subscription",
+      model: "claude-opus-4-8",
+      appliedAt: "2026-06-08T00:00:00.000Z",
+    });
+
+    await handlers.get("input")({ type: "input", text: "hi", source: "interactive" }, ctx);
+    assert.equal(setModelCalls.length, baseline + 1, "must not re-cap under a managed override");
+    assert.equal(setModelCalls.at(-1), models[0]);
   });
 });
