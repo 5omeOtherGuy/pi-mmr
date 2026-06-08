@@ -25,11 +25,11 @@ import { selectMmrModelRoute } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildFinderWorkerSystemPrompt as buildFinderWorkerSystemPromptFromPrompts } from "./prompts.js";
+import { readMmrWorkerSessionId } from "./fallback.js";
 import {
-  type MmrWorkerFallbackRegistry,
-  readMmrWorkerSessionId,
-  runMmrWorkerWithModelFallback,
-} from "./fallback.js";
+  resolveEffectiveRunner,
+  runMmrWorkerWithSharedFallback,
+} from "./worker-fallback-run.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import { FINDER_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import { resolveWorkerCwd } from "./worker-host.js";
@@ -40,8 +40,6 @@ import {
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcome,
-  createChildCliMmrSubagentRunner,
-  createMmrSubagentRunnerFromRunWorker,
   type MmrSpawnedSubagentWorkerDetailsBase,
   type MmrWorkerOutcomeStatus,
   type MmrSubagentRunOptions,
@@ -623,16 +621,7 @@ function assembleFinderSystemPrompt(
 }
 
 export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
-  if (deps.runner && deps.runWorker) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      "createFinderTool: both runner and runWorker were provided; the runner takes precedence and runWorker is ignored.",
-    );
-  }
-  const runner: MmrSubagentRunner = deps.runner
-    ?? (deps.runWorker
-      ? createMmrSubagentRunnerFromRunWorker(deps.runWorker)
-      : createChildCliMmrSubagentRunner());
+  const effectiveRunner = resolveEffectiveRunner(deps);
   const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
   return {
     name: FINDER_TOOL_NAME,
@@ -660,13 +649,6 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
       const profile = requireFinderProfile();
       const registry = resolveCtxMmrModelRegistry(ctx);
       const basePreferences = resolveFinderModelPreferences(cwd, deps);
-      const effectiveRunner = deps.runner
-        ? deps.runner
-        : deps.runWorker
-          ? createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps)
-          : deps.runnerDeps
-            ? createChildCliMmrSubagentRunner(deps.runnerDeps)
-            : runner;
 
       // Session-scoped model fallback (issue #9). The closure owns normal
       // model preference resolution; under an override it selects from the override and
@@ -712,14 +694,12 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
         return { result, route: model };
       };
 
-      const outcome = await runMmrWorkerWithModelFallback({
+      const outcome = await runMmrWorkerWithSharedFallback({
         ctx,
         sessionId: readMmrWorkerSessionId(ctx),
-        registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
         toolName: FINDER_TOOL_NAME,
         profileName: FINDER_SUBAGENT_PROFILE,
         candidatePreferences: profile.modelPreferences,
-        classifyOutcome: (result) => classifyMmrWorkerOutcome(result, { partialOutputPolicy: "fail-on-nonzero" }),
         run: runWorkerOnce,
       });
 
