@@ -6,6 +6,25 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ## Unreleased
 
+### Changed
+
+- `mmr-toolbox`: split the 877-line `todo-list-tool.ts` into focused leaf
+  modules with the entry file kept as a thin compatibility shell, mirroring the
+  async-task split pattern. Schema, strict defense-in-depth validation, and
+  model-visible contract text (`TASK_LIST_DESCRIPTION`,
+  `TASK_LIST_PROMPT_GUIDELINES`, `TASK_LIST_PROMPT_SNIPPET`) move to
+  `todo-list-contract.ts`; the shared static line/glyph helpers
+  (`statusGlyph`/`taskStatusGlyph`, `renderTaskLines`, the loader frames) and
+  result-visible text formatting move to `todo-list-rendering.ts`; the pinned
+  TUI widget (`refreshTodoWidget`, `isTuiWidgetSurface`, `TASK_LIST_WIDGET_ID`,
+  spinner animation) moves to `todo-list-widget.ts`. This is movement plus
+  re-exports only: every previously-exported symbol stays importable from
+  `todo-list-tool.js` and the package root, and no model-visible/result-visible
+  text, schema text, widget glyphs, spinner frames, or persisted-entry shape
+  changed. Covered by a new positive import-presence guard
+  (`tests/mmr-toolbox-todo-list-tool-surface.test.mjs`) plus the existing
+  todo-list tool, session-scope, and negative-export tests.
+
 ### Fixed
 
 - `mmr-history`: redact common compressed public IPv6 addresses that previously
