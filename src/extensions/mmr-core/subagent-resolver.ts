@@ -571,7 +571,7 @@ export function resolveMmrSubagentInvocation<TModel extends MmrRegisteredModelLi
         ...(promptBaseMode !== undefined ? { promptBaseMode } : {}),
         workerTools,
         toolResolution: resolution,
-      ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
+        ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
       };
     }
   }
