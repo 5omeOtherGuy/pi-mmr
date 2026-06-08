@@ -1,4 +1,8 @@
-import { enforceContentLengthBudget, truncateUtf8 } from "../http-utils.js";
+import {
+  enforceContentLengthBudget,
+  readTextWithByteLimit,
+  truncateUtf8,
+} from "../http-utils.js";
 import type { SearchResponse } from "./types.js";
 
 /**
@@ -13,21 +17,26 @@ export type SearchResponseBody = Pick<
 >;
 
 /**
- * Read a buffered upstream search response body under the per-call byte
- * budget. Centralizes the contract every JSON/HTML search backend shares:
+ * Read an upstream search response body under the per-call byte budget.
+ * Centralizes the bounded-read contract every JSON/HTML search backend
+ * shares:
  *
  *   1. Fast-fail when an advertised `Content-Length` far exceeds the
- *      per-call cap, so an obviously oversized response never reaches
- *      `response.text()`.
- *   2. Fully buffer the body via `response.text()` so callers can parse
- *      JSON/HTML and run backend-specific checks (block-page detection,
- *      JSON-vs-HTML sniffing) against the untruncated text.
+ *      per-call cap, so an obviously oversized response never reaches the
+ *      body-read stage.
+ *   2. Stream the body via {@link readTextWithByteLimit}, stopping at
+ *      `maxResultBytes` of input and cancelling the underlying stream, so a
+ *      chunked / `Content-Length`-less response from an arbitrary origin
+ *      cannot buffer unbounded bytes into memory before truncation runs.
  *   3. Cap the surfaced `rawText` and report byte counts via
  *      {@link truncateUtf8}, producing the four `SearchResponseBody`
  *      fields exactly the same way for every backend.
  *
- * Callers receive both the untruncated `text` (for parsing/diagnostics)
- * and the truncated `body` to spread into their `SearchResponse`.
+ * Callers receive both the streamed `text` (already bounded by the cap, for
+ * parsing/diagnostics) and the truncated `body` to spread into their
+ * `SearchResponse`. Backend sniffs (block-page detection, JSON-vs-HTML)
+ * operate on the head of the body, which the cap preserves; the cap is far
+ * larger than any realistic sniff prefix or result-page head.
  */
 export async function readSearchResponseBody(
   response: Response,
@@ -35,15 +44,15 @@ export async function readSearchResponseBody(
   label: string,
 ): Promise<{ text: string; body: SearchResponseBody }> {
   enforceContentLengthBudget(response, maxResultBytes, label);
-  const text = await response.text();
-  const truncated = truncateUtf8(text, maxResultBytes);
+  const streamed = await readTextWithByteLimit(response, maxResultBytes, label);
+  const truncated = truncateUtf8(streamed.text, maxResultBytes);
   return {
-    text,
+    text: streamed.text,
     body: {
       rawText: truncated.content,
-      truncated: truncated.truncated,
+      truncated: streamed.truncated || truncated.truncated,
       bytes: truncated.outputBytes,
-      totalBytes: truncated.totalBytes,
+      totalBytes: streamed.totalBytes,
     },
   };
 }

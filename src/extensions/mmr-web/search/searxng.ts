@@ -1,6 +1,6 @@
 import {
   combineSignal,
-  readErrorBody,
+  readErrorPreview,
 } from "../http-utils.js";
 import { readSearchResponseBody } from "./body.js";
 import {
@@ -163,7 +163,7 @@ export async function searxngSearch(
     signal: combineSignal(args.signal, args.timeoutMs),
   });
   if (!response.ok) {
-    const body = await readErrorBody(response);
+    const body = await readErrorPreview(response);
     throw new Error(
       `SearXNG search failed: HTTP ${response.status} ${response.statusText}${body ? ` \u2014 ${body}` : ""}`,
     );

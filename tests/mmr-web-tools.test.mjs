@@ -340,6 +340,10 @@ describe("mmr-web tool definitions", () => {
     const headers = calls[0].init?.headers ?? {};
     assert.equal(headers["X-No-Cache"], undefined);
     assert.equal(result.details.forceRefetch, true);
+    // The model-visible description must not promise cache-busting the reader
+    // cannot provide.
+    const { READ_WEB_PAGE_DESCRIPTION } = await importSource("extensions/mmr-web/tools.ts");
+    assert.doesNotMatch(READ_WEB_PAGE_DESCRIPTION, /cached version|days old/i);
   });
 
   it("read_web_page caps excerpted output at FINAL_CONTENT_CAP_BYTES with a truncation marker", async () => {

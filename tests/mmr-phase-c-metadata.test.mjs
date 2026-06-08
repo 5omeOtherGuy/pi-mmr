@@ -98,10 +98,17 @@ describe("Phase C: mmr-web read_web_page metadata", () => {
     assert.match(text, /excerpt/i);
   });
 
-  it("description tells the model when to use forceRefetch", () => {
+  it("description describes forceRefetch truthfully (accepted for compatibility, reader always fetches live)", () => {
     const text = mod.READ_WEB_PAGE_DESCRIPTION;
     assert.match(text, /forceRefetch/);
-    assert.match(text, /latest|recent|fresh/i);
+    assert.match(text, /compatibility/i);
+    assert.match(text, /live fetch/i);
+    // Must not promise cache-busting: the reader has no cache layer.
+    assert.doesNotMatch(
+      text,
+      /cached version|bypass.*cache|days old/i,
+      "description must not promise cache-busting behavior the reader cannot provide",
+    );
   });
 
   it("description keeps the local/private URL restriction and names the custom reader", () => {

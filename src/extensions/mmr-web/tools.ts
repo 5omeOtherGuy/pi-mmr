@@ -84,7 +84,7 @@ export const READ_WEB_PAGE_PARAMETERS_SCHEMA = Type.Object({
   forceRefetch: Type.Optional(
     Type.Boolean({
       description:
-        "Force a live fetch of the URL (default: use a cached version that may be a few days old). Set to true when freshness is important or when the user asks for the latest or recent contents.",
+        "Accepted for compatibility. The custom reader always performs a live fetch on every call, so this flag does not change fetch behavior; it is recorded in details.forceRefetch.",
     }),
   ),
 });
@@ -103,7 +103,7 @@ export const WEB_SEARCH_PROMPT_GUIDELINES = [
 ] as const;
 export const READ_WEB_PAGE_PROMPT_GUIDELINES = [
   "Use read_web_page to read the contents of a web page at a given URL. When only the url parameter is set, read_web_page returns the contents as Markdown; when an objective is provided, read_web_page returns excerpts relevant to that objective.",
-  "Pass forceRefetch: true to read_web_page when the user asks for the latest or recent contents.",
+  "The read_web_page forceRefetch flag is accepted for compatibility; the custom reader always performs a live fetch, so every read already returns the latest content and the flag does not change fetch behavior.",
   "Use read_web_page only for public http(s) pages; do not use read_web_page for localhost, private IPs, link-local hosts, or non-Internet URLs.",
 ] as const;
 
@@ -113,7 +113,7 @@ export const WEB_SEARCH_DESCRIPTION =
   "Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains) and `recency` (day/week/month/year) restricts by publication window. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. " +
   "Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.";
 export const READ_WEB_PAGE_DESCRIPTION =
-  "Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. If the user asks for the latest or recent contents, pass `forceRefetch: true` to ensure the latest content is fetched. " +
+  "Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. The `forceRefetch` flag is accepted for compatibility but does not change behavior: the custom reader always performs a live fetch, so every read already returns the latest content. " +
   "Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.";
 
 export type WebSearchParams = Static<typeof WEB_SEARCH_PARAMETERS_SCHEMA>;

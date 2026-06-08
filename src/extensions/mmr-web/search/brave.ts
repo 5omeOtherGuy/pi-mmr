@@ -1,6 +1,6 @@
 import {
   combineSignal,
-  readErrorBody,
+  readErrorPreview,
   redactApiKey,
 } from "../http-utils.js";
 import { readSearchResponseBody } from "./body.js";
@@ -123,7 +123,7 @@ export async function braveSearch(
     signal: combineSignal(args.signal, args.timeoutMs),
   });
   if (!response.ok) {
-    const body = redactApiKey(await readErrorBody(response), options.apiKey);
+    const body = redactApiKey(await readErrorPreview(response), options.apiKey);
     throw new Error(
       `Brave search failed: HTTP ${response.status} ${response.statusText}${body ? ` \u2014 ${body}` : ""}`,
     );

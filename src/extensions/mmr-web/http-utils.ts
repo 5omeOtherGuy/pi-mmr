@@ -87,16 +87,6 @@ export function enforceContentLengthBudget(
   }
 }
 
-/** Best-effort error body read for diagnostic preview, capped at 500 bytes. */
-export async function readErrorBody(response: Response): Promise<string> {
-  try {
-    const body = await response.text();
-    return body.slice(0, ERROR_BODY_PREVIEW_BYTES);
-  } catch {
-    return "";
-  }
-}
-
 /**
  * Bounded read of an error response body. Streams at most `maxBytes` and
  * cancels the underlying body, so a malicious origin returning a huge body

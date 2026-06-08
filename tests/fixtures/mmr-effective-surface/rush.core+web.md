@@ -30,7 +30,7 @@ Guidelines:
 - Use web_search when you need up-to-date or precise documentation. Use read_web_page for fetching full content from a specific URL.
 - Use web_search only for public, non-sensitive research; do not include secrets, API keys, or private data in web_search.objective or web_search.search_queries.
 - Use read_web_page to read the contents of a web page at a given URL. When only the url parameter is set, read_web_page returns the contents as Markdown; when an objective is provided, read_web_page returns excerpts relevant to that objective.
-- Pass forceRefetch: true to read_web_page when the user asks for the latest or recent contents.
+- The read_web_page forceRefetch flag is accepted for compatibility; the custom reader always performs a live fetch, so every read already returns the latest content and the flag does not change fetch behavior.
 - Use read_web_page only for public http(s) pages; do not use read_web_page for localhost, private IPs, link-local hosts, or non-Internet URLs.
 - Be concise in your responses
 - Show file paths clearly when working with files
@@ -321,18 +321,18 @@ Prompt snippet: Fetch a public http(s) page through mmr-web's custom reader and 
 
 Prompt guidelines:
 - Use read_web_page to read the contents of a web page at a given URL. When only the url parameter is set, read_web_page returns the contents as Markdown; when an objective is provided, read_web_page returns excerpts relevant to that objective.
-- Pass forceRefetch: true to read_web_page when the user asks for the latest or recent contents.
+- The read_web_page forceRefetch flag is accepted for compatibility; the custom reader always performs a live fetch, so every read already returns the latest content and the flag does not change fetch behavior.
 - Use read_web_page only for public http(s) pages; do not use read_web_page for localhost, private IPs, link-local hosts, or non-Internet URLs.
 
 Description:
-Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. If the user asks for the latest or recent contents, pass `forceRefetch: true` to ensure the latest content is fetched. Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.
+Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. The `forceRefetch` flag is accepted for compatibility but does not change behavior: the custom reader always performs a live fetch, so every read already returns the latest content. Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.
 
 Parameters:
 ```json
 {
   "properties": {
     "forceRefetch": {
-      "description": "Force a live fetch of the URL (default: use a cached version that may be a few days old). Set to true when freshness is important or when the user asks for the latest or recent contents.",
+      "description": "Accepted for compatibility. The custom reader always performs a live fetch on every call, so this flag does not change fetch behavior; it is recorded in details.forceRefetch.",
       "type": "boolean"
     },
     "objective": {

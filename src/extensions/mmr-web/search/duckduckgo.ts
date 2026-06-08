@@ -1,6 +1,6 @@
 import {
   combineSignal,
-  readErrorBody,
+  readErrorPreview,
 } from "../http-utils.js";
 import { readSearchResponseBody } from "./body.js";
 import { applyDomainFilter } from "./filters.js";
@@ -296,7 +296,7 @@ export async function duckduckgoSearch(
     signal: combineSignal(args.signal, args.timeoutMs),
   });
   if (!response.ok) {
-    const preview = await readErrorBody(response);
+    const preview = await readErrorPreview(response);
     // Treat 403/429 as a block signal so subsequent calls back off.
     if (response.status === 403 || response.status === 429) {
       state.blockedUntil = ts + BLOCK_BACKOFF_MS;

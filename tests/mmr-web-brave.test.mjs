@@ -151,6 +151,64 @@ describe("mmr-web Brave client - search", () => {
     );
     assert.equal(response.bodyUsed, false);
   });
+
+  it("caps the streamed search body at maxResultBytes without buffering more (chunked / no Content-Length)", async () => {
+    const { braveSearch } = await importSource("extensions/mmr-web/brave.ts");
+    const CAP = 1000;
+    let chunksEmitted = 0;
+    const stream = new ReadableStream({
+      async pull(controller) {
+        chunksEmitted += 1;
+        // ~1 KiB of JSON-ish bytes per pull; an unbounded reader would emit
+        // far more than CAP bytes in total.
+        controller.enqueue(new TextEncoder().encode('{"web":{"results":[' + "x".repeat(1024)));
+        if (chunksEmitted > 200) controller.close();
+      },
+    });
+    const fetchImpl = async () => new Response(stream, {
+      status: 200,
+      // No content-length: forces the streaming code path.
+      headers: { "content-type": "application/json" },
+    });
+    const result = await braveSearch(
+      { query: "x", maxResults: 5, maxResultBytes: CAP },
+      { apiKey: "k", fetchImpl },
+    );
+    assert.equal(result.truncated, true, "streamed search body must be marked truncated");
+    // totalBytes is the raw input bytes actually consumed; must not exceed CAP.
+    assert.ok(
+      result.totalBytes <= CAP,
+      `read body bytes ${result.totalBytes} must not exceed cap ${CAP}`,
+    );
+    // Truncated JSON cannot parse, so results is empty without throwing.
+    assert.deepEqual(result.results, []);
+    // Only a handful of pulls should have happened, not hundreds.
+    assert.ok(chunksEmitted <= 5, `expected stream to stop early, observed ${chunksEmitted} chunks`);
+  });
+
+  it("bounds the diagnostic preview from non-OK search error responses (no unbounded text())", async () => {
+    const { braveSearch } = await importSource("extensions/mmr-web/brave.ts");
+    let pullCount = 0;
+    const stream = new ReadableStream({
+      async pull(controller) {
+        pullCount += 1;
+        // Each pull emits 4 KiB; an unbounded reader would keep going.
+        controller.enqueue(new TextEncoder().encode("x".repeat(4096)));
+        if (pullCount > 500) controller.close();
+      },
+    });
+    const fetchImpl = async () => new Response(stream, {
+      status: 500,
+      statusText: "Server Error",
+      headers: { "content-type": "text/html" },
+    });
+    await assert.rejects(
+      () => braveSearch({ query: "x", maxResults: 5, maxResultBytes: 10000 }, { apiKey: "k", fetchImpl }),
+      /HTTP 500/,
+    );
+    // Preview should have read only a few KiB worth of pulls, not hundreds.
+    assert.ok(pullCount <= 3, `error preview must be bounded, observed ${pullCount} pulls`);
+  });
 });
 
 describe("mmr-web custom reader", () => {
