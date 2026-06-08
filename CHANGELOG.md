@@ -6,8 +6,37 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ## Unreleased
 
+### Added
+
+- `mmr-subagents`: `start_task` gains a `fleet` form for declaring a whole
+  fan-out in one call. `start_task({ fleet: { groups: [{ group_label?, members:
+  [...] }] } })` creates every group and member up front in a new `ready` state,
+  renders all group cards before any worker launches (section header `● ready ·
+  0/N`, rows shown with a `-` glyph and `0s` elapsed), then launches them
+  together on a deferred tick so each row animates in place through
+  `ready`→`running`→terminal. The whole fleet is rejected up front if it would
+  exceed the per-session concurrency cap, and an invalid member fails the fleet
+  before any task or group is created (no partial fleet). The registry adds a
+  real `ready` task status plus a `launchTask` lifecycle and a `getRunningCapacity`
+  reader; the inline card renders the declared fleet decoupled from execution and
+  reconciles to the live board each frame, falling back to the frozen declaration
+  on replayed transcripts. Covered by `tests/mmr-subagents-fleet-registry.test.mjs`,
+  `tests/mmr-subagents-fleet-parse.test.mjs`, `tests/mmr-subagents-fleet-tools.test.mjs`,
+  `tests/mmr-subagents-fleet-render.test.mjs`, and ready-state view cases in
+  `tests/mmr-subagents-fleet-ready-view.test.mjs` and
+  `tests/mmr-subagents-staged-reveal.test.mjs`.
+
 ### Changed
 
+- `mmr-subagents`: the model-visible group orchestration guidance now routes
+  same-step fan-out to the `start_task.fleet` form instead of the contradictory
+  "issue the opener and every sibling in a single step" / "reuse the returned
+  group_id" wording. The fan-out guidance also explicitly tells the model to keep
+  setup silent (no "minting/adding siblings/opening the next group" narration
+  between calls) and to not re-emit the settled card, its rows, or its counts as
+  a fenced block or prose summary — the live card and the settled card are the
+  status surface. `group_id` is reframed as the legacy incremental path that
+  defers to `fleet`. Covered by `tests/mmr-subagents-fleet-parse.test.mjs`.
 - `mmr-core`: the active-model context-window cap now applies to every locked
   mode, not just `smart`. `withMmrModeContextCap` derives each mode's cap from
   its own request policy (`smart` 300k, `smartGPT`/`rush`/`deep` 256k, `large`

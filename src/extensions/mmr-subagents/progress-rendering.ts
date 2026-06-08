@@ -56,6 +56,7 @@ import type {
   MmrAsyncTaskBoard,
   MmrAsyncTaskGroupSnapshot,
 } from "./async-task-registry.js";
+import type { AsyncTaskFleetDetails, AsyncTaskFleetRow } from "./async-task-tool-schemas.js";
 
 /**
  * Live-state resolvers for the inline background card. Supplied by the async
@@ -122,6 +123,83 @@ function rowFromDetails(details: BackgroundTaskDetails): WidgetRow {
 
 function rowsAnyRunning(rows: readonly WidgetRow[]): boolean {
   return rows.some((r) => r.status === "running" || r.status === "cancelling");
+}
+
+/** A declared fleet row frozen at `ready` (replay / before the live board has it). */
+function fleetRowFromDetails(row: AsyncTaskFleetRow, groupId: string): WidgetRow {
+  return {
+    taskId: row.taskId,
+    status: "ready",
+    freshness: "healthy",
+    agent: row.agent,
+    description: row.description,
+    runtimeMs: 0,
+    createdAtMs: 0,
+    boardGeneratedAtMs: 0,
+    deferredLaunch: true,
+    groupId,
+    ...(row.resolvedModel !== undefined ? { resolvedModel: row.resolvedModel } : {}),
+    ...(row.capabilityProfile !== undefined ? { capabilityProfile: row.capabilityProfile } : {}),
+  };
+}
+
+/**
+ * The fleet card: every declared group rendered up front as its own section,
+ * decoupled from execution. Each member row is drawn in DECLARED order (by
+ * `group.taskIds`, never the running-first reorder) so a row animates in place
+ * through ready→running→terminal instead of jumping. Live rows come from the
+ * board; a member the live board does not (yet) have falls back to its frozen
+ * `ready` declaration, so a freshly-declared fleet — and a replayed transcript
+ * with no live registry — both show the full ready card. While every row is
+ * still `ready`, a muted setup line states the fleet is launching.
+ */
+function renderBackgroundFleetCard(
+  fleet: AsyncTaskFleetDetails,
+  sessionKey: string | undefined,
+  theme: SubagentTheme,
+  extras: BackgroundCardExtras | undefined,
+): Component {
+  const build = (): readonly string[] => {
+    const board = sessionKey ? extras?.resolveBoard?.(sessionKey) : undefined;
+    const sections: { section: WidgetSection; rows: WidgetRow[] }[] = [];
+    let anyRunning = false;
+    let allReady = true;
+    for (const group of fleet.groups) {
+      const rows = group.rows.map((row) => {
+        const live = board && row.taskId ? singleRowFromBoard(board, row.taskId) : undefined;
+        return live ?? fleetRowFromDetails(row, group.groupId);
+      });
+      const snapshot = sessionKey ? extras?.resolveGroup?.(sessionKey, group.groupId) : undefined;
+      const synth = synthesizeGroup(rows);
+      const label = snapshot?.label ?? group.label ?? synth.label;
+      const resolved = {
+        status: snapshot?.status ?? synth.status,
+        counts: snapshot?.counts ?? synth.counts,
+        ...(label !== undefined ? { label } : {}),
+      };
+      if (rowsAnyRunning(rows) || resolved.status === "running") anyRunning = true;
+      if (!rows.every((r) => r.status === "ready")) allReady = false;
+      sections.push({ section: { groupId: group.groupId, group: resolved, rows }, rows });
+    }
+    const frame = anyRunning ? currentLoaderFrame() : undefined;
+    const lines: string[] = [];
+    for (const { section, rows } of sections) {
+      lines.push(renderSectionHeader(section, theme));
+      for (const row of rows) lines.push(renderRowLine(row, theme, frame, { indent: "  ", metadata: "full" }));
+    }
+    if (allReady) {
+      const n = fleet.totalTasks;
+      const m = fleet.groups.length;
+      lines.push(
+        theme.fg(
+          "muted",
+          `All ${n} agent${n === 1 ? "" : "s"} set up across ${m} group${m === 1 ? "" : "s"}. Launching them now.`,
+        ),
+      );
+    }
+    return lines;
+  };
+  return new BackgroundCardComponent(build);
 }
 
 /**
@@ -279,6 +357,18 @@ export function renderMmrBackgroundTaskResult(
 ): Component {
   const details = result.details as BackgroundTaskDetails | undefined;
   const output = textContent(result).trim();
+
+  // 0. Fleet declaration (start_task.fleet) → all group cards rendered up front,
+  //    decoupled from execution; rows animate ready→running→terminal in place.
+  if (details?.fleet !== undefined) {
+    clearRenderedCall(context);
+    return renderBackgroundFleetCard(
+      details.fleet as AsyncTaskFleetDetails,
+      details.sessionKey,
+      theme,
+      extras,
+    );
+  }
 
   // 1. No-id board (task_poll list mode) → grouped board view.
   if (details?.board !== undefined) {

@@ -112,6 +112,47 @@ describe("revealedRows", () => {
     assert.deepEqual(ids(revealed), ["done"], "the settled earliest-spawn row stays in the revealed prefix");
   });
 
+  it("reveals ALL ready rows immediately (declared up front, before any launch)", async () => {
+    const { revealedRows } = await importSource(VIEW_MODULE);
+    // A freshly declared fleet: every row is `ready`, nothing is running yet.
+    const ready = [
+      row(1000, { taskId: "a", status: "ready" }),
+      row(1000, { taskId: "b", status: "ready" }),
+      row(1000, { taskId: "c", status: "ready" }),
+    ];
+    // Even at the instant of declaration (no settle elapsed), all show.
+    assert.deepEqual(ids(revealedRows(ready, 1000)), ["a", "b", "c"]);
+  });
+
+  it("keeps declared rows shown across the ready->running flip (animate in place)", async () => {
+    const { revealedRows } = await importSource(VIEW_MODULE);
+    // Fleet rows are marked deferredLaunch: declared up front, then launched
+    // together. The instant they flip to running they must NOT re-stage and
+    // disappear — they animate in place at their fixed positions.
+    const now = 1000; // == createdAtMs, i.e. launched the same tick as declared
+    const running = [
+      row(now, { taskId: "a", status: "running", deferredLaunch: true }),
+      row(now, { taskId: "b", status: "running", deferredLaunch: true }),
+      row(now, { taskId: "c", status: "running", deferredLaunch: true }),
+    ];
+    assert.deepEqual(ids(revealedRows(running, now)), ["a", "b", "c"]);
+  });
+
+  it("shows ready rows while still staging a mixed legacy running sibling", async () => {
+    const { revealedRows, SPAWN_SETTLE_MS } = await importSource(VIEW_MODULE);
+    // A declared ready row coexists with a freshly-spawned legacy running row
+    // (no deferredLaunch). The ready row always shows; the legacy row stages.
+    const rows = [
+      row(2000, { taskId: "ready", status: "ready" }),
+      row(2000, { taskId: "legacy", status: "running" }),
+    ];
+    const before = revealedRows(rows, 2000); // settle not elapsed for legacy
+    assert.ok(before.some((r) => r.taskId === "ready"), "ready row shows immediately");
+    assert.ok(!before.some((r) => r.taskId === "legacy"), "legacy running row still staging");
+    const after = revealedRows(rows, 2000 + SPAWN_SETTLE_MS);
+    assert.deepEqual(ids(after).sort(), ["legacy", "ready"], "legacy reveals once its settle elapses");
+  });
+
   it("reveals in lockstep for two groups whose members share the same spawn times", async () => {
     const { revealedRows, SPAWN_SETTLE_MS, REVEAL_INTERVAL_MS } = await importSource(VIEW_MODULE);
     // A one-step fan-out lands sibling rows at near-identical createdAtMs; model

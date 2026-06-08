@@ -338,15 +338,118 @@ export function projectSnapshot(
     : projectRunning(tool, snapshot, opts);
 }
 
-export interface ParsedStartParams {
+/** A single normalized worker member, shared by the single-task and fleet paths. */
+export interface ParsedMember {
   agent: AsyncTaskAgentName;
   params: unknown;
   description: string;
   promptSummary: string;
-  wantsNotify: boolean;
   capabilityProfile?: string;
+}
+
+export interface ParsedStartParams extends ParsedMember {
+  wantsNotify: boolean;
   groupId?: string;
   groupLabel?: string;
+}
+
+/** One declared group in a fleet plan: an optional label plus its members. */
+export interface ParsedFleetGroup {
+  label?: string;
+  members: ParsedMember[];
+}
+
+export interface ParsedFleetPlan {
+  groups: ParsedFleetGroup[];
+  wantsNotify: boolean;
+  totalMembers: number;
+}
+
+/**
+ * Normalize one worker from its own object: resolve the agent, fold the
+ * `prompt`/`description` shortcuts into `params`, and apply the Task-only
+ * capabilityProfile rule. Shared by {@link parseStartParams} (single task) and
+ * {@link parseFleet} (each fleet member) so both paths normalize identically.
+ */
+function normalizeMember(raw: Record<string, unknown>): ParsedMember | { error: string } {
+  const agent = normalizeAgent(raw.agent);
+  if (!agent) {
+    return { error: "agent must be one of: Task, finder, librarian. Oracle is always blocking and cannot run in the background." };
+  }
+  let params: unknown = raw.params;
+  if (params === undefined) {
+    if (agent === "Task") {
+      params = { prompt: raw.prompt, description: raw.description };
+    } else if (typeof raw.prompt === "string") {
+      params = { query: raw.prompt };
+    } else {
+      return { error: `params is required when agent is ${agent}.` };
+    }
+  } else if (agent === "Task" && isRecord(params) && params.description === undefined && raw.description !== undefined) {
+    params = { ...params, description: raw.description };
+  }
+  if (!isRecord(params)) {
+    return { error: "params must be an object." };
+  }
+  const capabilityProfile = typeof raw.capabilityProfile === "string" ? raw.capabilityProfile : undefined;
+  if (capabilityProfile !== undefined) {
+    if (agent !== "Task") return { error: "capabilityProfile is only supported for the Task agent." };
+    params = { ...params, capabilityProfile };
+  }
+  return {
+    agent,
+    params,
+    description: shortDescription(agent, params, raw.description),
+    promptSummary: summarizeInput(agent, params),
+    ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
+  };
+}
+
+/** Single-task fields that may not be combined with the fleet form. */
+const FLEET_INCOMPATIBLE_KEYS = ["agent", "params", "prompt", "description", "capabilityProfile", "group_id", "group_label"] as const;
+
+/**
+ * Parse the `start_task.fleet` form into a normalized plan: a list of groups,
+ * each with its label and normalized members. Structural shape (array bounds,
+ * unknown keys) is enforced by the schema in execute(); this performs the
+ * semantic rules the schema cannot express — the fleet/single-task exclusivity
+ * and per-member agent normalization.
+ */
+export function parseFleet(rawParams: unknown): ParsedFleetPlan | { error: string } {
+  if (!isRecord(rawParams) || !isRecord(rawParams.fleet)) {
+    return { error: "start_task.fleet must be an object with a groups array." };
+  }
+  for (const key of FLEET_INCOMPATIBLE_KEYS) {
+    if (rawParams[key] !== undefined) {
+      return { error: `start_task.fleet cannot be combined with the single-task field "${key}".` };
+    }
+  }
+  const groupsRaw = rawParams.fleet.groups;
+  if (!Array.isArray(groupsRaw) || groupsRaw.length === 0) {
+    return { error: "start_task.fleet.groups must be a non-empty array." };
+  }
+  const groups: ParsedFleetGroup[] = [];
+  let totalMembers = 0;
+  for (let g = 0; g < groupsRaw.length; g += 1) {
+    const groupRaw = groupsRaw[g];
+    if (!isRecord(groupRaw)) return { error: `start_task.fleet.groups[${g}] must be an object.` };
+    const membersRaw = groupRaw.members;
+    if (!Array.isArray(membersRaw) || membersRaw.length === 0) {
+      return { error: `start_task.fleet.groups[${g}].members must be a non-empty array.` };
+    }
+    const members: ParsedMember[] = [];
+    for (let m = 0; m < membersRaw.length; m += 1) {
+      const memberRaw = membersRaw[m];
+      if (!isRecord(memberRaw)) return { error: `start_task.fleet.groups[${g}].members[${m}] must be an object.` };
+      const member = normalizeMember(memberRaw);
+      if ("error" in member) return { error: `start_task.fleet.groups[${g}].members[${m}]: ${member.error}` };
+      members.push(member);
+      totalMembers += 1;
+    }
+    const label = typeof groupRaw.group_label === "string" ? groupRaw.group_label : undefined;
+    groups.push({ ...(label !== undefined ? { label } : {}), members });
+  }
+  return { groups, totalMembers, wantsNotify: rawParams.notify !== false };
 }
 
 export function parseStartParams(rawParams: unknown): ParsedStartParams | { error: string } {
@@ -357,47 +460,18 @@ export function parseStartParams(rawParams: unknown): ParsedStartParams | { erro
   // group_id pattern, notify boolean) is enforced by checkMmrToolParams in
   // execute(); this parser only performs agent-specific normalization and the
   // semantic rules the schema cannot express.
-  const agent = normalizeAgent(rawParams.agent);
-  if (!agent) {
-    return { error: "start_task.agent must be one of: Task, finder, librarian. Oracle is always blocking and cannot run in the background." };
-  }
-  let params: unknown = rawParams.params;
-  if (params === undefined) {
-    if (agent === "Task") {
-      params = { prompt: rawParams.prompt, description: rawParams.description };
-    } else if (typeof rawParams.prompt === "string") {
-      params = { query: rawParams.prompt };
-    } else {
-      return { error: `start_task.params is required when agent is ${agent}.` };
-    }
-  } else if (agent === "Task" && isRecord(params) && params.description === undefined && rawParams.description !== undefined) {
-    params = { ...params, description: rawParams.description };
-  }
-  if (!isRecord(params)) {
-    return { error: "start_task.params must be an object." };
-  }
-  // Schema already constrained capabilityProfile to the read-only|read-write
-  // enum; only the Task-agent restriction is a semantic rule the schema cannot
-  // express.
-  const capabilityProfile = typeof rawParams.capabilityProfile === "string" ? rawParams.capabilityProfile : undefined;
-  if (capabilityProfile !== undefined) {
-    if (agent !== "Task") return { error: "start_task.capabilityProfile is only supported for the Task agent." };
-    params = { ...params, capabilityProfile };
-  }
+  const member = normalizeMember(rawParams);
+  if ("error" in member) return { error: `start_task.${member.error}` };
   // Schema constrained group_id to 'new' | group_<hex>; normalize to a string.
   const groupId = typeof rawParams.group_id === "string" ? rawParams.group_id : undefined;
   // Schema constrained group_label to a string; honored only when opening a
   // group (group_id:'new'), mirroring how capabilityProfile is Task-only.
   const groupLabel = typeof rawParams.group_label === "string" ? rawParams.group_label : undefined;
   return {
-    agent,
-    params,
-    description: shortDescription(agent, params, rawParams.description),
-    promptSummary: summarizeInput(agent, params),
+    ...member,
     // Schema guarantees notify is boolean when present; default is notify-on,
     // opt out only on an explicit false.
     wantsNotify: rawParams.notify !== false,
-    ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
     ...(groupId !== undefined ? { groupId } : {}),
     ...(groupLabel !== undefined ? { groupLabel } : {}),
   };

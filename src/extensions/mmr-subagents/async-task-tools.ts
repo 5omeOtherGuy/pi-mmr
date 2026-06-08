@@ -39,6 +39,7 @@ import {
   type MmrAsyncTaskGroupSnapshot,
   type MmrAsyncTaskRegistry,
   type MmrAsyncTaskInternalSnapshot,
+  type MmrAsyncTaskRun,
 } from "./async-task-registry.js";
 import { refreshBackgroundTaskWidget } from "./background-task-widget.js";
 import {
@@ -58,6 +59,8 @@ import {
   TASK_WAIT_TOOL_NAME,
   validateAsyncToolParams,
   type AsyncTaskAgentName,
+  type AsyncTaskFleetGroupDetails,
+  type AsyncTaskFleetRow,
   type AsyncTaskToolDetails,
 } from "./async-task-tool-schemas.js";
 import {
@@ -73,8 +76,10 @@ import {
   invalidAsyncControlResult,
   nonNormalOutcomeText,
   notFoundResult,
+  parseFleet,
   parseStartParams,
   parseTaskOrGroupControl,
+  type ParsedMember,
   projectSnapshot,
   renderBoard,
   summarizeTrail,
@@ -111,6 +116,13 @@ export interface AsyncTaskToolDeps extends TaskToolDeps {
    * the `MMR_SUBAGENTS_ASYNC_PUSH` environment gate in `index.ts`.
    */
   enableCompletionPush?: boolean;
+  /**
+   * Schedules the deferred launch of a fleet's `ready` members. Default is a
+   * ref'd `setTimeout(fn, 0)`, so the declaration result (and the ready card)
+   * is committed before the workers start, while still guaranteeing the launch
+   * runs even in a short-lived process. Injectable for deterministic tests.
+   */
+  launchScheduler?: (fn: () => void) => void;
 }
 
 /**
@@ -255,9 +267,215 @@ function workerToolsForAgent(agent: AsyncTaskAgentName, taskTools: readonly stri
   return LIBRARIAN_WORKER_TOOLS;
 }
 
+interface FleetMemberBuild {
+  startArgs: {
+    agent: AsyncTaskAgentName;
+    description: string;
+    prompt: string;
+    cwd: string;
+    workerTools: readonly string[];
+    resolvedModel?: string;
+    contextWindow?: number;
+    capabilityProfile?: string;
+    run: MmrAsyncTaskRun;
+  };
+  row: AsyncTaskFleetRow;
+}
+
 export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
   const cardExtras = backgroundCardExtras(registry);
+
+  /**
+   * Prepare one fleet member (validate + resolve its run thunk) WITHOUT any
+   * registry side effect, so an invalid member fails the whole fleet before a
+   * single task or group is created. Mirrors the single-task pre-spawn contract.
+   */
+  const buildMember = (
+    member: ParsedMember,
+    memberToolCallId: string,
+    ctx: ExtensionContext,
+  ): FleetMemberBuild | { error: string } => {
+    const m = member;
+    if (m.agent === "Task") {
+      const taskPrep = prepareTaskRun(m.params, ctx, { ...baseToolDeps(deps), ...(deps.taskDeps ?? {}) } as TaskToolDeps);
+      if (!taskPrep.ok) return { error: taskPrep.result.details?.errorMessage ?? "invalid Task parameters" };
+      const { params, cwd, detailsContext, runnerOptionsBase, runner } = taskPrep.prepared;
+      return {
+        startArgs: {
+          agent: "Task",
+          description: params.description,
+          prompt: params.prompt,
+          cwd,
+          workerTools: detailsContext.workerTools,
+          ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
+          ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
+          ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
+          run: async ({ signal, onProgress }) => {
+            try {
+              return await runner.run({ ...runnerOptionsBase, signal, onProgress });
+            } catch (err) {
+              return buildSpawnErrorWorkerResult(err, { prompt: params.prompt, cwd });
+            }
+          },
+        },
+        row: {
+          taskId: "",
+          agent: "Task",
+          description: params.description,
+          ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
+          ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
+        },
+      };
+    }
+    const agent = m.agent;
+    const schema = agent === "finder" ? FINDER_PARAMETERS_SCHEMA : LIBRARIAN_PARAMETERS_SCHEMA;
+    const toolName = agent === "finder" ? FINDER_TOOL_NAME : LIBRARIAN_TOOL_NAME;
+    const v = validateAsyncToolParams(toolName, schema, m.params);
+    if (!v.ok) return { error: v.message };
+    const tool = createSelectedTool(agent, deps);
+    const cwd = resolveWorkerCwd(ctx);
+    return {
+      startArgs: {
+        agent,
+        description: m.description,
+        prompt: m.promptSummary,
+        cwd,
+        workerTools: workerToolsForAgent(agent),
+        run: async ({ signal, onProgress }) => {
+          const result = await tool.execute(`${memberToolCallId}:${agent}`, m.params, signal, (update) => onProgress(update), ctx);
+          const status = inferToolRunStatus(result, signal);
+          return {
+            toolResult: result,
+            status,
+            terminalOutcome: status === "succeeded" ? "success" : status === "failed" ? "failed" : undefined,
+            ...(status === "failed" ? { errorMessage: inferToolErrorMessage(result) } : {}),
+          };
+        },
+      },
+      row: { taskId: "", agent, description: m.description },
+    };
+  };
+
+  /**
+   * Execute the `start_task.fleet` form: validate + prepare every member,
+   * reject the whole fan-out if it would exceed the cap, create all members
+   * `ready` (rendered up front), then schedule a single deferred launch that
+   * flips them to `running` together.
+   */
+  const executeFleet = async (
+    toolCallId: string,
+    rawParams: unknown,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<AsyncTaskToolDetails>> => {
+    const sessionKey = resolveSessionKey(ctx, deps);
+    const onSettle = () => refreshAsyncTaskWidget(ctx, registry, sessionKey);
+    const validated = validateAsyncToolParams(START_TASK_TOOL_NAME, START_TASK_PARAMETERS, rawParams);
+    if (!validated.ok) return validationResult(validated.message);
+    const plan = parseFleet(rawParams);
+    if ("error" in plan) return validationResult(plan.error);
+
+    // Atomic capacity gate: reject the whole fleet up front so it never creates
+    // a partial set that trips the per-task cap mid-way.
+    const { runningCount, cap } = registry.getRunningCapacity(sessionKey);
+    if (runningCount + plan.totalMembers > cap) {
+      const message =
+        `start_task: cannot start a fleet of ${plan.totalMembers}; ${runningCount} background task(s) already running ` +
+        `(cap ${cap}). Wait for some to finish (task_wait) or stop some (task_cancel) first.`;
+      return {
+        content: [{ type: "text", text: message }],
+        details: { worker: "mmr-subagents.async-task", tool: START_TASK_TOOL_NAME, errorMessage: message },
+      };
+    }
+
+    // Prepare every member before any side effect; an invalid member fails the
+    // whole fleet with no records/groups created.
+    const prepared: FleetMemberBuild[][] = [];
+    for (let gi = 0; gi < plan.groups.length; gi += 1) {
+      const built: FleetMemberBuild[] = [];
+      for (let mi = 0; mi < plan.groups[gi].members.length; mi += 1) {
+        const result = buildMember(plan.groups[gi].members[mi], `${toolCallId}#g${gi}m${mi}`, ctx);
+        if ("error" in result) return validationResult(`fleet.groups[${gi}].members[${mi}]: ${result.error}`);
+        built.push(result);
+      }
+      prepared.push(built);
+    }
+
+    const wantsAutomaticDelivery = plan.wantsNotify && deps.enableCompletionPush !== false;
+    const fleetGroups: AsyncTaskFleetGroupDetails[] = [];
+    const allTaskIds: string[] = [];
+    for (let gi = 0; gi < plan.groups.length; gi += 1) {
+      const group = plan.groups[gi];
+      const groupNotify = wantsAutomaticDelivery ? buildGroupCompletionNotifier(deps.pi) : undefined;
+      const snap = registry.openGroup({
+        sessionKey,
+        deliveryOptIn: wantsAutomaticDelivery,
+        ...(group.label !== undefined ? { label: group.label } : {}),
+        ...(groupNotify !== undefined ? { notify: groupNotify } : {}),
+        onSettle,
+      });
+      const rows: AsyncTaskFleetRow[] = [];
+      const taskIds: string[] = [];
+      for (let mi = 0; mi < group.members.length; mi += 1) {
+        const build = prepared[gi][mi];
+        const started = registry.startTask({
+          sessionKey,
+          originToolCallId: `${toolCallId}#g${gi}m${mi}`,
+          launchMode: "manual",
+          groupId: snap.groupId,
+          deliveryOptIn: false,
+          onSettle,
+          ...build.startArgs,
+        });
+        if (!started.ok) {
+          // Unreachable after the capacity gate, but never leave a partial fleet:
+          // cancel what we created and drop the empty groups.
+          for (const id of allTaskIds) await registry.cancelTask({ sessionKey, taskId: id });
+          for (const created of fleetGroups) registry.dropEmptyGroup(sessionKey, created.groupId);
+          registry.dropEmptyGroup(sessionKey, snap.groupId);
+          const message =
+            `start_task: cannot start a fleet of ${plan.totalMembers}; ${started.runningCount} background task(s) already running (cap ${started.cap}).`;
+          return {
+            content: [{ type: "text", text: message }],
+            details: { worker: "mmr-subagents.async-task", tool: START_TASK_TOOL_NAME, errorMessage: message },
+          };
+        }
+        const taskId = started.snapshot.taskId;
+        taskIds.push(taskId);
+        allTaskIds.push(taskId);
+        rows.push({ ...build.row, taskId });
+      }
+      fleetGroups.push({ groupId: snap.groupId, ...(group.label !== undefined ? { label: group.label } : {}), taskIds, rows });
+    }
+
+    // The ready fleet is fully declared; render it before any worker starts.
+    refreshAsyncTaskWidget(ctx, registry, sessionKey);
+
+    // Ref'd on purpose: a ready fleet must launch even in a short-lived/headless
+    // run that would otherwise exit before an unref'd tick fired, which would
+    // strand every member in `ready` forever. The hold is a single 0ms tick.
+    const schedule = deps.launchScheduler ?? ((fn: () => void) => {
+      setTimeout(fn, 0);
+    });
+    schedule(() => {
+      for (const taskId of allTaskIds) registry.launchTask(sessionKey, taskId);
+      refreshAsyncTaskWidget(ctx, registry, sessionKey);
+    });
+
+    const message =
+      `start_task: set up ${plan.totalMembers} background worker(s) across ${plan.groups.length} group(s); launching now. ` +
+      `The live card is the status; poll only the child outputs you need after completion.`;
+    return {
+      content: [{ type: "text", text: message }],
+      details: {
+        worker: "mmr-subagents.async-task",
+        tool: START_TASK_TOOL_NAME,
+        sessionKey,
+        fleet: { version: 1, totalTasks: plan.totalMembers, groups: fleetGroups },
+      },
+    };
+  };
+
   return {
     name: START_TASK_TOOL_NAME,
     label: START_TASK_TOOL_NAME,
@@ -273,6 +491,12 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       return renderMmrBackgroundTaskResult(START_TASK_TOOL_NAME, result, options, theme, context, cardExtras);
     },
     async execute(toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
+      // Fleet form: declare every group/member up front (ready) and render all
+      // group cards before any worker starts, then launch them together on a
+      // deferred tick. Branch before the single-task parse, which has no agent.
+      if (typeof rawParams === "object" && rawParams !== null && "fleet" in rawParams) {
+        return executeFleet(toolCallId, rawParams, ctx);
+      }
       // Semantic checks first so agent/Task-only guidance the schema cannot
       // express wins (e.g. "Oracle is always blocking"); the shared schema then
       // enforces structure (unknown keys, notify boolean, capabilityProfile

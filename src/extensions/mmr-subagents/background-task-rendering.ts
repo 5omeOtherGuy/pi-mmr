@@ -84,6 +84,7 @@ export function backgroundTaskDisplayText(
 }
 
 const BACKGROUND_STATUS_VALUES: ReadonlySet<string> = new Set([
+  "ready",
   "running",
   "cancelling",
   "succeeded",

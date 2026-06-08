@@ -657,7 +657,7 @@ describe("async task tools model-visible surface", () => {
       assert.equal(typeof t.renderCall, "function");
       assert.equal(typeof t.renderResult, "function");
     }
-    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "capabilityProfile", "description", "group_id", "group_label", "notify", "params", "prompt"]);
+    assert.deepEqual(Object.keys(start.parameters.properties).sort(), ["agent", "capabilityProfile", "description", "fleet", "group_id", "group_label", "notify", "params", "prompt"]);
     assert.equal(start.parameters.properties.notify.type, "boolean");
     assert.equal(start.parameters.properties.group_label.type, "string");
     assert.deepEqual(start.parameters.properties.capabilityProfile.anyOf.map((entry) => entry.const), ["read-only", "read-write"]);
@@ -690,8 +690,8 @@ describe("async task tools model-visible surface", () => {
       "start_task should document the single grouped-notification policy",
     );
     assert.ok(
-      start.promptGuidelines.some((g) => /open the group with start_task\(\{ group_id: 'new'/.test(g) && /task_poll\(\{ task_id \}\)/.test(g)),
-      "guidelines should give a concrete open-group-then-reuse example with the per-child retrieval call",
+      start.promptGuidelines.some((g) => /start_task\(\{ fleet: \{ groups:/.test(g) && /task_poll\(\{ task_id \}\)/.test(g)),
+      "guidelines should give a concrete fleet fan-out example with the per-child retrieval call",
     );
     assert.ok(
       start.promptGuidelines.some(

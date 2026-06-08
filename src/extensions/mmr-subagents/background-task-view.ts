@@ -109,6 +109,14 @@ export interface WidgetRow {
   terminalOutcome?: MmrAsyncTaskBoardEntry["terminalOutcome"];
   capabilityProfile?: string;
   groupId?: string;
+  /**
+   * The row was declared up front by the fleet form and launched on a deferred
+   * tick (`launchMode:"manual"`). Such a row is always revealed — it was
+   * committed to the card before launch — so it animates in place through
+   * `ready`→`running`→terminal instead of re-staging when it starts. Legacy
+   * rows born `running` leave this unset and keep the staged-reveal wave.
+   */
+  deferredLaunch?: boolean;
 }
 
 /**
@@ -144,6 +152,10 @@ export function groupStatusColor(status: MmrAsyncTaskGroupStatus): string {
  * resting glyph. ✓ succeeded, ✕ failed, – cancelled.
  */
 export function backgroundStatusGlyph(status: string, activeFrame?: string): string {
+  // `ready` (declared, not launched) reads as an ASCII hyphen — deliberately
+  // distinct from the cancelled en-dash `–` so a not-started row and a
+  // cancelled row never look identical.
+  if (status === "ready") return "-";
   if (status === "running" || status === "cancelling") {
     return activeFrame ?? PI_LOADER_FRAMES[0];
   }
@@ -160,6 +172,7 @@ export function backgroundStatusGlyph(status: string, activeFrame?: string): str
  * label vocabulary.
  */
 export function backgroundStatusWord(status: string | undefined): string {
+  if (status === "ready") return "ready";
   if (status === "running") return "running";
   if (status === "cancelling") return "cancelling";
   if (status === "succeeded" || status === "completed") return "completed";
@@ -217,7 +230,9 @@ export type RowMetadataLevel = "full" | "minimal" | "none";
  * to the static `runtimeMs`, and the live delta is never negative.
  */
 export function liveRuntimeMs(row: WidgetRow): number {
-  if (isTerminalRowStatus(row.status)) return row.runtimeMs;
+  // A declared-but-not-launched row has no clock yet: keep its elapsed at the
+  // static (zero) runtime so the ready phase never shows a ticking timer.
+  if (row.status === "ready" || isTerminalRowStatus(row.status)) return row.runtimeMs;
   const generatedAt = row.boardGeneratedAtMs;
   if (!Number.isFinite(generatedAt) || generatedAt <= 0) return row.runtimeMs;
   return row.runtimeMs + Math.max(0, Date.now() - generatedAt);
@@ -268,6 +283,7 @@ export function toRow(entry: MmrAsyncTaskBoardEntry, boardGeneratedAtMs: number)
     ...(entry.terminalOutcome !== undefined ? { terminalOutcome: entry.terminalOutcome } : {}),
     ...(entry.capabilityProfile !== undefined ? { capabilityProfile: entry.capabilityProfile } : {}),
     ...(entry.groupId !== undefined ? { groupId: entry.groupId } : {}),
+    ...(entry.deferredLaunch !== undefined ? { deferredLaunch: entry.deferredLaunch } : {}),
   };
 }
 
@@ -317,9 +333,16 @@ export const REVEAL_INTERVAL_MS = 70;
  */
 export function revealedRows(rows: readonly WidgetRow[], nowMs: number): WidgetRow[] {
   if (rows.length === 0) return [];
-  const anyActive = rows.some((r) => r.status === "running" || r.status === "cancelling");
+  // Rows committed to the card up front — declared `ready`, or launched on a
+  // deferred tick from the fleet form — are ALWAYS revealed: they were shown
+  // before launch, so they must animate in place (glyph flips at a fixed
+  // position) rather than re-stage and disappear when they start running.
+  const alwaysShown = (r: WidgetRow) => r.status === "ready" || r.deferredLaunch === true;
+  const staged = rows.filter((r) => !alwaysShown(r));
+  // Only legacy, born-running rows drive the staged-reveal wave.
+  const anyActive = staged.some((r) => r.status === "running" || r.status === "cancelling");
   if (!anyActive) return [...rows];
-  const bySpawn = [...rows].sort(
+  const bySpawn = [...staged].sort(
     (a, b) => a.createdAtMs - b.createdAtMs || a.taskId.localeCompare(b.taskId),
   );
   // Thresholds are monotonically increasing (createdAtMs sorted ascending plus a
@@ -333,7 +356,9 @@ export function revealedRows(rows: readonly WidgetRow[], nowMs: number): WidgetR
   // Identify revealed rows by object reference (not taskId) so the filter is
   // robust even if ids are absent or collide, then return them in display order.
   const revealed = new Set<WidgetRow>(bySpawn.slice(0, count));
-  return rows.filter((r) => revealed.has(r));
+  // Keep the caller's display order; emit always-shown rows plus the staged
+  // prefix of legacy rows.
+  return rows.filter((r) => alwaysShown(r) || revealed.has(r));
 }
 
 /**
@@ -343,14 +368,22 @@ export function revealedRows(rows: readonly WidgetRow[], nowMs: number): WidgetR
  */
 export function synthesizeGroup(rows: readonly WidgetRow[]): Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts" | "label"> {
   const counts = { running: 0, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: rows.length };
+  let ready = 0;
   for (const r of rows) {
     if (r.status === "succeeded") r.terminalOutcome === "partial" ? counts.partial++ : counts.succeeded++;
     else if (r.status === "failed") counts.failed++;
     else if (r.status === "cancelled") counts.cancelled++;
+    else if (r.status === "ready") ready++;
     else counts.running++;
   }
+  // `ready` rows are non-terminal but pre-launch: an all-ready group reads as
+  // `ready`; once any worker is live (or a mix of ready + settled remains in
+  // flight) the group is `running`. `ready` is not tracked in `counts`, so the
+  // settled/total chip stays `0/N` during the ready phase.
   const status: MmrAsyncTaskGroupStatus =
     counts.running > 0 ? "running"
+    : ready > 0 && ready === rows.length ? "ready"
+    : ready > 0 ? "running"
     : counts.failed > 0 ? "failed"
     : counts.partial > 0 ? "partial"
     : counts.succeeded > 0 ? "completed"

@@ -42,6 +42,9 @@ export function freshnessOf(
   cfg: FreshnessConfig,
 ): MmrAsyncTaskFreshness {
   if (isTerminalStatus(record.status)) return "terminal";
+  // A declared-but-not-launched task has no worker yet: it is never stalled or
+  // dead by wall time until launchTask starts its clock.
+  if (record.status === "ready") return "healthy";
   if (
     record.cancelRequestedAtMs !== undefined &&
     now - record.cancelRequestedAtMs > cfg.cancelDeadAfterMs
@@ -79,7 +82,7 @@ export function snapshotOf(
     ...(record.completedAtMs !== undefined ? { completedAtMs: record.completedAtMs } : {}),
     ...(record.cancelRequestedAtMs !== undefined ? { cancelRequestedAtMs: record.cancelRequestedAtMs } : {}),
     ...(record.cancelReason !== undefined ? { cancelReason: record.cancelReason } : {}),
-    runtimeMs: (record.completedAtMs ?? now) - record.startedAtMs,
+    runtimeMs: record.status === "ready" ? 0 : (record.completedAtMs ?? now) - record.startedAtMs,
     ...(lastProgressAt !== undefined ? { lastProgressAgeMs: now - lastProgressAt } : {}),
     completionPush: projectCompletionPush(record),
     ...(record.terminalOutcome !== undefined ? { terminalOutcome: record.terminalOutcome } : {}),
@@ -113,7 +116,7 @@ export function boardEntryOf(
     startedAtMs: record.startedAtMs,
     updatedAtMs: record.updatedAtMs,
     ...(record.completedAtMs !== undefined ? { completedAtMs: record.completedAtMs } : {}),
-    runtimeMs: (record.completedAtMs ?? now) - record.startedAtMs,
+    runtimeMs: record.status === "ready" ? 0 : (record.completedAtMs ?? now) - record.startedAtMs,
     ...(lastProgressAt !== undefined ? { lastProgressAgeMs: now - lastProgressAt } : {}),
     ...(progress?.model !== undefined || record.resolvedModel !== undefined
       ? { resolvedModel: progress?.model ?? record.resolvedModel }
@@ -127,6 +130,7 @@ export function boardEntryOf(
     ...(record.terminalOutcome !== undefined ? { terminalOutcome: record.terminalOutcome } : {}),
     ...(record.capabilityProfile !== undefined ? { capabilityProfile: record.capabilityProfile } : {}),
     ...(record.groupId !== undefined ? { groupId: record.groupId } : {}),
+    ...(record.deferredLaunch ? { deferredLaunch: true } : {}),
     completionPush: projectCompletionPush(record),
     ...(record.errorMessage !== undefined ? { errorMessage: record.errorMessage } : {}),
   };
@@ -135,6 +139,8 @@ export function boardEntryOf(
 export function groupStatusOf(
   children: readonly MmrAsyncTaskRecord[],
 ): MmrAsyncTaskGroupStatus {
+  // A fleet declared but not yet launched: every child is still `ready`.
+  if (children.length > 0 && children.every((child) => child.status === "ready")) return "ready";
   if (children.length === 0 || children.some((child) => !isTerminalStatus(child.status))) return "running";
   if (children.some((child) => child.status === "failed" || child.terminalFreshness === "dead")) return "failed";
   if (children.some((child) => child.status === "cancelled")) return "cancelled";

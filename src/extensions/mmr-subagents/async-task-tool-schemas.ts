@@ -56,6 +56,35 @@ export function validateAsyncToolParams<T extends TSchema>(
   }
 }
 
+/** One declared fleet member, rendered as a row in its group card. */
+export interface AsyncTaskFleetRow {
+  taskId: string;
+  agent: AsyncTaskAgentName;
+  description: string;
+  resolvedModel?: string;
+  capabilityProfile?: string;
+}
+
+/** One declared fleet group: its minted id, label, and member rows in order. */
+export interface AsyncTaskFleetGroupDetails {
+  groupId: string;
+  label?: string;
+  taskIds: string[];
+  rows: AsyncTaskFleetRow[];
+}
+
+/**
+ * Frozen declaration of a fleet, carried on the `start_task` result so the
+ * inline card can render every group up front and so a replayed transcript
+ * (no live registry) still shows the declared rows. The live registry board is
+ * the source of truth once workers launch; this is the ordering/replay anchor.
+ */
+export interface AsyncTaskFleetDetails {
+  version: 1;
+  totalTasks: number;
+  groups: AsyncTaskFleetGroupDetails[];
+}
+
 /** Discriminated details for the async task tools' results. */
 export interface AsyncTaskToolDetails {
   worker: "mmr-subagents.async-task";
@@ -85,6 +114,8 @@ export interface AsyncTaskToolDetails {
   /** Board snapshot for `task_poll` list mode. */
   board?: MmrAsyncTaskBoard;
   group?: MmrAsyncTaskGroupSnapshot;
+  /** Present on a fleet declaration (`start_task.fleet`); renders all group cards up front. */
+  fleet?: AsyncTaskFleetDetails;
   errorMessage?: string;
 }
 
@@ -115,7 +146,7 @@ const GROUP_ID_SCHEMA = Type.String({
   maxLength: 256,
   pattern: "^(new|group_[a-f0-9]{6,})$",
   description:
-    "Optional worker-group id. Use group_id:'new' on the first start_task call to mint a group, then reuse the returned group_id on sibling start_task calls. Concrete ids must look like group_<hex>.",
+    "Optional legacy worker-group id for adding a single worker to a group incrementally. Use group_id:'new' to mint one group, or a previously returned concrete group id to add a later sibling to it. For same-step fan-out, prefer start_task.fleet instead of group_id. Concrete ids look like group_<hex>.",
 });
 
 const GROUP_LABEL_SCHEMA = Type.String({
@@ -124,9 +155,61 @@ const GROUP_LABEL_SCHEMA = Type.String({
     "Optional human-readable label for the worker group, shown on the orchestration widget header. Honored only on the opening call (group_id:'new'); ignored when joining an existing group. Defaults to the first worker's description when omitted.",
 });
 
+const FLEET_MEMBER_SCHEMA = Type.Object(
+  {
+    agent: Type.Optional(START_TASK_AGENT_SCHEMA),
+    params: Type.Optional(
+      Type.Object(
+        {},
+        {
+          additionalProperties: true,
+          description:
+            "Parameters for this worker's agent. For Task use {prompt, description}; for finder use {query}; for librarian use {query, context?}.",
+        },
+      ),
+    ),
+    prompt: Type.Optional(
+      Type.String({ description: "Shortcut prompt/query when params is omitted (Task prompt, or finder/librarian query)." }),
+    ),
+    description: Type.Optional(Type.String({ description: "Short display label for this worker." })),
+    capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
+  },
+  {
+    additionalProperties: false,
+    description:
+      "One fleet worker. Do not set a group id here — the runtime mints group ids for the fleet.",
+  },
+);
+
+const FLEET_GROUP_SCHEMA = Type.Object(
+  {
+    group_label: Type.Optional(GROUP_LABEL_SCHEMA),
+    members: Type.Array(FLEET_MEMBER_SCHEMA, {
+      minItems: 1,
+      description: "Workers that make up this group; each renders as one row in the group card.",
+    }),
+  },
+  { additionalProperties: false, description: "One worker group in the fleet." },
+);
+
+const FLEET_SCHEMA = Type.Object(
+  {
+    groups: Type.Array(FLEET_GROUP_SCHEMA, {
+      minItems: 1,
+      description: "The worker groups to declare; each renders as its own group card.",
+    }),
+  },
+  {
+    additionalProperties: false,
+    description:
+      "Declare a whole fan-out in one call: every group and member is created up front and rendered as a ready card before any worker launches, then all launch together. Omit group_id inside fleet (the runtime mints ids), and do not combine fleet with the single-task fields (agent/params/prompt/group_id).",
+  },
+);
+
 export const START_TASK_PARAMETERS = Type.Object(
   {
     agent: Type.Optional(START_TASK_AGENT_SCHEMA),
+    fleet: Type.Optional(FLEET_SCHEMA),
     params: Type.Optional(
       Type.Object(
         {},
@@ -201,7 +284,8 @@ export const START_TASK_DESCRIPTION = [
   START_TASK_SELECTION_GUIDANCE,
   "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session.",
   "Use task_poll/task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
-  "Use group_id:'new' on the first grouped start_task call to mint a worker group, then reuse the returned group_id on sibling start_task calls and task_poll/task_wait/task_cancel. The opening call controls the single grouped notification; sibling tasks in the group do not send individual completion notifications.",
+  "To launch several workers at once, pass fleet.groups[] (each group lists its members) in one call: the runtime mints the group ids, renders every group card up front in a ready state, and launches them together. Omit group_id inside fleet, and do not combine fleet with the single-task fields.",
+  "group_id is the legacy incremental path: use group_id:'new' to mint a group on one call and a returned concrete group id to add a later sibling. The opening call controls the single grouped notification; sibling tasks in the group do not send individual completion notifications. Prefer fleet for same-step fan-out.",
   START_TASK_GROUP_FANOUT_GUIDANCE,
   "For Task workers only, capabilityProfile can narrow tools to read-only or read-write (narrowing only; never widens the default Task surface).",
   "By default a background task notifies you once it finishes; pass notify:false to opt out and make task_poll/task_wait the only retrieval path.",
@@ -216,7 +300,7 @@ export const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "Treat a terminal task_poll/task_wait result as consumed. Do not poll the same task again unless you intentionally need to re-read the same result.",
   "If a task-notification, task-group-notification, or background-tasks-finished notice appears for a task/group whose terminal result is already present in the transcript, treat it as stale; do not call tools or rewrite your answer solely because of it.",
   "Call task_poll with no task_id to list this session's background tasks and their delivery state during fallback checks or multi-worker orchestration.",
-  "For grouped workers, open the group with start_task({ group_id: 'new', ... }), copy the returned group_id into each sibling start_task call, then wait/poll/cancel with group_id. When the group finishes, retrieve each needed child output once with task_poll({ task_id }) for the ids the group result lists.",
+  "To fan out several workers at once, declare them with start_task({ fleet: { groups: [...] } }) in a single call; the runtime mints the group ids and renders all group cards up front. Use group_id only to add a worker to a group incrementally across separate calls, then wait/poll/cancel with group_id. When the group finishes, retrieve each needed child output once with task_poll({ task_id }) for the ids the group result lists.",
   START_TASK_GROUP_FANOUT_GUIDANCE,
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task or group.",
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",

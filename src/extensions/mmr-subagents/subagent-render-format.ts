@@ -88,6 +88,8 @@ export interface BackgroundTaskDetails {
   terminalOutcome?: string;
   board?: unknown;
   group?: unknown;
+  /** Frozen fleet declaration (start_task.fleet); renders all group cards up front. */
+  fleet?: unknown;
   description?: string;
   /** Full worker prompt/query, used as the rendered Markdown task body. */
   prompt?: string;

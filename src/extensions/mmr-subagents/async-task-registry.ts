@@ -69,6 +69,13 @@ export { toPublicAsyncTaskSnapshot };
  */
 
 export type MmrAsyncTaskStatus =
+  /**
+   * Declared but not yet launched. Used by the `start_task` fleet form: every
+   * member is created `ready` up front so all group cards render before any
+   * worker starts, then a deferred launch flips each row to `running`. A
+   * single immediate `start_task` never observes this state.
+   */
+  | "ready"
   | "running"
   | "cancelling"
   | "succeeded"
@@ -175,6 +182,13 @@ export interface StartAsyncTaskArgs {
   capabilityProfile?: string;
   groupId?: string;
   run: MmrAsyncTaskRun;
+  /**
+   * `"immediate"` (default) invokes the run thunk at creation. `"manual"`
+   * creates the task `ready` and holds the run thunk until {@link
+   * MmrAsyncTaskRegistry.launchTask} fires it — the fleet form declares all
+   * members `ready` up front, then launches them on a deferred tick.
+   */
+  launchMode?: "immediate" | "manual";
   /**
    * Whether automatic model-facing delivery (context pull + idle-wake push) is
    * permitted for this task. Required: the start handler always computes it
@@ -299,6 +313,8 @@ export interface MmrAsyncTaskBoardEntry {
   terminalOutcome?: MmrAsyncTerminalOutcome;
   capabilityProfile?: string;
   groupId?: string;
+  /** Declared up front by the fleet form and launched on a deferred tick. */
+  deferredLaunch?: boolean;
   /** Projected public delivery state (§12.4); same projection as snapshots. */
   completionPush: MmrAsyncTaskCompletionPushState;
   errorMessage?: string;
@@ -313,7 +329,29 @@ export interface MmrAsyncTaskBoard {
   finished: MmrAsyncTaskBoardEntry[];
 }
 
-export type MmrAsyncTaskGroupStatus = "running" | "failed" | "cancelled" | "partial" | "completed";
+export type MmrAsyncTaskGroupStatus =
+  /** Every child is `ready`: the fleet is declared but no worker has launched. */
+  | "ready"
+  | "running"
+  | "failed"
+  | "cancelled"
+  | "partial"
+  | "completed";
+
+/**
+ * A group is terminal only once every child has finished. `ready` (declared,
+ * not launched) and `running` are both non-terminal: settlement, automatic
+ * delivery, observation, and wait-completion must treat them the same so a
+ * freshly declared fleet is never delivered or "settled" before it launches.
+ */
+export function isTerminalGroupStatus(status: MmrAsyncTaskGroupStatus): boolean {
+  return (
+    status === "completed"
+    || status === "failed"
+    || status === "cancelled"
+    || status === "partial"
+  );
+}
 
 export interface MmrAsyncTaskGroupSnapshot {
   groupId: string;
@@ -401,6 +439,18 @@ export type MmrAsyncTaskGroupSettleCallback = (
 
 export interface MmrAsyncTaskRegistry {
   startTask(args: StartAsyncTaskArgs): StartAsyncTaskResult;
+  /**
+   * Launch a task created with `launchMode:"manual"`: flip `ready`→`running`,
+   * stamp `startedAt`, fire the held run thunk once, and arm the watchdog.
+   * Idempotent and a no-op for a task that is not `ready`.
+   */
+  launchTask(sessionKey: string, taskId: string): MmrAsyncTaskInternalSnapshot | undefined;
+  /**
+   * Current non-terminal task count and the per-session cap. Lets a batch
+   * caller (the fleet form) reject a whole fan-out up front instead of
+   * creating a partial set that hits the cap mid-way.
+   */
+  getRunningCapacity(sessionKey: string): { runningCount: number; cap: number };
   openGroup(args: OpenAsyncTaskGroupArgs): MmrAsyncTaskGroupSnapshot;
   getTask(sessionKey: string, taskId: string): MmrAsyncTaskInternalSnapshot | undefined;
   /**
@@ -625,6 +675,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     const group = args.groupId !== undefined
       ? this.ensureGroup({ sessionKey: args.sessionKey, groupId: args.groupId })
       : undefined;
+    const manual = args.launchMode === "manual";
     const now = this.nowMs();
     const controller = new AbortController();
     const record: MmrAsyncTaskRecord = {
@@ -640,11 +691,16 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       workerTools: args.workerTools,
       ...(args.capabilityProfile !== undefined ? { capabilityProfile: args.capabilityProfile } : {}),
       ...(args.groupId !== undefined ? { groupId: args.groupId } : {}),
-      status: "running",
+      status: manual ? "ready" : "running",
+      ...(manual ? { deferredLaunch: true } : {}),
       createdAtMs: now,
       startedAtMs: now,
       updatedAtMs: now,
-      maxRuntimeAtMs: now + this.maxRuntimeMs,
+      // A manual/ready task has no runtime budget until it actually launches
+      // ({@link launchTask} stamps the real deadline); otherwise the prune
+      // backstop could expire a declared-but-unlaunched fleet member by wall
+      // time. An immediate task starts its budget now.
+      maxRuntimeAtMs: manual ? Number.POSITIVE_INFINITY : now + this.maxRuntimeMs,
       expiredByWatchdog: false,
       controller,
       runGeneration: 0,
@@ -661,11 +717,30 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     }
     this.taskIdByToolCallId.set(indexKey, record.taskId);
 
+    // Manual launch holds the run thunk until launchTask fires it; an immediate
+    // start runs right away. Either way the watchdog clock starts only when the
+    // worker actually begins, so a ready task never expires by wall time.
+    if (manual) {
+      record.pendingRun = args.run;
+    } else {
+      this.beginRun(record, args.run);
+    }
+
+    return { ok: true, deduplicated: false, snapshot: this.snapshot(record) };
+  }
+
+  /**
+   * Invoke a task's run thunk and arm its max-runtime watchdog. Shared by the
+   * immediate start path and {@link launchTask}; a runaway worker is aborted
+   * even if the parent never polls/lists/waits again (prune is a backstop).
+   */
+  private beginRun(record: MmrAsyncTaskRecord, run: MmrAsyncTaskRun): void {
     const generation = record.runGeneration;
+    const controller = record.controller;
     record.promise = (async () => {
       let result: MmrAsyncTaskRunResult;
       try {
-        result = await args.run({
+        result = await run({
           signal: controller.signal,
           onProgress: (snapshot) => this.handleProgress(record, generation, snapshot),
         });
@@ -675,17 +750,30 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       }
       this.finalizeResult(record, generation, result);
     })();
-
-    // Active max-runtime watchdog: a runaway task is aborted even if the
-    // parent never polls/lists/waits again. The prune-time check below is a
-    // backstop. Unref so a pending timer never keeps the process alive.
     if (Number.isFinite(this.maxRuntimeMs) && this.maxRuntimeMs > 0) {
       const timer = setTimeout(() => this.expireByWatchdog(record, generation), this.maxRuntimeMs);
       if (typeof timer.unref === "function") timer.unref();
       record.watchdogTimer = timer;
     }
+  }
 
-    return { ok: true, deduplicated: false, snapshot: this.snapshot(record) };
+  launchTask(sessionKey: string, taskId: string): MmrAsyncTaskInternalSnapshot | undefined {
+    this.prune(sessionKey);
+    const record = this.sessions.get(sessionKey)?.get(taskId);
+    if (!record) return undefined;
+    // Idempotent: only a `ready` task with a held run thunk launches; a task
+    // already running/terminal (or already launched) returns its current state.
+    if (record.status !== "ready") return this.snapshot(record);
+    const run = record.pendingRun;
+    if (!run) return this.snapshot(record);
+    record.pendingRun = undefined;
+    const now = this.nowMs();
+    record.status = "running";
+    record.startedAtMs = now;
+    record.updatedAtMs = now;
+    record.maxRuntimeAtMs = now + this.maxRuntimeMs;
+    this.beginRun(record, run);
+    return this.snapshot(record);
   }
 
   private handleProgress(
@@ -1004,7 +1092,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     if (!group) return;
     const snapshot = this.groupSnapshot(group);
     group.updatedAtMs = this.nowMs();
-    if (snapshot.status === "running") return;
+    if (!isTerminalGroupStatus(snapshot.status)) return;
     if (group.completedAtMs === undefined) {
       group.completedAtMs = this.nowMs();
       // Mirror task settlement (§8.1b): an active group wait registers a waiter,
@@ -1050,7 +1138,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     if (!group) return undefined;
     // A model-facing group poll counts as observing the group only (§8.3);
     // UI/widget mirrors read non-observingly so they never suppress delivery.
-    if (options.observe === true && this.groupStatus(this.groupChildren(group)) !== "running") {
+    if (options.observe === true && isTerminalGroupStatus(this.groupStatus(this.groupChildren(group)))) {
       this.markGroupObserved(group);
     }
     return this.groupSnapshot(group);
@@ -1105,7 +1193,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     if (groupMap) {
       for (const group of groupMap.values()) {
         if (!group.deliveryOptIn) continue;
-        if (this.groupStatus(this.groupChildren(group)) === "running") continue;
+        if (!isTerminalGroupStatus(this.groupStatus(this.groupChildren(group)))) continue;
         if (terminalDeliveryOf(group) !== "pending") continue;
         candidates.push({
           kind: "group",
@@ -1150,6 +1238,13 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     if (!map || !group || group.taskIds.size > 0) return false;
     map.delete(groupId);
     return true;
+  }
+
+  getRunningCapacity(sessionKey: string): { runningCount: number; cap: number } {
+    this.prune(sessionKey);
+    const map = this.sessions.get(sessionKey);
+    const runningCount = map ? [...map.values()].filter((r) => !isTerminalStatus(r.status)).length : 0;
+    return { runningCount, cap: this.maxRunningPerSession };
   }
 
   listTasks(sessionKey: string): MmrAsyncTaskBoard {
@@ -1243,7 +1338,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     const timeoutMs = Math.max(0, Math.min(rawTimeout, MAX_TASK_WAIT_TIMEOUT_MS));
     const children = this.groupChildren(group);
     const snapshotBefore = this.groupSnapshot(group);
-    if (snapshotBefore.status !== "running") {
+    if (isTerminalGroupStatus(snapshotBefore.status)) {
       this.markGroupObserved(group);
       return { found: true, timedOut: false, snapshot: this.groupSnapshot(group) };
     }
@@ -1272,7 +1367,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       group.waiters.delete(groupWaiter);
     }
     const snapshot = this.groupSnapshot(group);
-    const terminal = snapshot.status !== "running";
+    const terminal = isTerminalGroupStatus(snapshot.status);
     if (terminal) this.markGroupObserved(group);
     return { found: true, timedOut: !allSettled || !terminal, snapshot: this.groupSnapshot(group) };
   }
@@ -1290,6 +1385,23 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       // canceller now holds the terminal snapshot, so mark it observed (§8.2) to
       // suppress any idle-wake push or later context notice for it.
       if (record.finalObservedAtMs === undefined) record.finalObservedAtMs = this.nowMs();
+      return this.snapshot(record);
+    }
+    if (record.status === "ready") {
+      // Never launched: cancel synchronously without a worker round-trip so the
+      // canceller doesn't block on the cancel grace, and the held run thunk is
+      // dropped so it can never fire.
+      const cancelNow = this.nowMs();
+      record.cancelRequestedAtMs = cancelNow;
+      record.cancelReason = args.reason ?? "cancelled by request";
+      record.status = "cancelled";
+      record.terminalFreshness = "healthy";
+      record.terminalOutcome = undefined;
+      record.completedAtMs = cancelNow;
+      record.updatedAtMs = cancelNow;
+      record.pendingRun = undefined;
+      if (record.finalObservedAtMs === undefined) record.finalObservedAtMs = cancelNow;
+      this.settle(record);
       return this.snapshot(record);
     }
     const now = this.nowMs();
@@ -1336,7 +1448,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     this.maybeSettleGroup(args.groupId, args.sessionKey);
     // The canceller holds the terminal group snapshot; mark the group observed
     // (§8.3) so no idle-wake/context group notice re-surfaces it.
-    if (this.groupStatus(this.groupChildren(group)) !== "running") this.markGroupObserved(group);
+    if (isTerminalGroupStatus(this.groupStatus(this.groupChildren(group)))) this.markGroupObserved(group);
     return this.groupSnapshot(group);
   }
 
@@ -1474,6 +1586,8 @@ const globalRegistryStore = globalThis as typeof globalThis & {
 
 const REQUIRED_REGISTRY_METHODS = [
   "startTask",
+  "launchTask",
+  "getRunningCapacity",
   "openGroup",
   "getTask",
   "getGroup",

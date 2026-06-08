@@ -47,7 +47,7 @@ export const START_TASK_SELECTION_GUIDANCE =
  * "do not narrate" phrasing so the model-visible guidance is greppable.
  */
 export const START_TASK_GROUP_FANOUT_GUIDANCE =
-  "When fanning out a worker group, issue the opening start_task({ group_id: 'new', ... }) and every sibling start_task call together in a single step, and do not narrate each spawn or restate the spawned set in prose — the UI renders the whole group as one live card. Go straight to your next action, then collect each needed child output once with task_poll({ task_id }) after the group finishes.";
+  "To fan out more than one worker at once, declare the whole fleet in a single start_task call with fleet.groups[] (each group lists its members); the runtime mints the group ids and renders every group card up front in a ready state, so you never mint a group and then add siblings across separate calls. Keep setup silent: do not narrate spawns or group transitions (\"minting\", \"adding siblings\", \"opening the next group\"), and go straight to your next action — the live card is the status surface and updates itself as workers run. After the group settles, do not re-emit the card, its rows, or its counts as a fenced block or a prose summary; read only the specific child outputs you need with task_poll({ task_id }).";
 
 /** Concrete, copyable start_task agent examples for each background worker. */
 export const START_TASK_AGENT_EXAMPLES: readonly string[] = [

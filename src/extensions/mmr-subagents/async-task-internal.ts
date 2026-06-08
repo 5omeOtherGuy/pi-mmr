@@ -10,6 +10,7 @@ import type {
   MmrAsyncTaskGroupNotifier,
   MmrAsyncTaskGroupSettleCallback,
   MmrAsyncTaskNotifier,
+  MmrAsyncTaskRun,
   MmrAsyncTaskRunResult,
   MmrAsyncTaskSettleCallback,
   MmrAsyncTaskStatus,
@@ -128,6 +129,18 @@ export interface MmrAsyncTaskRecord {
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
   expiredByWatchdog: boolean;
   controller: AbortController;
+  /**
+   * Declared by the fleet form and launched on a deferred tick. Stays `true`
+   * through `ready`→`running`→terminal so both surfaces always reveal the row
+   * (it was committed to the card before launch) and animate it in place.
+   */
+  deferredLaunch?: boolean;
+  /**
+   * Run thunk held while `status === "ready"` (manual launch). Consumed once by
+   * {@link MmrAsyncTaskRegistry.launchTask}, then cleared. Absent for an
+   * immediate start, which invokes its run thunk at creation.
+   */
+  pendingRun?: MmrAsyncTaskRun;
   runGeneration: number;
   runnerSettled: boolean;
   watchdogTimer?: ReturnType<typeof setTimeout>;
