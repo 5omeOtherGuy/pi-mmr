@@ -539,6 +539,30 @@ describe("async-task-registry wait + completion push", () => {
     await flush();
     assert.equal(reg.getTask("sess-A", "t").completionPush, "disabled");
   });
+
+  it("marks the completion push failed (no retry) when the notifier rejects", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => "t" });
+    const d = makeDeferredRun();
+    let notifyCalls = 0;
+    reg.startTask(startArgs({
+      run: d.run,
+      notify: async () => {
+        notifyCalls += 1;
+        throw new Error("push boom");
+      },
+    }));
+    // A timed-out wait leaves no observer, so the push fires and then rejects.
+    const timedOut = await reg.waitForTask({ sessionKey: "sess-A", taskId: "t", timeoutMs: 5 });
+    assert.equal(timedOut.timedOut, true);
+    d.resolve(makeWorkerResult({ finalOutput: "done" }));
+    await flush();
+    // Read via listTasks (getTask marks the item observed) to see the push outcome.
+    assert.equal(reg.listTasks("sess-A").finished[0].completionPush, "failed");
+    // A failed push must never be retried: exactly one notifier invocation.
+    await flush();
+    assert.equal(notifyCalls, 1, "a rejected push must not be retried");
+  });
 });
 
 describe("async-task-registry audit regressions", () => {
@@ -723,6 +747,35 @@ describe("async-task-registry worker groups", () => {
     assert.equal(reg.getGroup("sess-A", "group_beaded").completionPush, "announced");
     assert.equal(reg.getTask("sess-A", "t0").completionPush, "disabled");
     assert.equal(reg.getTask("sess-A", "t1").completionPush, "disabled");
+  });
+
+  it("marks the grouped completion push failed (no retry) when the group notifier rejects", async () => {
+    const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
+    let n = 0;
+    let notifyCalls = 0;
+    const reg = createMmrAsyncTaskRegistry({ idFactory: () => `t${n++}` });
+    const group = reg.openGroup({
+      sessionKey: "sess-A",
+      groupId: "group_beaded",
+      deliveryOptIn: true,
+      notify: async () => {
+        notifyCalls += 1;
+        throw new Error("group push boom");
+      },
+    });
+    const first = makeDeferredRun();
+    const second = makeDeferredRun();
+    reg.startTask(startArgs({ run: first.run, originToolCallId: "c0", groupId: group.groupId }));
+    reg.startTask(startArgs({ run: second.run, originToolCallId: "c1", groupId: group.groupId }));
+
+    first.resolve(makeWorkerResult());
+    second.resolve(makeWorkerResult());
+    await flush();
+    assert.equal(reg.getGroup("sess-A", "group_beaded").completionPush, "failed");
+    // A rejected group push must not be retried on subsequent reads.
+    reg.getGroup("sess-A", "group_beaded");
+    await flush();
+    assert.equal(notifyCalls, 1, "a rejected group push must not be retried");
   });
 
   it("stores an explicit group label and emits it in the group snapshot", async () => {

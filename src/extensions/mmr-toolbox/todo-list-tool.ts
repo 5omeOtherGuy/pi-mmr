@@ -19,8 +19,10 @@
  * - When every submitted item has status `completed`, the *stored* list is
  *   cleared to `[]` immediately. The tool result still echoes the submitted
  *   list and surfaces `details.allCompleted: true` so callers/UI can react.
- * - Only one item should be `in_progress` at a time — documented contract,
- *   not enforced by this tool.
+ * - Only one item should be `in_progress` at a time — advisory contract only,
+ *   not enforced by this tool. Lists with multiple `in_progress` items (for
+ *   example a parent and a subtask both in progress) are accepted and stored
+ *   unchanged; this rule is model guidance, not a validated invariant.
  */
 
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -571,7 +573,8 @@ Every item has three required fields and one optional child-list field:
   you start it and \`completed\` the moment it is done. Otherwise subtasks
   sit at \`pending\` and the pinned widget cannot show which child step is
   currently being worked on.
-- Keep at most one item \`in_progress\` at a time.
+- Keep at most one item \`in_progress\` at a time. This is advisory guidance,
+  not enforced: lists with multiple \`in_progress\` items are still accepted.
 - Update task status in real time as work progresses: mark the current task
   \`in_progress\` before beginning that step, and mark it \`completed\`
   immediately after finishing. Do not batch status updates at the end.

@@ -305,6 +305,34 @@ describe("mmr-toolbox task_list — schema (session-local todo)", () => {
     assert.match(result.content[0].text, /^  └─ ⠋ Running checks$/m);
     assert.deepEqual(result.details.newTasks, tasks);
   });
+
+  it("accepts multiple in_progress items unchanged (single-in_progress rule is advisory, not enforced)", async () => {
+    const { pi, session } = await loadToolboxLinked();
+    const tool = getTaskListTool(pi);
+    const ctx = makeCtx(session);
+    // Two top-level in_progress items, plus a parent in_progress with an
+    // in_progress subtask: a legitimate parallel/subtask shape. The tool must
+    // accept and round-trip this unchanged — it never counts or rejects on the
+    // documented "one in_progress" advisory rule.
+    const tasks = [
+      { content: "Alpha", activeForm: "Doing alpha", status: "in_progress" },
+      { content: "Beta", activeForm: "Doing beta", status: "in_progress" },
+      {
+        content: "Gamma",
+        activeForm: "Doing gamma",
+        status: "in_progress",
+        subtasks: [
+          { content: "Gamma child", activeForm: "Doing gamma child", status: "in_progress" },
+        ],
+      },
+    ];
+
+    const result = await callTaskList(tool, { tasks }, ctx);
+
+    assert.notEqual(result?.isError, true, "multiple in_progress items must not be rejected");
+    assert.deepEqual(result.details.newTasks, tasks, "the list round-trips unchanged (no demotion/normalize)");
+    assert.notEqual(result.details.normalized, true, "the tool must not normalize the list");
+  });
 });
 
 describe("mmr-toolbox task_list — strict schema rejects legacy keys", () => {

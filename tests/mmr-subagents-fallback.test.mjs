@@ -356,6 +356,58 @@ describe("override persistence gated on retry route adoption (#4)", () => {
   });
 });
 
+describe("runMmrWorkerWithModelFallback runner-throw propagation (characterization)", () => {
+  const scope = () => mod.mmrWorkerFallbackScopeKey({ sessionId: "s1", profileName: "oracle" });
+
+  it("propagates a first-run throw without persisting an override or advancing the failure count", async () => {
+    const run = async () => {
+      throw new Error("runner exploded");
+    };
+    await assert.rejects(
+      mod.runMmrWorkerWithModelFallback(baseArgs({ run })),
+      /runner exploded/,
+    );
+    assert.equal(mod.getMmrWorkerFallbackOverride(scope()), undefined, "a throw must not persist an override");
+
+    // The throw aborted before the outcome was classified, so the route's
+    // consecutive-failure count never advanced: a single later classified
+    // worker-error is only count 1 (below threshold 2) and must not prompt.
+    let prompted = false;
+    const followUp = makeRun([{ status: "worker-error", route: "claude-subscription/claude-opus-4-8" }]);
+    await mod.runMmrWorkerWithModelFallback(baseArgs({
+      run: followUp.run,
+      ctx: { hasUI: true, ui: { select: async () => { prompted = true; return undefined; } } },
+    }));
+    assert.equal(prompted, false, "a throw must not pre-advance the threshold counter");
+  });
+
+  it("propagates a retry throw and does not persist the chosen override", async () => {
+    // First failure (count 1, no prompt) primes the route for the threshold.
+    const f1 = makeRun([{ status: "worker-error", route: "claude-subscription/claude-opus-4-8" }]);
+    await mod.runMmrWorkerWithModelFallback(baseArgs({ run: f1.run }));
+
+    // Second call: first run classifies as a retryable worker-error (count 2 ->
+    // prompt), the user picks gpt-5.5, and the retry run throws.
+    let calls = 0;
+    const run = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { result: { __status: "worker-error" }, route: "claude-subscription/claude-opus-4-8" };
+      }
+      throw new Error("retry exploded");
+    };
+    await assert.rejects(
+      mod.runMmrWorkerWithModelFallback(baseArgs({
+        run,
+        ctx: { hasUI: true, ui: { select: async (_t, options) => options.find((o) => o.includes("gpt-5.5")) } },
+      })),
+      /retry exploded/,
+    );
+    assert.equal(calls, 2, "the retry run was attempted before throwing");
+    assert.equal(mod.getMmrWorkerFallbackOverride(scope()), undefined, "a throwing retry must not persist the override");
+  });
+});
+
 describe("session_start clears worker-fallback state (#3)", () => {
   const scope = () => mod.mmrWorkerFallbackScopeKey({ sessionId: "s1", profileName: "oracle" });
 

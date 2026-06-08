@@ -38,6 +38,29 @@ describe("mmr-history session-catalog edge paths", () => {
     assert.equal(entry?.status, "applied");
   });
 
+  it("surfaces an invalid after: date as an `invalid` diagnostic without constraining results", async () => {
+    const { searchSessionsWithDiagnostics } = await importSource("extensions/mmr-history/session-catalog.ts");
+    const sessions = [
+      sessionInfo({ id: "S-old", modified: new Date("2026-05-15T00:00:00Z"), allMessagesText: "history search" }),
+      sessionInfo({ id: "S-new", modified: new Date("2026-05-25T00:00:00Z"), allMessagesText: "history search" }),
+    ];
+
+    const { matches, queryDiagnostics } = await searchSessionsWithDiagnostics(
+      { listSessions: async () => sessions },
+      "history after:not-a-date",
+      { limit: 10 },
+    );
+
+    // The invalid date does not constrain the result set: both sessions match.
+    assert.deepEqual(matches.map((m) => m.sessionId).sort(), ["S-new", "S-old"]);
+    const entry = queryDiagnostics.find((d) => d.filter === "after:not-a-date");
+    assert.equal(entry?.status, "invalid", "an unparseable date yields an `invalid` diagnostic");
+    assert.ok(
+      !queryDiagnostics.some((d) => d.filter === "after:not-a-date" && d.status === "applied"),
+      "an invalid date filter must not also appear as applied",
+    );
+  });
+
   it("applies id: filter as a case-insensitive substring", async () => {
     const { searchSessionsWithDiagnostics } = await importSource("extensions/mmr-history/session-catalog.ts");
     const sessions = [
@@ -398,6 +421,22 @@ describe("mmr-history tools edge paths and input validation", () => {
       ...overrides,
     };
   }
+
+  it("renders the invalid-date diagnostic group in find_session output", async () => {
+    const { createFindSessionTool } = await importSource("extensions/mmr-history/tools.ts");
+    const tool = createFindSessionTool(baseDeps({
+      listSessions: async () => [
+        sessionInfo({ id: "S-1", modified: new Date("2026-05-21T00:00:00Z"), allMessagesText: "history search" }),
+      ],
+    }));
+    const result = await tool.execute("call", { query: "history after:not-a-date" }, undefined, undefined, { cwd: "/repo" });
+    const text = result.content.map((c) => c.text).join("\n");
+    assert.match(text, /Invalid date filters ignored: after:not-a-date/);
+    assert.ok(
+      result.details.queryDiagnostics.some((d) => d.filter === "after:not-a-date" && d.status === "invalid"),
+      "details.queryDiagnostics carries the invalid-date entry",
+    );
+  });
 
   it("find_session throws when the privacy gate is disabled", async () => {
     const { createFindSessionTool } = await importSource("extensions/mmr-history/tools.ts");

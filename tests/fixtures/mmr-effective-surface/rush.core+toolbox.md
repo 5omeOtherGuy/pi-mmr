@@ -564,7 +564,8 @@ Every item has three required fields and one optional child-list field:
   you start it and `completed` the moment it is done. Otherwise subtasks
   sit at `pending` and the pinned widget cannot show which child step is
   currently being worked on.
-- Keep at most one item `in_progress` at a time.
+- Keep at most one item `in_progress` at a time. This is advisory guidance,
+  not enforced: lists with multiple `in_progress` items are still accepted.
 - Update task status in real time as work progresses: mark the current task
   `in_progress` before beginning that step, and mark it `completed`
   immediately after finishing. Do not batch status updates at the end.

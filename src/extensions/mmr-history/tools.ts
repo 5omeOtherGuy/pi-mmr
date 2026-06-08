@@ -186,10 +186,12 @@ function formatDiagnosticsLines(diagnostics: readonly QueryDiagnostic[]): string
   const applied = diagnostics.filter((d) => d.status === "applied").map((d) => d.filter);
   const unsupported = diagnostics.filter((d) => d.status === "unsupported").map((d) => d.filter);
   const nonApplicable = diagnostics.filter((d) => d.status === "non_applicable").map((d) => d.filter);
+  const invalid = diagnostics.filter((d) => d.status === "invalid").map((d) => d.filter);
   const lines: string[] = [];
   if (applied.length > 0) lines.push(`Applied filters: ${applied.join(", ")}`);
   if (unsupported.length > 0) lines.push(`Unsupported filters: ${unsupported.join(", ")}`);
   if (nonApplicable.length > 0) lines.push(`Non-applicable filters: ${nonApplicable.join(", ")}`);
+  if (invalid.length > 0) lines.push(`Invalid date filters ignored: ${invalid.join(", ")}`);
   return lines;
 }
 

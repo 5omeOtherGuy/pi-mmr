@@ -13,6 +13,13 @@ export interface SessionQuery {
   /** Original `repo:<value>` tokens, preserved for diagnostics. */
   repoTokens: string[];
   unsupportedFilters: string[];
+  /**
+   * `after:`/`before:` tokens whose value did not parse as a date. The date
+   * filter is silently not applied (result semantics unchanged), but the
+   * token is recorded here so the tool can surface an actionable diagnostic
+   * instead of dropping it without a signal.
+   */
+  invalidFilters: string[];
   /** Original tokens that parsed as `key:value` filters (used for diagnostics). */
   appliedFilterTokens: string[];
 }
@@ -53,6 +60,7 @@ export function parseSessionQuery(query: string, now = new Date()): SessionQuery
     repo: [],
     repoTokens: [],
     unsupportedFilters: [],
+    invalidFilters: [],
     appliedFilterTokens: [],
   };
   for (const token of tokenizeSessionQuery(query)) {
@@ -75,12 +83,16 @@ export function parseSessionQuery(query: string, now = new Date()): SessionQuery
       if (date) {
         parsed.after = date;
         parsed.appliedFilterTokens.push(`after:${value}`);
+      } else {
+        parsed.invalidFilters.push(`after:${value}`);
       }
     } else if (key === "before") {
       const date = parseDateFilter(value, now);
       if (date) {
         parsed.before = date;
         parsed.appliedFilterTokens.push(`before:${value}`);
+      } else {
+        parsed.invalidFilters.push(`before:${value}`);
       }
     } else if (key === "file") {
       parsed.file.push(value.toLowerCase());

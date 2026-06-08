@@ -235,6 +235,81 @@ describe("mmr-session-fallback extension", () => {
     assert.equal(runtime.getMmrManagedModelOverride(), undefined);
   });
 
+  it("sets promptInFlight while a prompt runs and clears it after the prompt settles", async () => {
+    const extension = (await importSource("extensions/mmr-session-fallback/index.ts")).default;
+    const runtime = await loadRuntime();
+    const fallbackRuntime = await importSource("extensions/mmr-session-fallback/runtime.ts");
+    runtime.setMmrModeState(lockedSmartState());
+    const { pi, handlers } = createMockPi();
+    const { ctx, selectCalls } = createMockExtensionContext({
+      sessionId: "session-1",
+      models: [FAILING_MODEL, FALLBACK_MODEL, OTHER_MODEL],
+      model: FAILING_MODEL,
+    });
+
+    // Block the first (model) selection on a controllable deferred so the
+    // handler is mid-prompt when we assert the in-flight guard.
+    let releaseSelect;
+    const selectGate = new Promise((resolve) => { releaseSelect = resolve; });
+    ctx.ui.select = async (title, options) => {
+      selectCalls.push({ title });
+      if (/fallback model/i.test(title)) {
+        await selectGate;
+        return undefined; // cancel after release so the handler unwinds cleanly
+      }
+      return undefined;
+    };
+    extension(pi);
+
+    const event = {
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "error", errorMessage: "rate_limit_error: HTTP 429" },
+    };
+    const handlerPromise = handlers.get("message_end")(event, ctx);
+    await Promise.resolve();
+
+    assert.ok(fallbackRuntime.getMmrSessionFallbackPromptInFlight(), "promptInFlight is set while the prompt runs");
+
+    // Concurrent message-end while in flight is dropped without a second prompt.
+    const selectsBefore = selectCalls.length;
+    const concurrent = await handlers.get("message_end")(event, ctx);
+    assert.equal(concurrent, undefined, "concurrent message-end is dropped while a prompt is in flight");
+    assert.equal(selectCalls.length, selectsBefore, "the in-flight guard prevents a second prompt");
+
+    releaseSelect();
+    await handlerPromise;
+    assert.equal(fallbackRuntime.getMmrSessionFallbackPromptInFlight(), undefined, "finally clears promptInFlight");
+  });
+
+  it("clears promptInFlight when the prompt rejects", async () => {
+    const extension = (await importSource("extensions/mmr-session-fallback/index.ts")).default;
+    const runtime = await loadRuntime();
+    const fallbackRuntime = await importSource("extensions/mmr-session-fallback/runtime.ts");
+    runtime.setMmrModeState(lockedSmartState());
+    const { pi, handlers } = createMockPi();
+    const notifications = [];
+    const { ctx } = createMockExtensionContext({
+      sessionId: "session-1",
+      models: [FAILING_MODEL, FALLBACK_MODEL, OTHER_MODEL],
+      model: FAILING_MODEL,
+    });
+    ctx.ui.notify = (message, level) => { notifications.push({ message, level }); };
+    ctx.ui.select = async (title) => {
+      if (/fallback model/i.test(title)) throw new Error("select boom");
+      return undefined;
+    };
+    extension(pi);
+
+    const result = await handlers.get("message_end")({
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "error", errorMessage: "rate_limit_error: HTTP 429" },
+    }, ctx);
+
+    assert.equal(result, undefined, "a rejected prompt returns undefined");
+    assert.equal(notifications.at(-1)?.level, "error", "a rejected prompt notifies an error");
+    assert.equal(fallbackRuntime.getMmrSessionFallbackPromptInFlight(), undefined, "finally clears promptInFlight on the error path");
+  });
+
   it("does not rehydrate stale overrides for a different current mode route", async () => {
     const extension = (await importSource("extensions/mmr-session-fallback/index.ts")).default;
     const runtime = await loadRuntime();

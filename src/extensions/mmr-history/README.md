@@ -57,6 +57,7 @@ Case-insensitive; multiple `file:` / `repo:` tokens combine with implicit AND. E
 | `applied` | Evaluated against session data. |
 | `unsupported` | Syntax recognized but not implemented (`ref:`, `author:`, `task:`, …). |
 | `non_applicable` | Implemented but no candidate session can be evaluated (e.g. `repo:` with no resolvable remotes). Returns zero matches plus the diagnostic; never silently broadens. |
+| `invalid` | An `after:`/`before:` value that did not parse as a date. The date filter is ignored (results are not constrained by it) and the token is surfaced as `Invalid date filters ignored: …` instead of being dropped silently. |
 
 ### Worker-first read with lexical fallback
 

@@ -31,7 +31,7 @@ export interface SessionSearchMatch {
   unsupportedFilters: string[];
 }
 
-export type QueryDiagnosticStatus = "applied" | "unsupported" | "non_applicable";
+export type QueryDiagnosticStatus = "applied" | "unsupported" | "non_applicable" | "invalid";
 
 export interface QueryDiagnostic {
   filter: string;
@@ -105,6 +105,9 @@ function buildQueryDiagnostics(query: SessionQuery): QueryDiagnostic[] {
   for (const token of query.fileTokens) diagnostics.push({ filter: redactText(token), status: "applied" });
   for (const token of query.repoTokens) diagnostics.push({ filter: redactText(token), status: "applied" });
   for (const token of query.unsupportedFilters) diagnostics.push({ filter: redactText(token), status: "unsupported" });
+  // `after:`/`before:` tokens with an unparseable date: recorded so the tool
+  // can tell the user the date was ignored rather than silently dropping it.
+  for (const token of query.invalidFilters) diagnostics.push({ filter: redactText(token), status: "invalid" });
   return diagnostics;
 }
 
