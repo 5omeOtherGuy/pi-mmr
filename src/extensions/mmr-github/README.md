@@ -31,7 +31,7 @@ All tools are **read-only**. There is no issue, pull request, branch, or write e
 | --- | --- |
 | `read_github` | Read a file with optional `read_range`, or list a directory. |
 | `list_directory_github` | List directory entries; directories end with `/`. |
-| `glob_github` | Match repository paths with `*`, `**`, `?`, `{a,b}`, and character classes. |
+| `glob_github` | Match repository paths with `*`, `**`, `?`, `{a,b}`, and a validated `[...]` character-class subset. |
 | `search_github` | Search code within one repository; requires a token. |
 | `commit_search` | Search commit messages or list recent commits filtered by path, author, or date. |
 | `diff_github` | Compare refs and return file-level stats; optionally include bounded patches. |
@@ -77,6 +77,22 @@ Settings are sampled once at extension load. Restart Pi after changing fields th
 `read_github` fetches the whole file within GitHub's contents-API ceiling, applies `read_range` first, then gates the resulting slice at 128 KiB. If the requested slice is too large, the tool returns a clear retry-with-smaller-range error and reports the file's total line count.
 
 Directory listings accept `limit` to bound large directories. Files larger than GitHub's inline contents-API limit are reported as too large.
+
+### Glob matching and errors
+
+`glob_github` uses a documented, hand-rolled matcher (no glob dependency) compiled to a single anchored, case-sensitive pattern. It supports:
+
+- `*` — any run of characters except `/`
+- `**` — any run of characters including `/`; a `**/` segment also matches zero leading path segments
+- `?` — exactly one character except `/`
+- `{a,b}` — brace alternation
+- `[...]` — character classes restricted to ASCII letters, digits, `_`, and `.` as literal members, ascending ranges of those characters (e.g. `[a-z]`, `[0-9]`), and an optional leading `!`/`^` negation
+
+Unsupported or malformed class syntax (an empty class, an out-of-order range such as `[z-a]`, or any other member character) is rejected with a clear glob-specific error that names the offending pattern; no internal regex error text is surfaced.
+
+### Errors
+
+All `mmr-github` tools intentionally **return** a normal result whose `details.error` (and text body) carries the failure message instead of throwing. This applies uniformly across the suite — invalid parameters, repository parse failures, rate limits, truncated trees, slice-too-large reads, and malformed glob input all surface as readable error-shaped results so the model can read `details.error` and adapt within the same turn. A malformed `glob_github` pattern returns the glob-syntax error described above rather than throwing.
 
 ## Safety and privacy
 
