@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
@@ -169,6 +169,78 @@ describe("mmr-core settings", () => {
         loaded.warnings.some((w) => /modelPreferences/.test(w) && /\/project\/\.pi\/settings\.json/.test(w)),
         `expected a modelPreferences-shape warning, got ${JSON.stringify(loaded.warnings)}`,
       );
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("mmr-core settings - read path hardening", () => {
+  it("refuses to follow a symlinked settings file on load and keeps the sibling file", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-settings-symlink-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      writeFileSync(
+        path.join(home, ".pi/agent/settings.json"),
+        JSON.stringify({ mmrCore: { defaultMode: "rush" } }),
+      );
+      const outside = path.join(tempRoot, "outside.json");
+      writeFileSync(outside, JSON.stringify({ mmrCore: { defaultMode: "deep" } }));
+      const projectSettings = path.join(project, ".pi/settings.json");
+      symlinkSync(outside, projectSettings);
+
+      const { loadMmrCoreSettings } = await importSource("extensions/mmr-core/settings.ts");
+      const loaded = loadMmrCoreSettings(project, home);
+
+      // Symlinked file is refused on read: its defaultMode is not applied.
+      assert.equal(loaded.settings.defaultMode, "rush");
+      assert.deepEqual(loaded.filesRead, [path.join(home, ".pi/agent/settings.json")]);
+      assert.equal(loaded.warnings.length, 1);
+      assert.match(loaded.warnings[0], /Could not read MMR settings from .*\/project\/\.pi\/settings\.json/);
+      assert.match(loaded.warnings[0], /symbolic link/);
+
+      // The symlink target is never modified by a read.
+      assert.deepEqual(JSON.parse(readFileSync(outside, "utf8")), { mmrCore: { defaultMode: "deep" } });
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("locks filesRead semantics for missing, empty, and valid files", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "pi-mmr-settings-matrix-"));
+    try {
+      const home = path.join(tempRoot, "home");
+      const project = path.join(tempRoot, "project");
+      mkdirSync(path.join(home, ".pi/agent"), { recursive: true });
+      mkdirSync(path.join(project, ".pi"), { recursive: true });
+
+      // Missing home file (directory exists, file does not); empty project file.
+      writeFileSync(path.join(project, ".pi/settings.json"), "{}");
+
+      const { loadMmrCoreSettings } = await importSource("extensions/mmr-core/settings.ts");
+      const missingHome = loadMmrCoreSettings(project, home);
+
+      // Missing file is not counted as read; present-but-empty file is.
+      assert.deepEqual(missingHome.filesRead, [path.join(project, ".pi/settings.json")]);
+      assert.deepEqual(missingHome.warnings, []);
+      assert.deepEqual(missingHome.settings, {});
+
+      // Add a valid home file: both files now read.
+      writeFileSync(
+        path.join(home, ".pi/agent/settings.json"),
+        JSON.stringify({ mmrCore: { defaultMode: "deep" } }),
+      );
+      const both = loadMmrCoreSettings(project, home);
+      assert.deepEqual(both.filesRead, [
+        path.join(home, ".pi/agent/settings.json"),
+        path.join(project, ".pi/settings.json"),
+      ]);
+      assert.equal(both.settings.defaultMode, "deep");
+      assert.deepEqual(both.warnings, []);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { readJsonSettingsFile } from "./internal/settings-file.js";
 import { isRecord } from "./internal/json.js";
 import { isMmrModeKey } from "./modes.js";
 import type { MmrCoreSettings, MmrModelPreference } from "./types.js";
@@ -57,11 +58,20 @@ export interface LoadedMmrCoreSettings {
   warnings: string[];
 }
 
+// Route the load path through the same hardened reader the config writers use
+// (`O_NOFOLLOW`, refuses symlinked settings, refuses invalid JSON) so a
+// symlinked `settings.json` is rejected on read exactly as it is on write.
+// The `existsSync` pre-check is retained solely to preserve the loader's
+// missing-vs-empty distinction: a truly missing file yields `{}` (no `value`)
+// and is skipped (not counted in `filesRead`), while a present-but-empty `{}`
+// file reads as `{ value: {} }` and is counted. Helper errors (symlink /
+// invalid JSON) are wrapped into the loader's non-fatal read warning so
+// loading continues for the sibling file and never throws.
 function readJsonFile(filePath: string): { value?: unknown; warning?: string } {
   if (!existsSync(filePath)) return {};
 
   try {
-    return { value: JSON.parse(readFileSync(filePath, "utf8")) };
+    return { value: readJsonSettingsFile(filePath) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { warning: `Could not read MMR settings from ${filePath}: ${message}` };
