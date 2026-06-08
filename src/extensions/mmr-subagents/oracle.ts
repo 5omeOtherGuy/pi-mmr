@@ -23,11 +23,11 @@ import { selectMmrModelRoute } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildOracleWorkerSystemPrompt as buildOracleWorkerSystemPromptFromPrompts } from "./prompts.js";
+import { readMmrWorkerSessionId } from "./fallback.js";
 import {
-  type MmrWorkerFallbackRegistry,
-  readMmrWorkerSessionId,
-  runMmrWorkerWithModelFallback,
-} from "./fallback.js";
+  resolveEffectiveRunner,
+  runMmrWorkerWithSharedFallback,
+} from "./worker-fallback-run.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import { ORACLE_ALWAYS_BLOCKING_GUIDANCE } from "./tool-guidance.js";
 import { resolveWorkerCwd } from "./worker-host.js";
@@ -38,8 +38,6 @@ import {
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcome,
-  createChildCliMmrSubagentRunner,
-  createMmrSubagentRunnerFromRunWorker,
   type MmrSpawnedSubagentWorkerDetailsBase,
   type MmrWorkerOutcomeStatus,
   type MmrSubagentRunOptions,
@@ -663,16 +661,7 @@ export function createMmrAdvisorTool(
   config: MmrAdvisorToolConfig,
   deps: OracleToolDeps = {},
 ): ToolDefinition {
-  if (deps.runner && deps.runWorker) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `createMmrAdvisorTool(${config.toolName}): both runner and runWorker were provided; the runner takes precedence and runWorker is ignored.`,
-    );
-  }
-  const runner: MmrSubagentRunner = deps.runner
-    ?? (deps.runWorker
-      ? createMmrSubagentRunnerFromRunWorker(deps.runWorker)
-      : createChildCliMmrSubagentRunner());
+  const effectiveRunner = resolveEffectiveRunner(deps);
   const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
   const perFileByteLimit = deps.perFileByteLimit ?? config.defaultPerFileByteLimit;
   return {
@@ -709,13 +698,6 @@ export function createMmrAdvisorTool(
       );
       const profile = requireMmrAdvisorProfile(config.profileName);
       const registry = resolveCtxMmrModelRegistry(ctx);
-      const effectiveRunner = deps.runner
-        ? deps.runner
-        : deps.runWorker
-          ? createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps)
-          : deps.runnerDeps
-            ? createChildCliMmrSubagentRunner(deps.runnerDeps)
-            : runner;
 
       // Run the worker with session-scoped model fallback (issue #9). The
       // closure owns normal model preference resolution; when a fallback override is
@@ -763,14 +745,12 @@ export function createMmrAdvisorTool(
         return { result, route: model };
       };
 
-      const outcome = await runMmrWorkerWithModelFallback({
+      const outcome = await runMmrWorkerWithSharedFallback({
         ctx,
         sessionId: readMmrWorkerSessionId(ctx),
-        registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
         toolName: config.toolName,
         profileName: config.profileName,
         candidatePreferences: profile.modelPreferences,
-        classifyOutcome: (result) => classifyMmrWorkerOutcome(result, { partialOutputPolicy: "fail-on-nonzero" }),
         run: runWorkerOnce,
       });
 
