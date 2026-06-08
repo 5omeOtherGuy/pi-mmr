@@ -102,10 +102,18 @@ export const ORACLE_WORKER_TOOLS: readonly string[] = Object.freeze([
 
 /**
  * Ordered worker-model preferences with both canonical
- * (`provider/id`) and bare-id forms so the loose-match logic
- * ({@link selectOracleWorkerModel}) succeeds regardless of which form
- * the parent Pi registry exposes. Source of truth: the `oracle`
- * subagent profile in `mmr-core`.
+ * (`provider/id`) and bare-id forms, derived from the `oracle` subagent
+ * profile in `mmr-core` (the single source of truth).
+ *
+ * Export-only/legacy convenience constant: it is retained for
+ * compatibility and is no longer wired into any tool config field. The
+ * advisor parent resolves its provider/model through the shared
+ * `selectMmrModelRoute` registry resolver using the profile's
+ * `modelPreferences` (see `resolveAdvisorModelPreferences`), so this
+ * frozen list has no internal runtime consumer beyond its own test and
+ * the package-root re-export. The dual canonical/bare-id forms let loose
+ * matching ({@link selectOracleWorkerModel}) succeed regardless of which
+ * form the parent Pi registry exposes.
  */
 export const ORACLE_DEFAULT_MODEL_PREFERENCES: readonly string[] = Object.freeze([
   ...expandMmrModelPreferencesToStrings(requireOracleProfile().modelPreferences),
@@ -639,13 +647,6 @@ export interface MmrAdvisorToolConfig {
   outputLabel: string;
   /** Profile-resolved worker tool allowlist (for details reporting). */
   workerTools: readonly string[];
-  /**
-   * @deprecated Retained for compatibility only and no longer used for
-   * model preference resolution. The advisor parent now resolves its provider/model through
-   * the shared `selectMmrModelRoute` registry resolver using the
-   * profile's `modelPreferences` (see `resolveAdvisorModelPreferences`).
-   */
-  defaultModelPreferences?: readonly string[];
   /** Default per-file inline byte cap. */
   defaultPerFileByteLimit: number;
   /** Render the streaming call component. */
@@ -794,7 +795,6 @@ export const ORACLE_TOOL_CONFIG: MmrAdvisorToolConfig = {
   progressPlaceholder: ORACLE_PROGRESS_PLACEHOLDER,
   outputLabel: ORACLE_TOOL_NAME,
   workerTools: ORACLE_WORKER_TOOLS,
-  defaultModelPreferences: ORACLE_DEFAULT_MODEL_PREFERENCES,
   defaultPerFileByteLimit: DEFAULT_ORACLE_PER_FILE_BYTE_LIMIT,
   renderCall: (args, theme, context) =>
     renderMmrSubagentCall(ORACLE_TOOL_NAME, args, theme as never, context as never),

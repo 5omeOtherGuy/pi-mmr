@@ -268,6 +268,16 @@ describe("ORACLE_DEFAULT_MODEL_PREFERENCES", () => {
   });
 });
 
+describe("ORACLE_TOOL_CONFIG", () => {
+  it("does not carry the removed defaultModelPreferences field", async () => {
+    const { ORACLE_TOOL_CONFIG } = await importSource(ORACLE_MODULE);
+    assert.ok(
+      !("defaultModelPreferences" in ORACLE_TOOL_CONFIG),
+      "ORACLE_TOOL_CONFIG must not reintroduce the inert defaultModelPreferences field; model preferences resolve solely through the oracle subagent profile.",
+    );
+  });
+});
+
 describe("oracle execute() seam", () => {
   it("rejects missing or blank task before spawning a worker", async () => {
     const { createOracleTool } = await importSource(ORACLE_MODULE);

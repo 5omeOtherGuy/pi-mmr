@@ -1,3 +1,43 @@
+/**
+ * `pi-mmr` package root barrel — the public export surface.
+ *
+ * Exports here are organized into stability tiers. The same tiers, the
+ * compatibility rule, and a per-tier breakdown of what each covers are
+ * documented in `docs/public-api-surface.md` (the symbol-by-symbol API
+ * reference lives in `docs/public-api.md` and `docs/mmr-core-api.md`);
+ * keep the tier doc, this block, and the section banners below in sync
+ * when the surface changes.
+ *
+ * Tiers:
+ *
+ * - Stable: supported public API. Removing or renaming a Stable export is
+ *   a breaking change — it requires a semver-major bump and a `CHANGELOG.md`
+ *   migration note. Covers mode keys/definitions, the model resolver,
+ *   routing, feature gates, settings loaders, the `createMmr*Extension`
+ *   factories, the public tool `create*`/`register*` functions, and the
+ *   public type surface.
+ *
+ * - Internal / prompt-assembly: exported for cross-extension wiring and
+ *   advanced embedders. Not part of the stability promise and may change
+ *   without a major bump. Covers prompt-layer markers/builders, the
+ *   prompt-assembly helpers, the planned-tool catalog, the debug-fixture
+ *   renderers, and legacy convenience constants such as
+ *   `ORACLE_DEFAULT_MODEL_PREFERENCES`.
+ *
+ * - Test seam: exported (or, in a few cases, deliberately NOT re-exported
+ *   from this barrel) only for the repo's own tests. Do not depend on these
+ *   externally.
+ *
+ * Compatibility rule: no export is ever pruned abruptly. Any future
+ * removal or relocation must ship a staged compatibility plan — a
+ * `CHANGELOG.md` deprecation note, a transition window, and (for
+ * type-only members) a `@deprecated` JSDoc tag first.
+ *
+ * Section banner comments below mark the owning extension/module for each
+ * export group; they are comment-only and add or remove no export.
+ */
+
+// --- mmr-core: public types (Stable) ---
 export type {
   MmrActiveToolManifestEntry,
   MmrCoreSettings,
@@ -39,6 +79,7 @@ export type {
   MmrRegisteredModelLike,
 } from "./extensions/mmr-core/model-resolver.js";
 
+// --- mmr-core: modes, model resolver & routing (Stable) ---
 export { DEFAULT_MMR_MODE, MMR_MODE_KEYS, MMR_MODES, getMmrMode, isMmrModeKey } from "./extensions/mmr-core/modes.js";
 export { resolveAndApplyMmrModel, selectMmrModelRoute } from "./extensions/mmr-core/model-resolver.js";
 export { resolveMmrModeSelection } from "./extensions/mmr-core/routing.js";
@@ -68,6 +109,7 @@ export type {
   MmrStateChangedHandler,
 } from "./extensions/mmr-core/runtime.js";
 export { loadMmrCoreSettings } from "./extensions/mmr-core/settings.js";
+// --- mmr-core: prompt assembly & subagent wiring (Internal / prompt-assembly) ---
 export { MMR_PROMPT_LAYER_END, MMR_PROMPT_LAYER_START, buildMmrPromptLayer } from "./extensions/mmr-core/prompt.js";
 export {
   expandMmrModelPreferencesToStrings,
@@ -159,10 +201,12 @@ export {
   extractActiveBuiltinToolNames,
   listBuiltinToolGuidanceTools,
 } from "./extensions/mmr-core/builtin-tool-guidance.js";
+// --- mmr-core: planned-tool catalog & debug renderers (Internal / prompt-assembly) ---
 export { MMR_PLANNED_TOOL_CATALOG } from "./extensions/mmr-core/planned-catalog.js";
 export { renderMmrPromptDebugFixture, stringifyMmrToolSchema } from "./extensions/mmr-core/prompt-debug-renderer.js";
 export { MMR_MODE_STATE_ENTRY, findLatestPersistedModeState } from "./extensions/mmr-core/state.js";
 export { createMmrToolRegistry, isMmrToolAllowed, resolveMmrTools as resolveMmrToolNames } from "./extensions/mmr-core/tool-registry.js";
+// --- mmr-session-fallback (Stable) ---
 export { createMmrSessionFallbackExtension } from "./extensions/mmr-session-fallback/index.js";
 export { classifyMmrSessionFallbackError } from "./extensions/mmr-session-fallback/classifier.js";
 export type { MmrSessionFallbackErrorClassification, MmrSessionFallbackQuotaKind } from "./extensions/mmr-session-fallback/classifier.js";
@@ -175,6 +219,7 @@ export {
 } from "./extensions/mmr-session-fallback/state.js";
 export type { PersistedMmrSessionFallbackOverride } from "./extensions/mmr-session-fallback/state.js";
 export { getMmrSessionFallbackOverrideSnapshot } from "./extensions/mmr-session-fallback/runtime.js";
+// --- mmr-toolbox (Stable) ---
 export { ApplyPatchError } from "./extensions/mmr-toolbox/apply-patch.js";
 export { registerMmrToolboxProviders } from "./extensions/mmr-toolbox/index.js";
 export {
@@ -196,6 +241,7 @@ export {
   createTodoListTool,
   refreshTodoWidget,
 } from "./extensions/mmr-toolbox/todo-list-tool.js";
+// --- mmr-history (Stable) ---
 export {
   createMmrHistoryExtension,
 } from "./extensions/mmr-history/index.js";
@@ -263,6 +309,7 @@ export type {
   TodoListErrorDetails,
 } from "./extensions/mmr-toolbox/todo-list-tool.js";
 
+// --- mmr-web (Stable) ---
 export type { MmrWebSettings, LoadedMmrWebSettings } from "./extensions/mmr-web/config.js";
 export { DEFAULT_MAX_RESULT_BYTES, DEFAULT_TIMEOUT_MS, loadMmrWebSettings } from "./extensions/mmr-web/config.js";
 export {
@@ -276,6 +323,7 @@ export type { UrlValidationResult } from "./extensions/mmr-web/url-policy.js";
 export { createMmrWebExtension } from "./extensions/mmr-web/index.js";
 export type { MmrWebFactoryOverrides } from "./extensions/mmr-web/index.js";
 
+// --- mmr-github (Stable) ---
 export type { MmrGithubSettings, LoadedMmrGithubSettings } from "./extensions/mmr-github/config.js";
 export {
   DEFAULT_GITHUB_API_BASE_URL,
@@ -312,6 +360,9 @@ export type { MmrGithubToolDeps } from "./extensions/mmr-github/tools.js";
 export { createMmrGithubExtension } from "./extensions/mmr-github/index.js";
 export type { MmrGithubFactoryOverrides } from "./extensions/mmr-github/index.js";
 
+// --- mmr-subagents: providers, extension & subagent tools (Stable;
+//     ORACLE_DEFAULT_MODEL_PREFERENCES is an Internal/legacy convenience
+//     constant) ---
 export {
   MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE,
   MMR_SUBAGENTS_ASYNC_TASK_TOOLS,
