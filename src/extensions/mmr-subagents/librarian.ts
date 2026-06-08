@@ -27,11 +27,11 @@ import {
   type MmrGithubToolInfoLike,
 } from "../mmr-github/tool-ownership.js";
 import { buildLibrarianWorkerSystemPrompt as buildLibrarianWorkerSystemPromptFromPrompts } from "./prompts.js";
+import { readMmrWorkerSessionId } from "./fallback.js";
 import {
-  type MmrWorkerFallbackRegistry,
-  readMmrWorkerSessionId,
-  runMmrWorkerWithModelFallback,
-} from "./fallback.js";
+  resolveEffectiveRunner,
+  runMmrWorkerWithSharedFallback,
+} from "./worker-fallback-run.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import { LIBRARIAN_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import { buildWorkerToolManifest, resolveWorkerCwd, type ToolHostLike } from "./worker-host.js";
@@ -39,8 +39,6 @@ import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcome,
-  createChildCliMmrSubagentRunner,
-  createMmrSubagentRunnerFromRunWorker,
   emptyMmrWorkerUsageStats,
   type MmrSpawnedSubagentWorkerDetailsBase,
   type MmrSubagentRunOptions,
@@ -556,16 +554,7 @@ function isContextWindowError(err: unknown): boolean {
 }
 
 export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinition {
-  if (deps.runner && deps.runWorker) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      "createLibrarianTool: both runner and runWorker were provided; the runner takes precedence and runWorker is ignored.",
-    );
-  }
-  const runner: MmrSubagentRunner = deps.runner
-    ?? (deps.runWorker
-      ? createMmrSubagentRunnerFromRunWorker(deps.runWorker)
-      : createChildCliMmrSubagentRunner());
+  const effectiveRunner = resolveEffectiveRunner(deps);
   const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
   const resolveInvocation = deps.resolveInvocation ?? defaultResolveLibrarianInvocation;
   return {
@@ -675,14 +664,6 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
           : undefined,
       };
 
-      const effectiveRunner = deps.runner
-        ? deps.runner
-        : deps.runWorker
-          ? createMmrSubagentRunnerFromRunWorker(deps.runWorker, deps.runnerDeps)
-          : deps.runnerDeps
-            ? createChildCliMmrSubagentRunner(deps.runnerDeps)
-            : runner;
-
       // Session-scoped model fallback (issue #9). Under an applied override
       // the closure re-resolves the route (so parent spawn and child
       // activation agree) and forwards the override to the child via the
@@ -717,14 +698,12 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
 
       let result: MmrWorkerResult;
       try {
-        const outcome = await runMmrWorkerWithModelFallback({
+        const outcome = await runMmrWorkerWithSharedFallback({
           ctx,
           sessionId: readMmrWorkerSessionId(ctx),
-          registry: ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
           toolName: LIBRARIAN_TOOL_NAME,
           profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
           candidatePreferences: requireLibrarianProfile().modelPreferences,
-          classifyOutcome: (candidate) => classifyMmrWorkerOutcome(candidate, { partialOutputPolicy: "fail-on-nonzero" }),
           run: runWorkerOnce,
         });
         result = outcome.result;
