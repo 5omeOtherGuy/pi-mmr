@@ -5,6 +5,11 @@ import type {
   MmrAsyncTaskBoardEntry,
 } from "./async-task-registry.js";
 import {
+  backgroundStatusColor,
+  backgroundStatusGlyph,
+  backgroundStatusWord,
+} from "./background-task-view.js";
+import {
   compactOneLine,
   formatTitle,
   type BackgroundTaskDetails,
@@ -18,32 +23,6 @@ export function backgroundTaskRenderStatus(status: string | undefined): RenderSt
   if (status === "succeeded") return "succeeded";
   if (status === "failed" || status === "cancelled") return "failed";
   return undefined;
-}
-
-/**
- * One Pi-native status glyph for background tasks, mirroring the working
- * indicator / task-list language: a braille loader frame for in-flight work,
- * `✓` succeeded, `✕` failed, `–` cancelled. Static (result and board rows
- * are poll snapshots, not animated). Kept as a local constant — pi-tui does
- * not export its loader frames and cross-extension coupling is unwarranted
- * for a single glyph.
- */
-const PI_LOADER_GLYPH = "⠋";
-
-function backgroundStatusGlyph(status: string | undefined): string {
-  if (status === "running" || status === "cancelling") return PI_LOADER_GLYPH;
-  if (status === "succeeded") return "✓";
-  if (status === "failed") return "✕";
-  if (status === "cancelled") return "–";
-  return "•";
-}
-
-function backgroundStatusColor(status: string | undefined): string {
-  if (status === "running" || status === "cancelling") return "warning";
-  if (status === "succeeded") return "success";
-  if (status === "failed") return "error";
-  // cancelled / unknown: neutral. A user-initiated cancel is not an error.
-  return "muted";
 }
 
 export function backgroundStatusBgFn(
@@ -60,23 +39,15 @@ export function backgroundStatusBgFn(
   return (text) => text;
 }
 
-function backgroundTaskStatusLabel(status: string | undefined): string {
-  // The `background` badge already conveys placement, so the status word does
-  // not repeat it ("running", not "running in background").
-  if (status === "running") return "running";
-  if (status === "cancelling") return "cancelling";
-  if (status === "succeeded") return "completed";
-  if (status === "cancelled") return "cancelled";
-  if (status === "failed") return "failed";
-  return status ?? "background";
-}
-
 export function backgroundStatusBadge(
   status: string | undefined,
   theme: SubagentTheme,
 ): string {
-  const color = backgroundStatusColor(status);
-  return `${theme.fg(color, backgroundStatusGlyph(status))} ${theme.fg(color, backgroundTaskStatusLabel(status))}`;
+  // The shared glyph/colour helpers expect a concrete status; an unknown one
+  // resolves to the neutral `•`/muted pair, matching the prior local behavior.
+  const concrete = status ?? "";
+  const color = backgroundStatusColor(concrete);
+  return `${theme.fg(color, backgroundStatusGlyph(concrete))} ${theme.fg(color, backgroundStatusWord(status))}`;
 }
 
 export function backgroundTaskHeaderLine(
@@ -191,7 +162,7 @@ export function renderBackgroundTaskBoard(value: unknown, theme: SubagentTheme):
   const container = new Container();
   const total = board.counts.active + board.counts.stalled + board.counts.finished;
   const headGlyph = board.counts.active > 0
-    ? theme.fg("warning", PI_LOADER_GLYPH)
+    ? theme.fg("warning", backgroundStatusGlyph("running"))
     : theme.fg("muted", "•");
   const counts = theme.fg(
     "muted",

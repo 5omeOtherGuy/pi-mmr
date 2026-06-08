@@ -7,7 +7,11 @@ import {
   type MmrAsyncTaskInternalSnapshot,
   type MmrAsyncTaskStatus,
 } from "./async-task-registry.js";
-import { START_TASK_AGENT_EXAMPLES, START_TASK_SELECTION_GUIDANCE } from "./tool-guidance.js";
+import {
+  START_TASK_AGENT_EXAMPLES,
+  START_TASK_GROUP_FANOUT_GUIDANCE,
+  START_TASK_SELECTION_GUIDANCE,
+} from "./tool-guidance.js";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const TASK_POLL_TOOL_NAME = "task_poll";
@@ -59,6 +63,10 @@ export interface AsyncTaskToolDetails {
   agent?: AsyncTaskAgentName;
   taskId?: string;
   groupId?: string;
+  /** True on the start_task call that opened the group (renders the group card). */
+  groupOpener?: boolean;
+  /** Registry partition key; renderer-only, lets the inline card read live state. */
+  sessionKey?: string;
   status?: MmrAsyncTaskStatus;
   terminalOutcome?: MmrAsyncTaskInternalSnapshot["terminalOutcome"];
   freshness?: MmrAsyncTaskInternalSnapshot["freshness"];
@@ -194,6 +202,7 @@ export const START_TASK_DESCRIPTION = [
   "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session.",
   "Use task_poll/task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
   "Use group_id:'new' on the first grouped start_task call to mint a worker group, then reuse the returned group_id on sibling start_task calls and task_poll/task_wait/task_cancel. The opening call controls the single grouped notification; sibling tasks in the group do not send individual completion notifications.",
+  START_TASK_GROUP_FANOUT_GUIDANCE,
   "For Task workers only, capabilityProfile can narrow tools to read-only or read-write (narrowing only; never widens the default Task surface).",
   "By default a background task notifies you once it finishes; pass notify:false to opt out and make task_poll/task_wait the only retrieval path.",
   "",
@@ -208,6 +217,7 @@ export const ASYNC_TASK_GUIDELINES: readonly string[] = [
   "If a task-notification, task-group-notification, or background-tasks-finished notice appears for a task/group whose terminal result is already present in the transcript, treat it as stale; do not call tools or rewrite your answer solely because of it.",
   "Call task_poll with no task_id to list this session's background tasks and their delivery state during fallback checks or multi-worker orchestration.",
   "For grouped workers, open the group with start_task({ group_id: 'new', ... }), copy the returned group_id into each sibling start_task call, then wait/poll/cancel with group_id. When the group finishes, retrieve each needed child output once with task_poll({ task_id }) for the ids the group result lists.",
+  START_TASK_GROUP_FANOUT_GUIDANCE,
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task or group.",
   "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
   "Pass start_task({ notify: false }) to opt out of automatic delivery and pull the result explicitly with task_poll/task_wait.",

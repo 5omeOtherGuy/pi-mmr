@@ -29,6 +29,7 @@ import {
 import {
   ASYNC_TASK_COMPLETION_CUSTOM_TYPE,
   type AsyncTaskCompletionDetails,
+  type BackgroundCardExtras,
   renderAsyncTaskCompletionMessage,
   renderMmrBackgroundTaskCall,
   renderMmrBackgroundTaskResult,
@@ -129,6 +130,19 @@ function refreshAsyncTaskWidget(
   } catch {
     // UI mirror only; ignore.
   }
+}
+
+/**
+ * Live-state resolvers for the inline background card, reading the SAME registry
+ * the belowEditor widget mirrors so the card animates ⠋→✓ in lockstep with it.
+ * The card reads the session partition from `details.sessionKey`; both lookups
+ * are copy-on-read and bounded by the running-task cap.
+ */
+function backgroundCardExtras(registry: MmrAsyncTaskRegistry): BackgroundCardExtras {
+  return {
+    resolveBoard: (sessionKey) => registry.listTasks(sessionKey),
+    resolveGroup: (sessionKey, groupId) => registry.getGroup(sessionKey, groupId),
+  };
 }
 
 function resolveSessionKey(ctx: ExtensionContext | undefined, deps: AsyncTaskToolDeps): string {
@@ -243,6 +257,7 @@ function workerToolsForAgent(agent: AsyncTaskAgentName, taskTools: readonly stri
 
 export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
+  const cardExtras = backgroundCardExtras(registry);
   return {
     name: START_TASK_TOOL_NAME,
     label: START_TASK_TOOL_NAME,
@@ -255,7 +270,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       return renderMmrBackgroundTaskCall(START_TASK_TOOL_NAME, args, theme, context);
     },
     renderResult(result, options, theme, context) {
-      return renderMmrBackgroundTaskResult(START_TASK_TOOL_NAME, result, options, theme, context);
+      return renderMmrBackgroundTaskResult(START_TASK_TOOL_NAME, result, options, theme, context, cardExtras);
     },
     async execute(toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       // Semantic checks first so agent/Task-only guidance the schema cannot
@@ -451,6 +466,11 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
         `start_task: started background worker ${snapshot.taskId}${dedupNote}${groupNote} ("${snapshot.description}", agent ${snapshot.agent}). ` +
         `${deliveryHint} ` +
         `Use task_cancel to stop it. Background tasks are in-memory and lost if the session ends.`;
+      // The opener (group_id:'new') owns the consolidated inline group card;
+      // sibling starts in the same group render nothing inline. Guard on the
+      // task actually landing in the freshly minted group so a deduplicated
+      // retry (whose group we rolled back) does not claim openership.
+      const groupOpener = groupId !== undefined && parsed.groupId === "new" && snapshot.groupId === groupId;
       return {
         content: [{ type: "text", text: message }],
         details: {
@@ -458,7 +478,9 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
           tool: START_TASK_TOOL_NAME,
           agent: snapshot.agent as AsyncTaskAgentName,
           taskId: snapshot.taskId,
+          sessionKey,
           ...(snapshot.groupId !== undefined ? { groupId: snapshot.groupId } : {}),
+          ...(groupOpener ? { groupOpener: true } : {}),
           status: snapshot.status,
           ...(snapshot.terminalOutcome !== undefined ? { terminalOutcome: snapshot.terminalOutcome } : {}),
           freshness: snapshot.freshness,
@@ -474,6 +496,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
 
 export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
+  const cardExtras = backgroundCardExtras(registry);
   return {
     name: TASK_POLL_TOOL_NAME,
     label: TASK_POLL_TOOL_NAME,
@@ -489,7 +512,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       return renderMmrBackgroundTaskCall(TASK_POLL_TOOL_NAME, args, theme, context);
     },
     renderResult(result, options, theme, context) {
-      return renderMmrBackgroundTaskResult(TASK_POLL_TOOL_NAME, result, options, theme, context);
+      return renderMmrBackgroundTaskResult(TASK_POLL_TOOL_NAME, result, options, theme, context, cardExtras);
     },
     async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       const sessionKey = resolveSessionKey(ctx, deps);
@@ -501,7 +524,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
         const group = registry.getGroup(sessionKey, control.groupId, { observe: true });
         if (!group) return groupNotFoundResult(TASK_POLL_TOOL_NAME, control.groupId);
         refreshAsyncTaskWidget(ctx, registry, sessionKey);
-        return groupResult(TASK_POLL_TOOL_NAME, group);
+        return groupResult(TASK_POLL_TOOL_NAME, group, undefined, sessionKey);
       }
       if (!control.taskId) {
         const board = registry.listTasks(sessionKey);
@@ -521,6 +544,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
 
 export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
+  const cardExtras = backgroundCardExtras(registry);
   return {
     name: TASK_WAIT_TOOL_NAME,
     label: TASK_WAIT_TOOL_NAME,
@@ -536,7 +560,7 @@ export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       return renderMmrBackgroundTaskCall(TASK_WAIT_TOOL_NAME, args, theme, context);
     },
     renderResult(result, options, theme, context) {
-      return renderMmrBackgroundTaskResult(TASK_WAIT_TOOL_NAME, result, options, theme, context);
+      return renderMmrBackgroundTaskResult(TASK_WAIT_TOOL_NAME, result, options, theme, context, cardExtras);
     },
     async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       const sessionKey = resolveSessionKey(ctx, deps);
@@ -554,7 +578,7 @@ export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
         });
         if (!result.found || !result.snapshot) return groupNotFoundResult(TASK_WAIT_TOOL_NAME, control.groupId);
         refreshAsyncTaskWidget(ctx, registry, sessionKey);
-        return groupResult(TASK_WAIT_TOOL_NAME, result.snapshot, result.timedOut);
+        return groupResult(TASK_WAIT_TOOL_NAME, result.snapshot, result.timedOut, sessionKey);
       }
       const taskId = control.taskId;
       if (!taskId) return invalidAsyncControlResult(TASK_WAIT_TOOL_NAME, "task_wait requires task_id or group_id.");
@@ -572,6 +596,7 @@ export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
 
 export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefinition {
   const registry = deps.registry ?? getMmrAsyncTaskRegistry();
+  const cardExtras = backgroundCardExtras(registry);
   return {
     name: TASK_CANCEL_TOOL_NAME,
     label: TASK_CANCEL_TOOL_NAME,
@@ -587,7 +612,7 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
       return renderMmrBackgroundTaskCall(TASK_CANCEL_TOOL_NAME, args, theme, context);
     },
     renderResult(result, options, theme, context) {
-      return renderMmrBackgroundTaskResult(TASK_CANCEL_TOOL_NAME, result, options, theme, context);
+      return renderMmrBackgroundTaskResult(TASK_CANCEL_TOOL_NAME, result, options, theme, context, cardExtras);
     },
     async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx): Promise<AgentToolResult<AsyncTaskToolDetails>> {
       const sessionKey = resolveSessionKey(ctx, deps);
@@ -605,7 +630,7 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
         });
         if (!group) return groupNotFoundResult(TASK_CANCEL_TOOL_NAME, control.groupId);
         refreshAsyncTaskWidget(ctx, registry, sessionKey);
-        return groupResult(TASK_CANCEL_TOOL_NAME, group);
+        return groupResult(TASK_CANCEL_TOOL_NAME, group, undefined, sessionKey);
       }
       const taskId = control.taskId;
       if (!taskId) return invalidAsyncControlResult(TASK_CANCEL_TOOL_NAME, "task_cancel requires task_id or group_id.");

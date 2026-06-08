@@ -40,6 +40,15 @@ export const ORACLE_ALWAYS_BLOCKING_GUIDANCE =
 export const START_TASK_SELECTION_GUIDANCE =
   'If you cannot proceed without the result, use the blocking Task/finder/librarian tools; otherwise use start_task so the work runs while you keep working. Choosing a worker ("use a subagent" or "delegate") does not by itself mean background — only background it when you do not need the result before your next step, or the user explicitly asks for background, fan-out, parallel, or asynchronous workers. oracle is always blocking and cannot be a background agent.';
 
+/**
+ * Fan-out discipline for worker groups. The UI renders a spawned group as a
+ * single live card (rows flip ⠋→✓ in place) and the eventual settlement card,
+ * so per-spawn narration is redundant noise. Keep the literal "single step" /
+ * "do not narrate" phrasing so the model-visible guidance is greppable.
+ */
+export const START_TASK_GROUP_FANOUT_GUIDANCE =
+  "When fanning out a worker group, issue the opening start_task({ group_id: 'new', ... }) and every sibling start_task call together in a single step, and do not narrate each spawn or restate the spawned set in prose — the UI renders the whole group as one live card. Go straight to your next action, then collect each needed child output once with task_poll({ task_id }) after the group finishes.";
+
 /** Concrete, copyable start_task agent examples for each background worker. */
 export const START_TASK_AGENT_EXAMPLES: readonly string[] = [
   'Background a code search: start_task({ agent: "finder", params: { query: "..." } }).',

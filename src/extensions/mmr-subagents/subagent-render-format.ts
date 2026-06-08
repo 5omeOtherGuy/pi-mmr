@@ -71,6 +71,19 @@ export interface BackgroundTaskDetails {
   agent?: string;
   taskId?: string;
   groupId?: string;
+  /**
+   * Set on the `start_task` call that minted the group (`group_id:'new'`). Only
+   * the opener renders the consolidated inline group card; sibling starts in the
+   * same group render nothing inline so a swarm is one card, not N.
+   */
+  groupOpener?: boolean;
+  /**
+   * Registry partition key for the live inline card. Renderer-only metadata (it
+   * is not placed in the model-consumed `content`); lets the card read the live
+   * group/board snapshot so rows animate ⠋→✓ in place. Absent on replayed
+   * transcripts, where the card falls back to the static `details` snapshot.
+   */
+  sessionKey?: string;
   status?: string;
   terminalOutcome?: string;
   board?: unknown;

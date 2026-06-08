@@ -5,37 +5,36 @@
  * `task_cancel`) register a background run in the in-memory registry and
  * return immediately. Their per-call transcript output is intentionally
  * minimal; the live, at-a-glance state of every background agent is shown
- * here instead — pinned below the editor with `ctx.ui.setWidget(...)`, away
+ * here too — pinned below the editor with `ctx.ui.setWidget(...)`, away
  * from the above-editor `task_list` todo widget.
  *
- * This keeps background agents off the transcript as repeated cards (a raw
- * `task_<id>` per launch) and gives them one animated status board, mirroring
- * how Pi's working indicator / task list communicate in-flight work. The
- * widget is a pure UI mirror of the registry board; it owns no state.
+ * The row/header/glyph vocabulary and the loader animation clock live in
+ * {@link ./background-task-view.ts}; the inline transcript card renders the
+ * SAME rows from there. This module owns only the widget lifecycle: TUI
+ * gating, per-group bucketing with a finished-retention window, the visible
+ * row cap, and the animation/clear timers. The widget is a pure UI mirror of
+ * the registry board; it owns no state.
  */
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type {
-  MmrAsyncTaskBoard,
-  MmrAsyncTaskBoardEntry,
-  MmrAsyncTaskGroupSnapshot,
-  MmrAsyncTaskGroupStatus,
-} from "./async-task-registry.js";
+import type { MmrAsyncTaskBoard } from "./async-task-registry.js";
 import {
-  formatMmrWorkerTokens,
-  stripMmrWorkerModelProvider,
-} from "./worker-usage-format.js";
+  advanceLoaderFrame,
+  compareRows,
+  currentLoaderFrame,
+  makeSafeFg,
+  PI_LOADER_INTERVAL_MS,
+  renderRowLine,
+  renderSectionHeader,
+  synthesizeGroup,
+  toRow,
+  truncateWidgetLines,
+  type BackgroundViewTheme,
+  type MmrWidgetGroupResolver,
+  type WidgetRow,
+  type WidgetSection,
+} from "./background-task-view.js";
 
-/**
- * Resolves a group's live snapshot (status + counts) for its section header.
- * Supplied by the caller, which holds the registry. Optional: when absent —
- * or when it returns `undefined` — the section header is synthesized from the
- * rows on hand instead. The widget owns no state, so it never reads a registry
- * directly.
- */
-export type MmrWidgetGroupResolver = (
-  groupId: string,
-) => MmrAsyncTaskGroupSnapshot | undefined;
+export type { MmrWidgetGroupResolver } from "./background-task-view.js";
 
 /**
  * Stable widget id used with `ctx.ui.setWidget(...)`. Process-wide unique to
@@ -55,39 +54,12 @@ const WIDGET_MAX_ROWS = 8;
  */
 const WIDGET_FINISHED_RETENTION_MS = 8_000;
 
-/**
- * Pi's native streaming loader frames (see `@earendil-works/pi-tui` `Loader`).
- * Mirrored here so running background agents animate with the same braille
- * spinner the rest of Pi uses. Public-safe constant; pi-tui does not export
- * its frame array. Matches the mmr-toolbox task-list widget cadence.
- */
-const PI_LOADER_FRAMES = [
-  "⠋",
-  "⠙",
-  "⠹",
-  "⠸",
-  "⠼",
-  "⠴",
-  "⠦",
-  "⠧",
-  "⠇",
-  "⠏",
-] as const;
-
-/** Frame interval matching Pi's native loader cadence. */
-const PI_LOADER_INTERVAL_MS = 80;
-
-interface WidgetThemeLike {
-  fg(name: string, value: string): string;
-  bold(value: string): string;
-}
-
 /** Minimal view of the live Pi TUI the widget factory needs to animate. */
 interface WidgetTuiLike {
   requestRender?(force?: boolean): void;
 }
 
-type WidgetFactory = (tui: WidgetTuiLike, theme: WidgetThemeLike) => {
+type WidgetFactory = (tui: WidgetTuiLike, theme: BackgroundViewTheme) => {
   render(width: number): string[];
   invalidate(): void;
   dispose?(): void;
@@ -99,7 +71,7 @@ interface WidgetUILike {
     value: readonly string[] | WidgetFactory | undefined,
     options?: { placement?: "aboveEditor" | "belowEditor" },
   ): void;
-  theme?: WidgetThemeLike;
+  theme?: BackgroundViewTheme;
 }
 
 interface WidgetCtxLike {
@@ -119,189 +91,6 @@ export function isTuiWidgetSurface(ctx: WidgetCtxLike | undefined): boolean {
   if (!ctx?.ui) return false;
   if (typeof ctx.mode === "string") return ctx.mode === "tui";
   return ctx.hasUI === true;
-}
-
-/** A flattened board entry the widget renders, in display order. */
-interface WidgetRow {
-  status: string;
-  freshness: string;
-  agent: string;
-  description: string;
-  runtimeMs: number;
-  createdAtMs: number;
-  resolvedModel?: string;
-  contextWindow?: number;
-  usage?: MmrAsyncTaskBoardEntry["usage"];
-  latestToolName?: string;
-  latestToolStatus?: MmrAsyncTaskBoardEntry["latestToolStatus"];
-  toolCount?: number;
-  terminalOutcome?: MmrAsyncTaskBoardEntry["terminalOutcome"];
-  capabilityProfile?: string;
-  groupId?: string;
-}
-
-/**
- * One group's worth of rows plus the snapshot that labels its header. The
- * synthetic ungrouped bucket has `groupId === undefined` and no `group`; it is
- * rendered headerless when it is the only section (so non-grouped Task usage is
- * byte-identical to the pre-grouping widget).
- */
-interface WidgetSection {
-  groupId: string | undefined;
-  group?: Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts" | "label">;
-  rows: WidgetRow[];
-}
-
-/** Width cap for the group label shown in the section header. */
-const WIDGET_GROUP_LABEL_LIMIT = 40;
-
-function backgroundStatusColor(status: string): string {
-  if (status === "running" || status === "cancelling") return "warning";
-  if (status === "succeeded") return "success";
-  if (status === "failed") return "error";
-  // cancelled / unknown: neutral. A user-initiated cancel is not an error.
-  return "muted";
-}
-
-function groupStatusColor(status: MmrAsyncTaskGroupStatus): string {
-  if (status === "running") return "warning";
-  if (status === "completed") return "success";
-  if (status === "failed") return "error";
-  if (status === "partial") return "warning";
-  // cancelled / unknown: neutral, mirroring a row-level cancel.
-  return "muted";
-}
-
-/**
- * Static status glyph for a row. Running/cancelling resolve to the first
- * loader frame for the resting frame; the live widget overrides running rows
- * with the current braille frame. ✓ succeeded, ✕ failed, – cancelled.
- */
-function backgroundStatusGlyph(status: string, activeFrame?: string): string {
-  if (status === "running" || status === "cancelling") {
-    return activeFrame ?? PI_LOADER_FRAMES[0];
-  }
-  if (status === "succeeded") return "✓";
-  if (status === "failed") return "✕";
-  if (status === "cancelled") return "–";
-  return "•";
-}
-
-function compactOneLine(value: string, limit: number): string {
-  const compact = value.replace(/\s+/g, " ").trim();
-  if (compact.length <= limit) return compact;
-  return `${compact.slice(0, Math.max(0, limit - 1))}…`;
-}
-
-function formatElapsed(ms: number): string | undefined {
-  if (!Number.isFinite(ms) || ms < 0) return undefined;
-  const seconds = Math.floor(ms / 1000);
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
-  if (hours > 0) return `${hours}h${minutes > 0 ? `${minutes}m` : ""}`;
-  if (minutes > 0) return `${minutes}m${remainingSeconds > 0 ? `${remainingSeconds}s` : ""}`;
-  return `${remainingSeconds}s`;
-}
-
-function formatContextUsage(row: WidgetRow): string | undefined {
-  const contextWindow = row.contextWindow;
-  const contextTokens = row.usage?.contextTokens;
-  if (
-    typeof contextWindow !== "number" ||
-    !Number.isFinite(contextWindow) ||
-    contextWindow <= 0 ||
-    typeof contextTokens !== "number" ||
-    !Number.isFinite(contextTokens) ||
-    contextTokens <= 0
-  ) {
-    return undefined;
-  }
-  return `${((contextTokens / contextWindow) * 100).toFixed(1)}% ctx`;
-}
-
-function widgetMetadataParts(row: WidgetRow): string[] {
-  const parts: string[] = [];
-  const elapsed = formatElapsed(row.runtimeMs);
-  if (elapsed) parts.push(elapsed);
-  const model = stripMmrWorkerModelProvider(row.resolvedModel);
-  if (model) parts.push(model);
-  // Capability profile (e.g. `read-only` / `read-write`) shown verbatim as the
-  // worker's lane. The group id is NOT a row chip — it labels the section header.
-  if (row.capabilityProfile) parts.push(row.capabilityProfile);
-  if (row.latestToolName) {
-    const suffix = row.latestToolStatus === "running" ? "…" : "";
-    parts.push(`${row.latestToolName}${suffix}`);
-  }
-  const turns = row.usage?.turns ?? 0;
-  if (turns > 0) parts.push(`${turns} turn${turns === 1 ? "" : "s"}`);
-  if (typeof row.toolCount === "number" && Number.isFinite(row.toolCount) && row.toolCount > 0) {
-    parts.push(`${formatMmrWorkerTokens(row.toolCount)} tool${row.toolCount === 1 ? "" : "s"}`);
-  }
-  if (row.terminalOutcome === "partial") parts.push("partial");
-  const context = formatContextUsage(row);
-  if (context) parts.push(context);
-  return parts;
-}
-
-function toRow(entry: MmrAsyncTaskBoardEntry): WidgetRow {
-  return {
-    status: entry.status,
-    freshness: entry.freshness,
-    agent: entry.agent,
-    description: entry.description,
-    runtimeMs: entry.runtimeMs,
-    createdAtMs: entry.createdAtMs,
-    ...(entry.resolvedModel !== undefined ? { resolvedModel: entry.resolvedModel } : {}),
-    ...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
-    ...(entry.usage !== undefined ? { usage: entry.usage } : {}),
-    ...(entry.latestToolName !== undefined ? { latestToolName: entry.latestToolName } : {}),
-    ...(entry.latestToolStatus !== undefined ? { latestToolStatus: entry.latestToolStatus } : {}),
-    ...(entry.toolCount !== undefined ? { toolCount: entry.toolCount } : {}),
-    ...(entry.terminalOutcome !== undefined ? { terminalOutcome: entry.terminalOutcome } : {}),
-    ...(entry.capabilityProfile !== undefined ? { capabilityProfile: entry.capabilityProfile } : {}),
-    ...(entry.groupId !== undefined ? { groupId: entry.groupId } : {}),
-  };
-}
-
-function isTerminalRowStatus(status: string): boolean {
-  return status === "succeeded" || status === "failed" || status === "cancelled";
-}
-
-/** Non-terminal rows sort above settled ones; ties break by launch order. */
-function compareRows(a: WidgetRow, b: WidgetRow): number {
-  const rank = (r: WidgetRow) => (isTerminalRowStatus(r.status) ? 1 : 0);
-  return rank(a) - rank(b) || a.createdAtMs - b.createdAtMs;
-}
-
-/**
- * Synthesize a section header when no live group snapshot is available (the
- * resolver is absent or the group has already been pruned from the registry).
- * Status/counts are derived from the rows on hand, so the total may undercount
- * members that have already aged out — acceptable for a best-effort header.
- */
-function synthesizeGroup(rows: readonly WidgetRow[]): Pick<MmrAsyncTaskGroupSnapshot, "status" | "counts" | "label"> {
-  const counts = { running: 0, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: rows.length };
-  for (const r of rows) {
-    if (r.status === "succeeded") r.terminalOutcome === "partial" ? counts.partial++ : counts.succeeded++;
-    else if (r.status === "failed") counts.failed++;
-    else if (r.status === "cancelled") counts.cancelled++;
-    else counts.running++;
-  }
-  const status: MmrAsyncTaskGroupStatus =
-    counts.running > 0 ? "running"
-    : counts.failed > 0 ? "failed"
-    : counts.partial > 0 ? "partial"
-    : counts.succeeded > 0 ? "completed"
-    : "cancelled";
-  // Mirror the registry's earliest-child fallback so a synthesized header still
-  // carries a label when no live snapshot is available.
-  let earliest: WidgetRow | undefined;
-  for (const r of rows) {
-    if (!earliest || r.createdAtMs < earliest.createdAtMs) earliest = r;
-  }
-  const label = earliest?.description?.trim();
-  return { status, counts, ...(label ? { label } : {}) };
 }
 
 /**
@@ -378,69 +167,6 @@ function finishedOnlyClearDelayMs(board: MmrAsyncTaskBoard): number | undefined 
   return Math.max(0, Math.min(...delays));
 }
 
-function makeSafeFg(theme: WidgetThemeLike | undefined) {
-  return (name: string, value: string): string => {
-    if (!theme) return value;
-    try {
-      return theme.fg(name, value);
-    } catch {
-      return value;
-    }
-  };
-}
-
-function renderRowLine(
-  row: WidgetRow,
-  theme: WidgetThemeLike | undefined,
-  activeFrame: string | undefined,
-  indent = "",
-): string {
-  const safeFg = makeSafeFg(theme);
-  const color = backgroundStatusColor(row.status);
-  const glyph = safeFg(color, backgroundStatusGlyph(row.status, activeFrame));
-  const agent = safeFg("accent", row.agent);
-  const desc = row.description
-    ? ` ${safeFg("muted", compactOneLine(row.description, 60))}`
-    : "";
-  const metadataParts = widgetMetadataParts(row);
-  const metadata = metadataParts.length > 0
-    ? ` ${safeFg("dim", `· ${metadataParts.join(" · ")}`)}`
-    : "";
-  const fresh = row.freshness === "stalled" || row.freshness === "dead"
-    ? ` ${safeFg(row.freshness === "dead" ? "error" : "warning", `[${row.freshness}]`)}`
-    : "";
-  return `${indent}${glyph} ${agent}${desc}${metadata}${fresh}`;
-}
-
-/**
- * `▸ Explore order services · group_94f0d2  ● completed · 3/4` when the group
- * has a resolved label (label muted, id dim); `▸ group_94f0d2  ● …` when it has
- * none. Status dot+word in the group colour; settled/total in dim.
- */
-function renderSectionHeader(
-  section: WidgetSection,
-  theme: WidgetThemeLike | undefined,
-): string {
-  const safeFg = makeSafeFg(theme);
-  if (section.groupId === undefined) return safeFg("dim", "▸ ungrouped");
-  const marker = safeFg("dim", "▸");
-  const id = safeFg("dim", section.groupId);
-  const group = section.group;
-  const label = group?.label ? compactOneLine(group.label, WIDGET_GROUP_LABEL_LIMIT) : undefined;
-  // Label leads, id trails as the dim disambiguator: `▸ <label> · <id>`.
-  const head = label !== undefined
-    ? `${marker} ${safeFg("muted", label)} ${safeFg("dim", "·")} ${id}`
-    : `${marker} ${id}`;
-  if (!group) return head;
-  const color = groupStatusColor(group.status);
-  const dot = safeFg(color, "●");
-  const word = safeFg(color, group.status);
-  const { succeeded, failed, cancelled, partial, total } = group.counts;
-  const settled = succeeded + failed + cancelled + partial;
-  const count = safeFg("dim", `${settled}/${total}`);
-  return `${head}  ${dot} ${word} ${safeFg("dim", "·")} ${count}`;
-}
-
 /**
  * Flatten sections into widget lines: each group prints a header then its
  * indented rows. A lone ungrouped section prints headerless and flush-left, so
@@ -450,7 +176,7 @@ function renderSectionHeader(
  */
 function renderWidgetLines(
   sections: readonly WidgetSection[],
-  theme: WidgetThemeLike | undefined,
+  theme: BackgroundViewTheme | undefined,
   activeFrame: string | undefined,
 ): string[] {
   const safeFg = makeSafeFg(theme);
@@ -463,7 +189,7 @@ function renderWidgetLines(
     const indent = showHeader ? "  " : "";
     const lines: string[] = [];
     if (showHeader) lines.push(renderSectionHeader(section, theme));
-    for (const row of section.rows) lines.push(renderRowLine(row, theme, activeFrame, indent));
+    for (const row of section.rows) lines.push(renderRowLine(row, theme, activeFrame, { indent }));
     return { lines, rowCount: section.rows.length };
   });
 
@@ -503,14 +229,6 @@ function renderWidgetLines(
   return out;
 }
 
-function truncateWidgetLines(lines: readonly string[], width: number): string[] {
-  if (!Number.isFinite(width)) return [...lines];
-  if (width <= 0) return lines.map(() => "");
-  return lines.map((line) =>
-    visibleWidth(line) > width ? truncateToWidth(line, width) : line,
-  );
-}
-
 /**
  * Project the current registry board onto Pi's persistent widget. Non-TUI
  * surfaces are no-ops; the widget is a UI mirror, not a state source. The
@@ -532,16 +250,17 @@ export function refreshBackgroundTaskWidget(
     const hasActive = board.active.length > 0 || board.stalled.length > 0;
     const clearDelayMs = hasActive ? undefined : finishedOnlyClearDelayMs(board);
     ctx.ui.setWidget(BACKGROUND_TASK_WIDGET_ID, (tui, theme) => {
-      // Animate running rows with Pi's loader cadence. Finished-only rows use a
-      // one-shot clear timer so the drop-off window expires even when no active
-      // worker remains to drive future widget refreshes.
-      let frame = 0;
+      // Animate running rows with Pi's loader cadence by advancing the shared
+      // loader frame (read by the inline card too) and re-rendering the whole
+      // tree. Finished-only rows use a one-shot clear timer so the drop-off
+      // window expires even when no active worker remains to drive future
+      // widget refreshes.
       let timer: ReturnType<typeof setInterval> | ReturnType<typeof setTimeout> | undefined;
       let timerKind: "interval" | "timeout" | undefined;
       if (hasActive && typeof tui?.requestRender === "function") {
         timerKind = "interval";
         timer = setInterval(() => {
-          frame = (frame + 1) % PI_LOADER_FRAMES.length;
+          advanceLoaderFrame();
           try {
             tui.requestRender?.();
           } catch {
@@ -565,7 +284,7 @@ export function refreshBackgroundTaskWidget(
       return {
         render: (width) =>
           truncateWidgetLines(
-            renderWidgetLines(sections, theme, hasActive ? PI_LOADER_FRAMES[frame] : undefined),
+            renderWidgetLines(sections, theme, hasActive ? currentLoaderFrame() : undefined),
             width,
           ),
         invalidate: () => {},
