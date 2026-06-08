@@ -88,6 +88,11 @@ export const MMR_EVENT_STATE_CHANGED = "mmr-core:state-changed";
  */
 export const MMR_EVENT_SESSION_IDENTITY_CHANGED = "mmr-core:session-identity-changed";
 
+// Intentionally a JSON-shaped clone, not a generic deep clone. Runtime
+// snapshots are treated as JSON data; JSON round-trip behavior is observable
+// and differs from structuredClone for own undefined-valued properties and
+// future non-JSON values. Do not replace with structuredClone unless the state
+// contract changes (e.g. Map/Set/Date enters state).
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -149,26 +154,6 @@ function looksLikeMmrModeState(value: unknown): value is MmrModeState {
   // they reach JSON.stringify in the clone path.
   if (value === null || typeof value !== "object") return false;
   return typeof (value as Partial<MmrModeState>).mode === "string";
-}
-
-/**
- * Recursively freeze plain JSON-shaped values. mmr-core's MmrModeState only
- * contains primitives, arrays, and plain objects, so a depth-first freeze
- * is sufficient and stops at non-objects. Used by the runtime to harden the
- * live singleton against accidental mutation by callers that hold the
- * `getMmrModeState()` reference.
- */
-function deepFreezeMmrModeState(state: MmrModeState): MmrModeState {
-  const seen = new WeakSet<object>();
-  const freeze = (value: unknown): void => {
-    if (value === null || typeof value !== "object") return;
-    if (seen.has(value)) return;
-    seen.add(value);
-    Object.freeze(value);
-    for (const child of Object.values(value as Record<string, unknown>)) freeze(child);
-  };
-  freeze(state);
-  return state;
 }
 
 /**
@@ -339,7 +324,7 @@ export function createMmrCoreRuntime(
       // returned by `getMmrModeState()` cannot accidentally corrupt runtime
       // state through array push / property assignment. Callers that need a
       // mutable copy should use `getMmrModeStateSnapshot()`.
-      activeState = state ? deepFreezeMmrModeState(state) : undefined;
+      activeState = state ? deepFreezeJson(state) : undefined;
     },
 
     getMmrSessionIdentity() {
