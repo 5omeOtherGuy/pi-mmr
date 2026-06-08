@@ -97,7 +97,6 @@ export interface MmrModeController {
   setApplyingMmrMode(value: boolean): void;
 }
 
-
 export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
   const nativeFreeModeWarning = [
     "MMR switched to Free mode because the Pi model/thinking setting changed.",

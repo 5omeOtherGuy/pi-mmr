@@ -17,8 +17,8 @@ import { extractExplicitWorkerCliFlags } from "./worker-cli-flags.js";
 
 /**
  * State bindings for {@link applyMmrSubagentProfile}. The bindings own the
- * mutable settings/guard state that lives on the mmr-core extension closure
- * in `index.ts`; the activation helper writes through them so that the
+ * mutable settings/guard state that lives on the mmr-core mode-controller
+ * closure (`mode-controller.ts`); the activation helper writes through them so that the
  * extension keeps a single source of truth for `configuredSubagentModelPreferences`,
  * `settingsFilesRead`, `settingsWarnings`, and the `applyingMmrMode` transaction
  * guard.
