@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getMmrPolicyDiagnostics } from "./diagnostics.js";
+import { formatMmrCompactTokens } from "./token-format.js";
 import {
   MMR_REQUEST_POLICIES,
   applyMmrThinkingLevelToPolicy,
@@ -101,11 +102,13 @@ function sanitizeFooterText(value: string): string {
   return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim();
 }
 
-function formatFooterTokens(count: number): string {
-  if (count < 1_000) return count.toString();
-  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+// Exported as a narrow test seam so boundary-value parity tests can pin the
+// footer format byte-for-byte; not re-exported from the package root.
+export function formatFooterTokens(count: number): string {
+  // The >=10M tier (rounded whole `M`) is unique to the footer to save width;
+  // the lower tiers share mmr-core's compact formatter so the footer and the
+  // worker-metadata footer (formatMmrWorkerTokens) stay byte-for-byte aligned.
+  if (count < 10_000_000) return formatMmrCompactTokens(count);
   return `${Math.round(count / 1_000_000)}M`;
 }
 

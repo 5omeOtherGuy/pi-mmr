@@ -328,4 +328,30 @@ describe("mmr-core thinking-level toggle", () => {
     assert.equal(gptXhigh.openaiResponses.maxOutputTokens, 128000);
     assert.equal(MMR_REQUEST_POLICIES.smartGPT.openaiResponses.reasoning.effort, "medium");
   });
+
+  // Boundary-value parity pins for request-policy's compact token formatter,
+  // exercised through its public surface (formatMmrPolicyContext renders
+  // `<formatTokenCount(contextWindow)> total ...`). This format is
+  // INTENTIONALLY DISTINCT from status.ts's footer formatter (Item 2:
+  // keep-with-comments). It uses Number.isInteger gating + toFixed rather than
+  // Math.round, so e.g. 12345 -> "12.3k" here vs "12k" in the footer. These
+  // pins guard against an accidental unifying edit collapsing the two formats.
+  it("formats request-policy token counts byte-for-byte across boundary values", async () => {
+    const { formatMmrPolicyContext, MMR_REQUEST_POLICIES } = await importSource("extensions/mmr-core/request-policy.ts");
+    const cases = [
+      [999, "999"],
+      [1000, "1k"],
+      [1500, "1.5k"],
+      [12345, "12.3k"],
+      [999999, "1000.0k"],
+      [1000000, "1M"],
+      [1500000, "1.5M"],
+      [9999999, "10.0M"],
+      [10000000, "10M"],
+    ];
+    for (const [input, expected] of cases) {
+      const rendered = formatMmrPolicyContext(MMR_REQUEST_POLICIES.smart, { contextWindow: input });
+      assert.match(rendered, new RegExp(`^${expected.replace(/[.]/g, "\\.")} total`), `formatTokenCount(${input})`);
+    }
+  });
 });

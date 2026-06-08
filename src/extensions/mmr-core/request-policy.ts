@@ -271,6 +271,11 @@ export interface MmrRegisteredModelMetadata {
   maxTokens?: number;
 }
 
+// Intentionally a DISTINCT compact format from status.ts's `formatFooterTokens`
+// (and the shared mmr-core/token-format.ts compact tiers). This policy display
+// uses Number.isInteger gating + toFixed (e.g. 12345 -> "12.3k", 1_000 -> "1k"),
+// whereas the footer uses Math.round (12345 -> "12k"). Do not collapse the two
+// onto one helper: that would silently change operator-visible numbers.
 function formatTokenCount(count: number): string {
   if (count >= 1_000_000) {
     const millions = count / 1_000_000;

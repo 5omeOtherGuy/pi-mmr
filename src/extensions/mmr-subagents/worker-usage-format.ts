@@ -9,6 +9,7 @@
  * from `mmr-subagents` or vice versa. The Pi-TUI Container assembly
  * stays in each extension's own progress-rendering module.
  */
+import { formatMmrCompactTokens } from "../mmr-core/token-format.js";
 import type { MmrWorkerUsageStats } from "./runner.js";
 
 /** Strip a leading `provider/` from a worker model id so the footer shows a short name. */
@@ -19,12 +20,13 @@ export function stripMmrWorkerModelProvider(model: string | undefined): string |
   return trimmed.split("/").filter(Boolean).pop() ?? trimmed;
 }
 
-/** Format a non-negative token count for the worker metadata footer. */
+/**
+ * Format a non-negative token count for the worker metadata footer. Routes
+ * through mmr-core's shared compact formatter so this and the /mmr-status
+ * footer stay byte-for-byte identical (see mmr-core/token-format.ts).
+ */
 export function formatMmrWorkerTokens(count: number): string {
-  if (count < 1000) return String(count);
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
-  return `${(count / 1_000_000).toFixed(1)}M`;
+  return formatMmrCompactTokens(count);
 }
 
 /**

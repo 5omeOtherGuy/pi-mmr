@@ -536,4 +536,27 @@ describe("mmr-core /mmr-status", () => {
     assert.match(debug, /openai\/gpt-5\.5[\s\S]*?applied/);
     assert.match(debug, /Rejected sources:[\s\S]*?settings="fast"/);
   });
+
+  // Boundary-value parity pins for the footer compact token formatter. The
+  // first four tiers (count < 10_000_000) share mmr-core's compact formatter;
+  // the >=10M tier (Math.round + "M") is unique to the footer. Output is
+  // frozen byte-for-byte so the Item 5b shared-helper refactor cannot change
+  // any rendered footer number.
+  it("formats footer token counts byte-for-byte across boundary values", async () => {
+    const { formatFooterTokens } = await importSource("extensions/mmr-core/status.ts");
+    const cases = [
+      [999, "999"],
+      [1000, "1.0k"],
+      [1500, "1.5k"],
+      [12345, "12k"],
+      [999999, "1000k"],
+      [1000000, "1.0M"],
+      [1500000, "1.5M"],
+      [9999999, "10.0M"],
+      [10000000, "10M"],
+    ];
+    for (const [input, expected] of cases) {
+      assert.equal(formatFooterTokens(input), expected, `formatFooterTokens(${input})`);
+    }
+  });
 });
