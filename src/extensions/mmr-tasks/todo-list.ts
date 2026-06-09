@@ -30,7 +30,7 @@ export interface PersistedTodoState {
   tasks: TaskListItem[];
 }
 
-export const TODO_STATE_ENTRY = "mmr-toolbox.todo-state";
+export const TODO_STATE_ENTRY = "mmr-tasks.todo-state";
 export const TODO_STATE_VERSION = 2;
 const ACCEPTED_TODO_STATE_VERSIONS: ReadonlySet<number> = new Set([1, 2]);
 

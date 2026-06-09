@@ -183,7 +183,8 @@ describe("Phase B public-safety lint: applied to Phase B surfaces", () => {
   it("Phase C-edited source files contain no forbidden tokens outside PRIVATE_REFERENCE regions", () => {
     const files = [
       "src/extensions/mmr-web/tools.ts",
-      "src/extensions/mmr-toolbox/index.ts",
+      "src/extensions/mmr-patch/index.ts",
+      "src/extensions/mmr-tasks/index.ts",
       "src/extensions/mmr-core/builtin-tool-guidance.ts",
     ];
     const allFindings = [];

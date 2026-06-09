@@ -12,11 +12,12 @@ describe("mmr-core feature gate registry", () => {
       "mmr-subagents",
       "mmr-history",
       "mmr-web",
-      "mmr-toolbox",
+      "mmr-patch",
+      "mmr-tasks",
       "mmr-toolbox-mcp",
     ]);
 
-    assert.equal(decisions.length, 5);
+    assert.equal(decisions.length, 6);
     for (const decision of decisions) {
       assert.equal(decision.status, "missing");
       assert.equal(decision.source, "mmr-core.reserved");
@@ -25,8 +26,9 @@ describe("mmr-core feature gate registry", () => {
     assert.match(decisions[0].reason, /mmr-subagents/);
     assert.match(decisions[1].reason, /mmr-history/);
     assert.match(decisions[2].reason, /mmr-web/);
-    assert.match(decisions[3].reason, /mmr-toolbox extension/);
-    assert.match(decisions[4].reason, /mmr-toolbox-mcp extension/);
+    assert.match(decisions[3].reason, /mmr-patch extension/);
+    assert.match(decisions[4].reason, /mmr-tasks extension/);
+    assert.match(decisions[5].reason, /mmr-toolbox-mcp extension/);
   });
 
   it("treats prototype-chain names like 'toString' as unknown gates, not reserved decisions", async () => {

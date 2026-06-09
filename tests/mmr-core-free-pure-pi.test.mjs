@@ -51,7 +51,7 @@ describe("mmr-core free mode: pure Pi (pi-mmr-not-installed equivalence)", () =>
   it("drops MMR-owned tools from baseline when entering free from a locked mode", async () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const owned = await importOwnedTools();
-    // Simulate mmr-toolbox and mmr-web having registered their concrete
+    // Simulate mmr-patch and mmr-web having registered their concrete
     // Pi tools before mmr-core captures its baseline.
     owned.registerMmrOwnedTool("apply_patch");
     owned.registerMmrOwnedTool("web_search");
@@ -174,14 +174,14 @@ describe("mmr-core free mode: pure Pi (pi-mmr-not-installed equivalence)", () =>
 });
 
 describe("mmr-core free mode: source-aware MMR ownership", () => {
-  const MMR_TOOLBOX_PATH = "/abs/path/to/pi-mmr/src/extensions/mmr-toolbox/index.ts";
+  const MMR_PATCH_PATH = "/abs/path/to/pi-mmr/src/extensions/mmr-patch/index.ts";
   const THIRD_PARTY_PATH = "/abs/path/to/other-pkg/src/extensions/patch/index.ts";
 
   it("drops an MMR-owned name when the active registration's source is an MMR extension path", async () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const owned = await importOwnedTools();
     owned.registerMmrOwnedTool("apply_patch");
-    owned.registerMmrOwnedExtensionPath(MMR_TOOLBOX_PATH);
+    owned.registerMmrOwnedExtensionPath(MMR_PATCH_PATH);
 
     const baselineTools = ["read", "bash", "edit", "write", "apply_patch"];
     const { ctx } = createContext();
@@ -192,7 +192,7 @@ describe("mmr-core free mode: source-aware MMR ownership", () => {
         "bash",
         "edit",
         "write",
-        { name: "apply_patch", sourceInfo: { path: MMR_TOOLBOX_PATH } },
+        { name: "apply_patch", sourceInfo: { path: MMR_PATCH_PATH } },
       ],
     });
     extension(pi);
@@ -210,9 +210,9 @@ describe("mmr-core free mode: source-aware MMR ownership", () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const owned = await importOwnedTools();
     owned.registerMmrOwnedTool("apply_patch");
-    // mmr-toolbox path is registered, but the currently-active apply_patch
+    // mmr-patch path is registered, but the currently-active apply_patch
     // tool was contributed by a third-party extension at a different path.
-    owned.registerMmrOwnedExtensionPath(MMR_TOOLBOX_PATH);
+    owned.registerMmrOwnedExtensionPath(MMR_PATCH_PATH);
 
     const baselineTools = ["read", "bash", "edit", "write", "apply_patch"];
     const { ctx } = createContext();
@@ -245,7 +245,7 @@ describe("mmr-core free mode: source-aware MMR ownership", () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const owned = await importOwnedTools();
     owned.registerMmrOwnedTool("apply_patch");
-    owned.registerMmrOwnedExtensionPath(MMR_TOOLBOX_PATH);
+    owned.registerMmrOwnedExtensionPath(MMR_PATCH_PATH);
 
     const baselineTools = ["read", "bash", "edit", "write", "apply_patch"];
     const { ctx } = createContext();
@@ -270,7 +270,7 @@ describe("mmr-core free mode: source-aware MMR ownership", () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const owned = await importOwnedTools();
     owned.registerMmrOwnedTool("apply_patch");
-    owned.registerMmrOwnedExtensionPath(MMR_TOOLBOX_PATH);
+    owned.registerMmrOwnedExtensionPath(MMR_PATCH_PATH);
 
     const baselineTools = ["read", "bash", "edit", "write", "unrelated_tool"];
     const { ctx } = createContext();
@@ -284,7 +284,7 @@ describe("mmr-core free mode: source-aware MMR ownership", () => {
         "bash",
         "edit",
         "write",
-        { name: "unrelated_tool", sourceInfo: { path: MMR_TOOLBOX_PATH } },
+        { name: "unrelated_tool", sourceInfo: { path: MMR_PATCH_PATH } },
       ],
     });
     extension(pi);

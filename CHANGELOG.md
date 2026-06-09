@@ -6,6 +6,20 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ## Unreleased
 
+### Changed
+
+- **Breaking (extension split):** `mmr-toolbox` is split into two focused
+  extensions. `mmr-patch` now owns `apply_patch` and `mmr-tasks` now owns
+  `task_list` (and the deferred `chart` catalog entry). Both are registered in
+  `package.json` `pi.extensions` and exported at `./extensions/mmr-patch` and
+  `./extensions/mmr-tasks`. The tool names `apply_patch` and `task_list` are
+  unchanged. `./extensions/mmr-toolbox` remains as a deprecated compatibility
+  shim that re-exports the former surface (including `registerMmrToolboxProviders`)
+  but is no longer auto-loaded and registers no tools itself; import from
+  `mmr-patch`/`mmr-tasks` (or the package root) instead. The persisted todo-state
+  key is renamed from `mmr-toolbox.todo-state` to `mmr-tasks.todo-state`; existing
+  in-progress task-list widget state is reset once on upgrade.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest

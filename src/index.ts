@@ -219,28 +219,32 @@ export {
 } from "./extensions/mmr-session-fallback/state.js";
 export type { PersistedMmrSessionFallbackOverride } from "./extensions/mmr-session-fallback/state.js";
 export { getMmrSessionFallbackOverrideSnapshot } from "./extensions/mmr-session-fallback/runtime.js";
-// --- mmr-toolbox (Stable) ---
-export { ApplyPatchError } from "./extensions/mmr-toolbox/apply-patch.js";
-export { registerMmrToolboxProviders } from "./extensions/mmr-toolbox/index.js";
+// --- mmr-patch (Stable) ---
+export { ApplyPatchError } from "./extensions/mmr-patch/apply-patch.js";
+export { registerMmrPatchProviders } from "./extensions/mmr-patch/index.js";
+// --- mmr-tasks (Stable) ---
+export { registerMmrTasksProviders } from "./extensions/mmr-tasks/index.js";
 export {
   TODO_STATE_ENTRY,
   TODO_STATE_VERSION,
   findLatestPersistedTodoState,
   parsePersistedTodoState,
   toPersistedTodoState,
-} from "./extensions/mmr-toolbox/todo-list.js";
+} from "./extensions/mmr-tasks/todo-list.js";
 export type {
   PersistedTodoState,
   TaskListItem,
   TaskListSubtask,
   TodoStatus,
-} from "./extensions/mmr-toolbox/todo-list.js";
+} from "./extensions/mmr-tasks/todo-list.js";
 export {
   TASK_LIST_WIDGET_ID,
   TodoValidationError,
   createTodoListTool,
   refreshTodoWidget,
-} from "./extensions/mmr-toolbox/todo-list-tool.js";
+} from "./extensions/mmr-tasks/todo-list-tool.js";
+// --- mmr-toolbox (Deprecated compatibility shim: split into mmr-patch + mmr-tasks) ---
+export { registerMmrToolboxProviders } from "./extensions/mmr-toolbox/index.js";
 // --- mmr-history (Stable) ---
 export {
   createMmrHistoryExtension,
@@ -307,7 +311,7 @@ export type {
   RefreshTodoWidgetOptions,
   TodoListDetails,
   TodoListErrorDetails,
-} from "./extensions/mmr-toolbox/todo-list-tool.js";
+} from "./extensions/mmr-tasks/todo-list-tool.js";
 
 // --- mmr-web (Stable) ---
 export type { MmrWebSettings, LoadedMmrWebSettings } from "./extensions/mmr-web/config.js";

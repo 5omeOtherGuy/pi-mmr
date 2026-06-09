@@ -199,7 +199,7 @@ export function registerTaskListWiring(pi: ExtensionAPI): void {
   });
 
   // Register the session-local task_list tool. Persistence is via
-  // `pi.appendEntry("mmr-toolbox.todo-state", ...)` on the active Pi
+  // `pi.appendEntry("mmr-tasks.todo-state", ...)` on the active Pi
   // session log — no workspace-scoped store, no claim/lease, no cross-
   // session coordination. The previous workspace-scoped coordination
   // prototype is preserved on the annotated tag

@@ -248,7 +248,7 @@ describe("assembleMmrSubagentSurface() standalone route", () => {
       ...makeFinderManifest(),
       {
         name: "apply_patch",
-        owner: "mmr-toolbox",
+        owner: "mmr-patch",
         promptGuidelines: [],
         description: "Apply a patch",
         schema: {},

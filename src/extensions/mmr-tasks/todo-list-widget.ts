@@ -20,7 +20,7 @@ import type { TaskListItem, TodoStatus } from "./todo-list.js";
 /**
  * Stable widget id used with `ctx.ui.setWidget(...)` so the active task
  * list is pinned above the input editor. Process-wide unique to
- * mmr-toolbox so other extensions never accidentally clobber it.
+ * mmr-tasks so other extensions never accidentally clobber it.
  */
 export const TASK_LIST_WIDGET_ID = "pi-mmr-task-list";
 

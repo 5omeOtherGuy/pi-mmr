@@ -24,7 +24,7 @@ const FIXTURE_SYSTEM_PROMPT = [
 function applyPatchManifestEntry() {
   return {
     name: "apply_patch",
-    owner: "mmr-toolbox",
+    owner: "mmr-patch",
     description: "Apply a patch to one or more files using the Codex patch format.",
     promptSnippet: "Apply a Codex-format patch to workspace files",
     promptGuidelines: [
@@ -112,7 +112,7 @@ describe("mmr-core prompt debug renderer", () => {
     assert.ok(out.includes("# web_search"), "expected web_search heading");
 
     // Owner is labeled.
-    assert.ok(/Owner:\s*mmr-toolbox/.test(out), "expected apply_patch owner line");
+    assert.ok(/Owner:\s*mmr-patch/.test(out), "expected apply_patch owner line");
     assert.ok(/Owner:\s*mmr-web/.test(out), "expected web_search owner line");
 
     // Prompt snippet is labeled and present.
@@ -207,7 +207,7 @@ describe("mmr-core prompt debug renderer", () => {
       "",
       "# apply_patch",
       "",
-      "Owner: mmr-toolbox",
+      "Owner: mmr-patch",
       "",
       "Prompt snippet: Apply a Codex-format patch to workspace files",
       "",

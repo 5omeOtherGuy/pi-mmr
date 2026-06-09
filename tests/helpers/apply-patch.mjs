@@ -1,4 +1,4 @@
-// Shared helpers for the mmr-toolbox apply_patch test suites.
+// Shared helpers for the mmr-patch apply_patch test suites.
 //
 // The Pi-host mock used to live here as `makeMockPi`. It has been removed in
 // favor of the canonical `createMockPi` exported by `./pi-stub.mjs`, which

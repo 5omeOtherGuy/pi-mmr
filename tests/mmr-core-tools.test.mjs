@@ -64,7 +64,7 @@ describe("mmr-core tool registry", () => {
 
     const chartDecision = resolved.decisions.find((d) => d.requested === "chart");
     assert.equal(chartDecision.status, "deferred");
-    assert.equal(chartDecision.owner, "mmr-toolbox");
+    assert.equal(chartDecision.owner, "mmr-tasks");
 
     const webDecision = resolved.decisions.find((d) => d.requested === "web_search");
     assert.equal(webDecision.owner, "mmr-web");
@@ -92,7 +92,7 @@ describe("mmr-core tool registry", () => {
     const concrete = registry.resolve(["apply_patch"], ["apply_patch", "edit", "write"]);
     assert.deepEqual(concrete.activeTools, ["apply_patch"]);
     assert.equal(concrete.decisions[0].status, "active");
-    assert.equal(concrete.decisions[0].owner, "mmr-toolbox");
+    assert.equal(concrete.decisions[0].owner, "mmr-patch");
 
     // Without a concrete apply_patch tool, the decision is deferred (no
     // fallback to edit+write). Callers that want narrow edit/write tools
@@ -101,7 +101,7 @@ describe("mmr-core tool registry", () => {
     assert.deepEqual(fallback.activeTools, []);
     assert.deepEqual(fallback.deferredTools, ["apply_patch"]);
     assert.equal(fallback.decisions[0].status, "deferred");
-    assert.equal(fallback.decisions[0].owner, "mmr-toolbox");
+    assert.equal(fallback.decisions[0].owner, "mmr-patch");
   });
 
   it("credits the catalog owner when Pi registers an extension-owned tool without a provider claim", async () => {
@@ -242,21 +242,21 @@ describe("mmr-core tool registry", () => {
     assert.equal(decision.owner, "older-provider");
   });
 
-  it("keeps chart catalog-deferred when mmr-toolbox is loaded but that tool has not shipped", async () => {
+  it("keeps chart catalog-deferred when mmr-tasks is loaded but that tool has not shipped", async () => {
     const { createMmrToolRegistry } = await importSource("extensions/mmr-core/tool-registry.ts");
     const registry = createMmrToolRegistry();
 
-    // Simulate the mmr-toolbox provider: it only claims shipped names
-    // (apply_patch, task_list) and returns undefined for the rest.
+    // Simulate the mmr-tasks provider: it only claims its shipped name
+    // (task_list) and returns undefined for the rest (e.g. chart).
     registry.registerProvider({
-      name: "mmr-toolbox",
-      resolve: (toolName) => (toolName === "apply_patch" || toolName === "task_list" ? { kind: "active" } : undefined),
+      name: "mmr-tasks",
+      resolve: (toolName) => (toolName === "task_list" ? { kind: "active" } : undefined),
     });
 
     const resolved = registry.resolve(["chart"], ["apply_patch", "task_list"]);
     for (const decision of resolved.decisions) {
       assert.equal(decision.status, "deferred", `${decision.requested} must stay catalog-deferred`);
-      assert.equal(decision.owner, "mmr-toolbox", `${decision.requested} catalog owner must remain mmr-toolbox`);
+      assert.equal(decision.owner, "mmr-tasks", `${decision.requested} catalog owner must remain mmr-tasks`);
     }
   });
 

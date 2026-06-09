@@ -1,6 +1,6 @@
 // Positive import-presence guard for the public `todo-list-tool` surface.
 //
-// PR A decomposes `extensions/mmr-toolbox/todo-list-tool.ts` into focused leaf
+// PR A decomposes `extensions/mmr-tasks/todo-list-tool.ts` into focused leaf
 // modules (`todo-list-contract`, `todo-list-rendering`, `todo-list-widget`)
 // while keeping the entry file a thin compatibility shell. This test pins that
 // every previously-exported public symbol stays importable from the same
@@ -14,9 +14,9 @@ import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 
 after(cleanupLoadedSource);
 
-describe("mmr-toolbox todo-list-tool public surface stays importable", () => {
+describe("mmr-tasks todo-list-tool public surface stays importable", () => {
   it("re-exports the documented runtime symbols from todo-list-tool.js", async () => {
-    const mod = await importSource("extensions/mmr-toolbox/todo-list-tool.ts");
+    const mod = await importSource("extensions/mmr-tasks/todo-list-tool.ts");
 
     assert.equal(typeof mod.createTodoListTool, "function", "createTodoListTool");
     assert.equal(typeof mod.refreshTodoWidget, "function", "refreshTodoWidget");

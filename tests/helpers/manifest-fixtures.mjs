@@ -8,10 +8,10 @@
 import { importSource } from "./load-src.mjs";
 
 export async function applyPatchManifestEntry() {
-  const mod = await importSource("extensions/mmr-toolbox/index.ts");
+  const mod = await importSource("extensions/mmr-patch/index.ts");
   return {
     name: "apply_patch",
-    owner: "mmr-toolbox",
+    owner: "mmr-patch",
     promptSnippet: mod.APPLY_PATCH_PROMPT_SNIPPET,
     promptGuidelines: [...mod.APPLY_PATCH_PROMPT_GUIDELINES],
     description: mod.APPLY_PATCH_DESCRIPTION,
@@ -20,10 +20,10 @@ export async function applyPatchManifestEntry() {
 }
 
 export async function taskListManifestEntry() {
-  const mod = await importSource("extensions/mmr-toolbox/todo-list-tool.ts");
+  const mod = await importSource("extensions/mmr-tasks/todo-list-tool.ts");
   return {
     name: "task_list",
-    owner: "mmr-toolbox",
+    owner: "mmr-tasks",
     promptSnippet: mod.TASK_LIST_PROMPT_SNIPPET,
     promptGuidelines: [...mod.TASK_LIST_PROMPT_GUIDELINES],
     description: mod.TASK_LIST_DESCRIPTION,
@@ -58,15 +58,15 @@ export async function readWebPageManifestEntry() {
 /**
  * Build a manifest for one of the canonical Phase B tool-set combinations.
  * Active manifest order matches the order in which Pi would surface each
- * tool: toolbox tools first (apply_patch, task_list) then web tools
+ * tool: patch then tasks tools first (apply_patch, task_list) then web tools
  * (web_search, read_web_page). Callers that need a different order should
  * build the manifest by hand.
  */
 export async function buildBaselineManifest(toolSet) {
-  const includeToolbox = toolSet === "core+toolbox" || toolSet === "core+toolbox+web";
-  const includeWeb = toolSet === "core+web" || toolSet === "core+toolbox+web";
+  const includePatchTasks = toolSet === "core+patch+tasks" || toolSet === "core+patch+tasks+web";
+  const includeWeb = toolSet === "core+web" || toolSet === "core+patch+tasks+web";
   const entries = [];
-  if (includeToolbox) {
+  if (includePatchTasks) {
     entries.push(await applyPatchManifestEntry());
     entries.push(await taskListManifestEntry());
   }
@@ -115,7 +115,7 @@ export function buildBasePromptForActiveManifest(basePrompt, activeToolManifest)
 
 export const BASELINE_TOOL_SETS = /** @type {const} */ ([
   "core-only",
-  "core+toolbox",
+  "core+patch+tasks",
   "core+web",
-  "core+toolbox+web",
+  "core+patch+tasks+web",
 ]);

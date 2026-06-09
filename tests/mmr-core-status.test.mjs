@@ -42,7 +42,7 @@ async function buildState(overrides = {}) {
       disabledTools: [],
       decisions: [
         { requested: "Read", chosen: "read", chosenTools: ["read"], candidates: ["read"], status: "active", owner: "mmr-core", diagnostic: "Read → read" },
-        { requested: "chart", candidates: [], chosenTools: [], status: "deferred", owner: "mmr-toolbox", diagnostic: "chart: deferred until mmr-toolbox ships" },
+        { requested: "chart", candidates: [], chosenTools: [], status: "deferred", owner: "mmr-tasks", diagnostic: "chart: deferred until mmr-tasks ships" },
       ],
     };
 

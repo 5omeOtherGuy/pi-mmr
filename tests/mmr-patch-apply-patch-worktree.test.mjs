@@ -10,7 +10,7 @@ import { createMockPi } from "./helpers/pi-stub.mjs";
 
 after(cleanupLoadedSource);
 
-describe("mmr-toolbox apply_patch path safety extends to same-repo git worktrees", () => {
+describe("mmr-patch apply_patch path safety extends to same-repo git worktrees", () => {
   let tmpRoot;
   let mainWt;
   let siblingWt;
@@ -33,7 +33,7 @@ describe("mmr-toolbox apply_patch path safety extends to same-repo git worktrees
   });
 
   async function getTool() {
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
     const { pi } = createMockPi();
     toolbox.default(pi);
     return pi.tools.get("apply_patch");

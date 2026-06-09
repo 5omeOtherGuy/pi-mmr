@@ -23,7 +23,8 @@
     "extensions": [
       "./src/extensions/mmr-core/index.ts",
       "./src/extensions/mmr-session-fallback/index.ts",
-      "./src/extensions/mmr-toolbox/index.ts",
+      "./src/extensions/mmr-patch/index.ts",
+      "./src/extensions/mmr-tasks/index.ts",
       "./src/extensions/mmr-web/index.ts",
       "./src/extensions/mmr-github/index.ts",
       "./src/extensions/mmr-subagents/index.ts",
@@ -34,6 +35,8 @@
     ".": "./src/index.ts",
     "./extensions/mmr-core": "./src/extensions/mmr-core/index.ts",
     "./extensions/mmr-session-fallback": "./src/extensions/mmr-session-fallback/index.ts",
+    "./extensions/mmr-patch": "./src/extensions/mmr-patch/index.ts",
+    "./extensions/mmr-tasks": "./src/extensions/mmr-tasks/index.ts",
     "./extensions/mmr-toolbox": "./src/extensions/mmr-toolbox/index.ts",
     "./extensions/mmr-web": "./src/extensions/mmr-web/index.ts",
     "./extensions/mmr-github": "./src/extensions/mmr-github/index.ts",

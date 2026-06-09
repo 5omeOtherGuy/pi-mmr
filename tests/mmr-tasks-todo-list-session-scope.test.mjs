@@ -60,7 +60,7 @@ async function loadToolboxLinked() {
   const { pi, handlers } = createMockPi();
   const session = makeLinkedSession();
   pi.appendEntry = (customType, data) => session.append(customType, data);
-  const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+  const toolbox = await importSource("extensions/mmr-tasks/index.ts");
   toolbox.default(pi);
   return { pi, handlers, session, toolbox };
 }
@@ -75,7 +75,7 @@ async function callTaskList(tool, params, ctx) {
   return tool.execute("call-1", params, undefined, () => {}, ctx);
 }
 
-describe("mmr-toolbox task_list — session scope isolation", () => {
+describe("mmr-tasks task_list — session scope isolation", () => {
   it("two sessions in the same workspace do not see each other's lists", async () => {
     // Two independent (pi, session) pairs simulate two concurrent Pi sessions
     // both rooted at the same cwd. The new design must keep them isolated:
@@ -96,7 +96,7 @@ describe("mmr-toolbox task_list — session scope isolation", () => {
 
     // Session B's todo-state must be empty — A's write must not be visible.
     const { findLatestPersistedTodoState } = await importSource(
-      "extensions/mmr-toolbox/todo-list.ts",
+      "extensions/mmr-tasks/todo-list.ts",
     );
     const latestB = findLatestPersistedTodoState(b.session.getEntries());
     assert.equal(latestB, undefined, "session B must not see session A's todo-state");
@@ -114,7 +114,7 @@ describe("mmr-toolbox task_list — session scope isolation", () => {
   });
 });
 
-describe("mmr-toolbox task_list — no workspace task-store side effects on session_start", () => {
+describe("mmr-tasks task_list — no workspace task-store side effects on session_start", () => {
   const ENV_KEYS = ["PI_CODING_AGENT_DIR", "XDG_DATA_HOME"];
   const savedEnv = new Map();
   let agentDirOverride;
@@ -198,7 +198,7 @@ describe("mmr-toolbox task_list — no workspace task-store side effects on sess
     const { getPreparedSourceRoot } = await import("./helpers/load-src.mjs");
     const fs = await import("node:fs/promises");
     const root = getPreparedSourceRoot();
-    const legacyPath = `${root}/extensions/mmr-toolbox/task-list-tool.ts`;
+    const legacyPath = `${root}/extensions/mmr-tasks/task-list-tool.ts`;
     let legacyExists = false;
     try { await fs.access(legacyPath); legacyExists = true; } catch { /* expected */ }
     assert.equal(
@@ -207,7 +207,7 @@ describe("mmr-toolbox task_list — no workspace task-store side effects on sess
       `legacy ${legacyPath} (source of watchTaskListWidget) must be deleted in Phase 5`,
     );
     // The replacement module must not re-export the helper either.
-    const newToolMod = await importSource("extensions/mmr-toolbox/todo-list-tool.ts");
+    const newToolMod = await importSource("extensions/mmr-tasks/todo-list-tool.ts");
     assert.equal(
       typeof newToolMod.watchTaskListWidget,
       "undefined",
@@ -216,7 +216,7 @@ describe("mmr-toolbox task_list — no workspace task-store side effects on sess
   });
 });
 
-describe("mmr-toolbox task_list — widget only reflects this session's list", () => {
+describe("mmr-tasks task_list — widget only reflects this session's list", () => {
   it("a local tool call updates the widget via setWidget; pre-existing workspace state does not", async () => {
     const { pi, session } = await loadToolboxLinked();
     const tool = getTaskListTool(pi);
@@ -239,10 +239,10 @@ describe("mmr-toolbox task_list — widget only reflects this session's list", (
   });
 });
 
-describe("mmr-toolbox /tasks command", () => {
+describe("mmr-tasks /tasks command", () => {
   it("lists tasks with the shared glyph and active-label formatting", async () => {
     const { pi, session } = await loadToolboxLinked();
-    session.append("mmr-toolbox.todo-state", {
+    session.append("mmr-tasks.todo-state", {
       version: 1,
       tasks: [
         { content: "Plan alpha", activeForm: "Planning alpha", status: "in_progress" },
@@ -268,10 +268,10 @@ describe("mmr-toolbox /tasks command", () => {
   });
 });
 
-describe("mmr-toolbox task_list — compaction/context recollection", () => {
+describe("mmr-tasks task_list — compaction/context recollection", () => {
   it("injects the latest todo-state into before_agent_start so compaction summaries do not have to remember it", async () => {
     const { handlers, session } = await loadToolboxLinked();
-    session.append("mmr-toolbox.todo-state", {
+    session.append("mmr-tasks.todo-state", {
       version: 1,
       tasks: [
         { content: "Write recollection tests", activeForm: "Writing recollection tests", status: "in_progress" },
@@ -281,7 +281,7 @@ describe("mmr-toolbox task_list — compaction/context recollection", () => {
 
     const beforeAgentStart = handlers.get("before_agent_start");
     assert.equal(typeof beforeAgentStart, "function",
-      "mmr-toolbox must register before_agent_start to inject current todo state");
+      "mmr-tasks must register before_agent_start to inject current todo state");
 
     const result = await beforeAgentStart(
       { systemPrompt: "BASE SYSTEM PROMPT", systemPromptOptions: {} },
@@ -299,7 +299,7 @@ describe("mmr-toolbox task_list — compaction/context recollection", () => {
 
   it("injects a stale-update reminder into context after repeated turns without task_list", async () => {
     const { handlers, session } = await loadToolboxLinked();
-    session.append("mmr-toolbox.todo-state", {
+    session.append("mmr-tasks.todo-state", {
       version: 2,
       tasks: [
         { content: "Finish stale work", activeForm: "Finishing stale work", status: "in_progress" },
@@ -325,7 +325,7 @@ describe("mmr-toolbox task_list — compaction/context recollection", () => {
 
   it("resets the stale-update reminder counter after an accepted task_list write", async () => {
     const { handlers, pi, session } = await loadToolboxLinked();
-    session.append("mmr-toolbox.todo-state", {
+    session.append("mmr-tasks.todo-state", {
       version: 2,
       tasks: [
         { content: "Old stale work", activeForm: "Doing old stale work", status: "in_progress" },
@@ -358,7 +358,7 @@ describe("mmr-toolbox task_list — compaction/context recollection", () => {
   it("caps injected todo-state rows and labels so prompt injection stays small", async () => {
     const { handlers, session } = await loadToolboxLinked();
     const longTail = " x".repeat(200);
-    session.append("mmr-toolbox.todo-state", {
+    session.append("mmr-tasks.todo-state", {
       version: 1,
       tasks: Array.from({ length: 15 }, (_, i) => ({
         content: `Task ${String(i + 1).padStart(2, "0")}${longTail}`,
@@ -388,7 +388,7 @@ describe("mmr-toolbox task_list — compaction/context recollection", () => {
   it("refreshes the pinned widget from persisted todo-state after session_compact", async () => {
     const { handlers, session } = await loadToolboxLinked();
     const setWidgetCalls = [];
-    session.append("mmr-toolbox.todo-state", {
+    session.append("mmr-tasks.todo-state", {
       version: 1,
       tasks: [{ content: "Rehydrate widget", activeForm: "Rehydrating widget", status: "pending" }],
     });
@@ -399,7 +399,7 @@ describe("mmr-toolbox task_list — compaction/context recollection", () => {
 
     const sessionCompact = handlers.get("session_compact");
     assert.equal(typeof sessionCompact, "function",
-      "mmr-toolbox must register session_compact to refresh the todo widget");
+      "mmr-tasks must register session_compact to refresh the todo widget");
 
     await sessionCompact({ compactionEntry: { id: "compact-1" }, fromExtension: false }, ctx);
 

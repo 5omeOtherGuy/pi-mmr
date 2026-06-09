@@ -1,5 +1,5 @@
 /**
- * Codex-format `apply_patch` implementation for mmr-toolbox.
+ * Codex-format `apply_patch` implementation for mmr-patch.
  *
  * Accepts a structured patch payload wrapped in `*** Begin Patch` /
  * `*** End Patch` markers, with `*** Add File`, `*** Delete File`, and
@@ -455,7 +455,7 @@ export function applyHunksToContent(filePath: string, original: string, hunks: r
   // parser-level test exercising this is
   // `applyHunksToContent: removing every line of a file with a trailing
   // newline yields a single blank line, not an empty file` in
-  // tests/mmr-toolbox-apply-patch.test.mjs.
+  // tests/mmr-patch-apply-patch.test.mjs.
   const finalTrailing = original === "" ? working.length > 0 : trailingNewline;
   return joinFileLines(working, finalTrailing);
 }

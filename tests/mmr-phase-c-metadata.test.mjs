@@ -136,11 +136,11 @@ describe("Phase C: mmr-web read_web_page metadata", () => {
   });
 });
 
-describe("Phase C: mmr-toolbox apply_patch redaction/failure guidance", () => {
+describe("Phase C: mmr-patch apply_patch redaction/failure guidance", () => {
   let mod;
 
   beforeEach(async () => {
-    mod = await importSource("extensions/mmr-toolbox/index.ts");
+    mod = await importSource("extensions/mmr-patch/index.ts");
   });
 
   it("prompt guidelines include a redaction/failure note", () => {

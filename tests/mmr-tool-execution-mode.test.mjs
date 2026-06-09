@@ -20,8 +20,8 @@ after(cleanupLoadedSource);
 
 describe("mmr tool execution-mode policy (#8)", () => {
   it("marks workspace-mutating / session-state-mutating tools sequential", async () => {
-    const { createApplyPatchTool } = await importSource("extensions/mmr-toolbox/apply-patch-tool.ts");
-    const { createTodoListTool } = await importSource("extensions/mmr-toolbox/todo-list-tool.ts");
+    const { createApplyPatchTool } = await importSource("extensions/mmr-patch/apply-patch-tool.ts");
+    const { createTodoListTool } = await importSource("extensions/mmr-tasks/todo-list-tool.ts");
 
     const applyPatch = createApplyPatchTool();
     assert.equal(applyPatch.executionMode, "sequential", "apply_patch mutates the workspace and must be sequential");

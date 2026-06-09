@@ -18,7 +18,7 @@
  *    takes priority over per-name values and seeded defaults so existing tests behave
  *    identically.
  *  - `flags` (default `{}`): per-flag-name initial values. Use this instead of `flagValue`
- *    when an extension reads more than one flag (e.g. mmr-toolbox reads
+ *    when an extension reads more than one flag (e.g. mmr-tasks reads
  *    `task-widget-toggle-key`). Per-name explicit values override seeded defaults from
  *    `registerFlag(name, { default })`.
  *  - `shortcutsThrowOn` (default `[]`): array of shortcut keys for which

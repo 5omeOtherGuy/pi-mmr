@@ -2,7 +2,7 @@
  * Pi tool registration for the session-local `task_list` todo list.
  *
  * Persistence is via the active Pi session log: each accepted call appends
- * one `mmr-toolbox.todo-state` `CustomEntry` carrying the full submitted
+ * one `mmr-tasks.todo-state` `CustomEntry` carrying the full submitted
  * list, and reads use `findLatestPersistedTodoState(...)` to recover the
  * most recent valid entry. There is no workspace store, no claim/lease,
  * and no cross-session coordination — those concerns are parked on

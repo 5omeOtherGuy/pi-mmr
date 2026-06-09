@@ -30,10 +30,11 @@ export const CORE_OWNER = "mmr-core";
  * activated.
  */
 const DEFAULT_TOOL_CATALOG: Record<string, { owner: string }> = {
-  // mmr-toolbox
-  apply_patch: { owner: "mmr-toolbox" },
-  task_list: { owner: "mmr-toolbox" },
-  chart: { owner: "mmr-toolbox" },
+  // mmr-patch
+  apply_patch: { owner: "mmr-patch" },
+  // mmr-tasks
+  task_list: { owner: "mmr-tasks" },
+  chart: { owner: "mmr-tasks" },
   // mmr-toolbox-mcp
   read_mcp_resource: { owner: "mmr-toolbox-mcp" },
   // mmr-web

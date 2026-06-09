@@ -78,14 +78,14 @@ const EXPECTED_BLOCK_ORDER = [
 
 const EXPECTED_TOOLS_BY_SET = {
   "core-only": [],
-  "core+toolbox": ["apply_patch", "task_list"],
+  "core+patch+tasks": ["apply_patch", "task_list"],
   "core+web": ["web_search", "read_web_page"],
-  "core+toolbox+web": ["apply_patch", "task_list", "web_search", "read_web_page"],
+  "core+patch+tasks+web": ["apply_patch", "task_list", "web_search", "read_web_page"],
 };
 
 const EXPECTED_OWNERS = {
-  apply_patch: "mmr-toolbox",
-  task_list: "mmr-toolbox",
+  apply_patch: "mmr-patch",
+  task_list: "mmr-tasks",
   web_search: "mmr-web",
   read_web_page: "mmr-web",
 };

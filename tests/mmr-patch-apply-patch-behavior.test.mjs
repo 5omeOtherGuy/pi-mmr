@@ -9,7 +9,7 @@ import { createMockPi } from "./helpers/pi-stub.mjs";
 
 after(cleanupLoadedSource);
 
-describe("mmr-toolbox apply_patch tool behavior", () => {
+describe("mmr-patch apply_patch tool behavior", () => {
   let workdir;
   beforeEach(() => {
     workdir = mkdtempSync(path.join(tmpdir(), "pi-mmr-apply-patch-"));
@@ -19,7 +19,7 @@ describe("mmr-toolbox apply_patch tool behavior", () => {
   });
 
   async function getTool() {
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
     const { pi } = createMockPi();
     toolbox.default(pi);
     return pi.tools.get("apply_patch");

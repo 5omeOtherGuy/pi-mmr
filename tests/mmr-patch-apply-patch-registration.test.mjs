@@ -45,9 +45,9 @@ const APPLY_PATCH_PROMPT_GUIDELINE_CUES = [
   { label: "avoid unanchored insert-only hunks", pattern: /unanchored insert-only/i },
 ];
 
-describe("mmr-toolbox apply_patch tool registration", () => {
+describe("mmr-patch apply_patch tool registration", () => {
   it("registers an apply_patch custom tool with the structured patchText schema", async () => {
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
     const { pi } = createMockPi();
     toolbox.default(pi);
 
@@ -64,7 +64,7 @@ describe("mmr-toolbox apply_patch tool registration", () => {
   });
 
   it("embeds every required guidance cue in the model-visible description", async () => {
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
     const { pi } = createMockPi();
     toolbox.default(pi);
 
@@ -78,7 +78,7 @@ describe("mmr-toolbox apply_patch tool registration", () => {
   });
 
   it("declares promptGuidelines that surface the high-signal cues", async () => {
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
     const { pi } = createMockPi();
     toolbox.default(pi);
 
@@ -98,8 +98,8 @@ describe("mmr-toolbox apply_patch tool registration", () => {
     // capability.
     const { createMmrToolRegistry } = await importSource("extensions/mmr-core/tool-registry.ts");
     const registry = createMmrToolRegistry();
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
-    toolbox.registerMmrToolboxProviders(registry);
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
+    toolbox.registerMmrPatchProviders(registry);
     const padded = registry.resolve(["  apply_patch  "], ["apply_patch"]);
     assert.deepEqual(padded.activeTools, ["apply_patch"]);
     assert.equal(padded.decisions[0].status, "active");
@@ -113,8 +113,8 @@ describe("mmr-toolbox apply_patch tool registration", () => {
     // capability. Use Object.hasOwn / null-prototype lookups instead.
     const { createMmrToolRegistry } = await importSource("extensions/mmr-core/tool-registry.ts");
     const registry = createMmrToolRegistry();
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
-    toolbox.registerMmrToolboxProviders(registry);
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
+    toolbox.registerMmrPatchProviders(registry);
     // Real capability still resolves.
     const ok = registry.resolve(["apply_patch"], ["apply_patch"]);
     assert.deepEqual(ok.activeTools, ["apply_patch"]);
@@ -123,8 +123,8 @@ describe("mmr-toolbox apply_patch tool registration", () => {
       const decision = registry.resolve([name], [name]).decisions[0];
       assert.notEqual(
         decision.owner,
-        "mmr-toolbox",
-        `mmr-toolbox must not claim logical capability "${name}" via prototype chain`,
+        "mmr-patch",
+        `mmr-patch must not claim logical capability "${name}" via prototype chain`,
       );
     }
   });
@@ -133,26 +133,26 @@ describe("mmr-toolbox apply_patch tool registration", () => {
     const { createMmrToolRegistry } = await importSource("extensions/mmr-core/tool-registry.ts");
     const registry = createMmrToolRegistry();
 
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
-    assert.equal(typeof toolbox.registerMmrToolboxProviders, "function",
-      "mmr-toolbox must expose registerMmrToolboxProviders for explicit wiring");
-    toolbox.registerMmrToolboxProviders(registry);
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
+    assert.equal(typeof toolbox.registerMmrPatchProviders, "function",
+      "mmr-patch must expose registerMmrPatchProviders for explicit wiring");
+    toolbox.registerMmrPatchProviders(registry);
 
     const resolved = registry.resolve(["apply_patch"], ["apply_patch"]);
     assert.deepEqual(resolved.activeTools, ["apply_patch"]);
     const decision = resolved.decisions[0];
     assert.equal(decision.status, "active");
     assert.deepEqual(decision.chosenTools, ["apply_patch"]);
-    assert.equal(decision.owner, "mmr-toolbox");
+    assert.equal(decision.owner, "mmr-patch");
   });
 
   it("deep mode resolves apply_patch to the concrete apply_patch tool, not edit + write", async () => {
     const { createMmrToolRegistry } = await importSource("extensions/mmr-core/tool-registry.ts");
     const { getMmrMode } = await importSource("extensions/mmr-core/modes.ts");
-    const toolbox = await importSource("extensions/mmr-toolbox/index.ts");
+    const toolbox = await importSource("extensions/mmr-patch/index.ts");
 
     const registry = createMmrToolRegistry();
-    toolbox.registerMmrToolboxProviders(registry);
+    toolbox.registerMmrPatchProviders(registry);
 
     const deepMode = getMmrMode("deep");
     const resolved = registry.resolve(deepMode.tools, ["bash", "edit", "write", "apply_patch"]);
@@ -161,7 +161,7 @@ describe("mmr-toolbox apply_patch tool registration", () => {
     assert.ok(applyPatchDecision, "apply_patch must be in deep mode tool decisions");
     assert.equal(applyPatchDecision.status, "active");
     assert.deepEqual(applyPatchDecision.chosenTools, ["apply_patch"]);
-    assert.equal(applyPatchDecision.owner, "mmr-toolbox");
+    assert.equal(applyPatchDecision.owner, "mmr-patch");
     assert.equal(resolved.activeTools.includes("apply_patch"), true);
   });
 });

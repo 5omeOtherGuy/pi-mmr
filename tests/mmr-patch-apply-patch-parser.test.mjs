@@ -5,9 +5,9 @@ import { patch } from "./helpers/apply-patch.mjs";
 
 after(cleanupLoadedSource);
 
-describe("mmr-toolbox apply_patch parser", () => {
+describe("mmr-patch apply_patch parser", () => {
   it("parses Add/Delete/Update with hunks and Move to", async () => {
-    const { parseCodexPatch } = await importSource("extensions/mmr-toolbox/apply-patch.ts");
+    const { parseCodexPatch } = await importSource("extensions/mmr-patch/apply-patch.ts");
     const ops = parseCodexPatch(patch(
       "*** Begin Patch",
       "*** Add File: a.txt",
@@ -34,13 +34,13 @@ describe("mmr-toolbox apply_patch parser", () => {
   });
 
   it("rejects payloads missing the Begin/End envelope", async () => {
-    const { parseCodexPatch } = await importSource("extensions/mmr-toolbox/apply-patch.ts");
+    const { parseCodexPatch } = await importSource("extensions/mmr-patch/apply-patch.ts");
     assert.throws(() => parseCodexPatch("*** Add File: a.txt\n+x\n"), /Begin Patch/);
     assert.throws(() => parseCodexPatch("*** Begin Patch\n*** Add File: a.txt\n+x\n"), /End Patch/);
   });
 
   it("rejects an Add File body line that does not start with +", async () => {
-    const { parseCodexPatch } = await importSource("extensions/mmr-toolbox/apply-patch.ts");
+    const { parseCodexPatch } = await importSource("extensions/mmr-patch/apply-patch.ts");
     assert.throws(
       () => parseCodexPatch(patch("*** Begin Patch", "*** Add File: a.txt", "no plus prefix", "*** End Patch")),
       /does not start with '\+'/,
@@ -53,7 +53,7 @@ describe("mmr-toolbox apply_patch parser", () => {
     // that ended with a newline, the result is `"\n"` — a one-blank-line
     // file — not `""`. Callers that want a truly empty/removed file must
     // use `*** Delete File`. See apply-patch.ts applyHunksToContent.
-    const { applyHunksToContent } = await importSource("extensions/mmr-toolbox/apply-patch.ts");
+    const { applyHunksToContent } = await importSource("extensions/mmr-patch/apply-patch.ts");
     const result = applyHunksToContent(
       "f.txt",
       "only\n",

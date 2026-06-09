@@ -42,7 +42,8 @@ const RESERVED_GATE_REASONS: Record<string, string> = {
   "mmr-subagents.async-tasks": "Reserved for the mmr-subagents async background task tools; not yet provided.",
   "mmr-history": "Reserved for the mmr-history extension; not yet provided.",
   "mmr-web": "Reserved for the mmr-web extension; not yet provided.",
-  "mmr-toolbox": "Reserved for the mmr-toolbox extension; not yet provided.",
+  "mmr-patch": "Reserved for the mmr-patch extension; not yet provided.",
+  "mmr-tasks": "Reserved for the mmr-tasks extension; not yet provided.",
   "mmr-toolbox-mcp": "Reserved for the mmr-toolbox-mcp extension; not yet provided.",
 };
 
