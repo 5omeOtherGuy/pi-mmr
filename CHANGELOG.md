@@ -26,7 +26,10 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
   background-task widget are both visible above the editor, they now share a
   single two-column dashboard with the task list on the left and background
   agents on the right. Narrow terminals fall back to a stacked layout, and each
-  widget still renders standalone when the other slot is empty. Covered by
+  widget still renders standalone when the other slot is empty. The dashboard
+  slot registry is process-wide so cache-isolated `mmr-toolbox` and
+  `mmr-subagents` extension loads still meet in the same dashboard instead of
+  rendering as two separate stacked widgets. Covered by
   `tests/mmr-core-above-editor-dashboard.test.mjs` plus the existing task-list
   and background-widget tests.
 

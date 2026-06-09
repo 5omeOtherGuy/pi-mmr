@@ -61,6 +61,22 @@ describe("above-editor dashboard", () => {
     assert.deepEqual(last.value, ["todo"]);
   });
 
+  it("combines slots across cache-isolated extension module instances", async () => {
+    const leftModule = await importSource(MODULE);
+    const rightModule = await importSource(MODULE);
+    leftModule.resetAboveEditorDashboardForTest();
+    const { ctx, calls } = makeCtx();
+
+    leftModule.updateAboveEditorDashboardSlot(ctx, "left", "task", ["⠋ Task one"]);
+    rightModule.updateAboveEditorDashboardSlot(ctx, "right", "background", ["▸ Group ● running · 1/2"]);
+
+    const dashboardCall = calls.at(-1);
+    assert.equal(dashboardCall.id, leftModule.ABOVE_EDITOR_DASHBOARD_WIDGET_ID);
+    assert.equal(typeof dashboardCall.value, "function");
+    const lines = dashboardCall.value({}, {}).render(100);
+    assert.match(lines[0], /^⠋ Task one +│ ▸ Group ● running · 1\/2/);
+  });
+
   it("stacks instead of column-splitting on narrow widths", () => {
     const { ctx, calls } = makeCtx();
     mod.updateAboveEditorDashboardSlot(ctx, "left", "task", ["todo"]);

@@ -43,8 +43,22 @@ interface SlotState {
   value: AboveEditorDashboardValue;
 }
 
-const slots: Partial<Record<AboveEditorDashboardSlot, SlotState>> = {};
-let showingCombined = false;
+interface DashboardStore {
+  slots: Partial<Record<AboveEditorDashboardSlot, SlotState>>;
+  showingCombined: boolean;
+}
+
+const DASHBOARD_STORE_KEY = Symbol.for("pi-mmr.above-editor-dashboard");
+const MIN_COLUMN_DASHBOARD_WIDTH = 80;
+
+function dashboardStore(): DashboardStore {
+  const globalStore = globalThis as unknown as { [key: symbol]: DashboardStore | undefined };
+  const existing = globalStore[DASHBOARD_STORE_KEY];
+  if (existing) return existing;
+  const store: DashboardStore = { slots: {}, showingCombined: false };
+  globalStore[DASHBOARD_STORE_KEY] = store;
+  return store;
+}
 
 function instantiate(
   value: AboveEditorDashboardValue,
@@ -70,7 +84,7 @@ function combineLines(left: readonly string[], right: readonly string[], width: 
 
   const separator = " │ ";
   const separatorWidth = visibleWidth(separator);
-  if (width < 80) {
+  if (width < MIN_COLUMN_DASHBOARD_WIDTH) {
     return [...left, ...right].map((line) => truncateToWidth(line, width));
   }
 
@@ -126,25 +140,26 @@ export function updateAboveEditorDashboardSlot(
   const ui = ctx?.ui;
   if (!ui) return;
 
-  if (value === undefined) delete slots[slot];
-  else slots[slot] = { id, value };
+  const store = dashboardStore();
+  if (value === undefined) delete store.slots[slot];
+  else store.slots[slot] = { id, value };
 
-  const left = slots.left;
-  const right = slots.right;
+  const left = store.slots.left;
+  const right = store.slots.right;
   if (left && right) {
-    if (!showingCombined) {
+    if (!store.showingCombined) {
       ui.setWidget(left.id, undefined, { placement: "aboveEditor" });
       ui.setWidget(right.id, undefined, { placement: "aboveEditor" });
     }
-    showingCombined = true;
+    store.showingCombined = true;
     ui.setWidget(ABOVE_EDITOR_DASHBOARD_WIDGET_ID, makeCombinedWidget(left, right), { placement: "aboveEditor" });
     return;
   }
 
   const active = left ?? right;
-  if (showingCombined) {
+  if (store.showingCombined) {
     ui.setWidget(ABOVE_EDITOR_DASHBOARD_WIDGET_ID, undefined, { placement: "aboveEditor" });
-    showingCombined = false;
+    store.showingCombined = false;
     if (active) {
       ui.setWidget(active.id, active.value, { placement: "aboveEditor" });
       return;
@@ -154,7 +169,8 @@ export function updateAboveEditorDashboardSlot(
 }
 
 export function resetAboveEditorDashboardForTest(): void {
-  delete slots.left;
-  delete slots.right;
-  showingCombined = false;
+  const store = dashboardStore();
+  delete store.slots.left;
+  delete store.slots.right;
+  store.showingCombined = false;
 }
