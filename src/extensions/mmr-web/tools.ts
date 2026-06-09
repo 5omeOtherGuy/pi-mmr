@@ -68,6 +68,13 @@ export const WEB_SEARCH_PARAMETERS_SCHEMA = Type.Object({
       },
     ),
   ),
+  country: Type.Optional(
+    Type.String({
+      pattern: "^[A-Za-z]{2}$",
+      description:
+        "Optional ISO 3166-1 alpha-2 country code (e.g. \"de\", \"jp\") to target a region. Honored natively only by the Brave backend; SearXNG and DuckDuckGo report it as unsupported in details.filters rather than silently ignoring it.",
+    }),
+  ),
 });
 
 export const READ_WEB_PAGE_PARAMETERS_SCHEMA = Type.Object({
@@ -78,7 +85,7 @@ export const READ_WEB_PAGE_PARAMETERS_SCHEMA = Type.Object({
   objective: Type.Optional(
     Type.String({
       description:
-        "A natural-language description of the research goal. If set, only relevant excerpts will be returned. If not set, the full Markdown content of the web page will be returned.",
+        "A natural-language description of the research goal. When set, the most relevant verbatim excerpts of the page are selected locally (keyword relevance, not summarization) and returned; when not set, the full Markdown content of the web page is returned.",
     }),
   ),
   forceRefetch: Type.Optional(
@@ -110,10 +117,10 @@ export const READ_WEB_PAGE_PROMPT_GUIDELINES = [
 export const WEB_SEARCH_DESCRIPTION =
   "Search the web for information relevant to a research objective. Use when you need up-to-date or precise documentation. Use `read_web_page` to fetch full content from a specific URL. " +
   "The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). " +
-  "Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains) and `recency` (day/week/month/year) restricts by publication window. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. " +
+  "Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains), `recency` (day/week/month/year) restricts by publication window, and `country` (ISO 3166-1 alpha-2) targets a region. Prefer these structured filters over `site:`/date operators written into the query text. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. " +
   "Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.";
 export const READ_WEB_PAGE_DESCRIPTION =
-  "Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. The `forceRefetch` flag is accepted for compatibility but does not change behavior: the custom reader always performs a live fetch, so every read already returns the latest content. " +
+  "Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns the most relevant verbatim excerpts (selected locally by keyword relevance, not summarized). The `forceRefetch` flag is accepted for compatibility but does not change behavior: the custom reader always performs a live fetch, so every read already returns the latest content. " +
   "Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.";
 
 export type WebSearchParams = Static<typeof WEB_SEARCH_PARAMETERS_SCHEMA>;
@@ -350,6 +357,10 @@ export function createWebSearchTool(deps: MmrWebToolDeps): ToolDefinition {
         );
       }
       const recency = params.recency as Recency | undefined;
+      const country =
+        typeof params.country === "string" && params.country.trim().length > 0
+          ? params.country.trim().toLowerCase()
+          : undefined;
       const combined = getCombinedOptions(deps);
       const backend = getSearchBackend(settings, splitSearchOverrides(combined));
       if (!backend) {
@@ -366,6 +377,7 @@ export function createWebSearchTool(deps: MmrWebToolDeps): ToolDefinition {
         ...(includeDomains.length > 0 ? { includeDomains } : {}),
         ...(excludeDomains.length > 0 ? { excludeDomains } : {}),
         ...(recency ? { recency } : {}),
+        ...(country ? { country } : {}),
       });
       return {
         content: [{ type: "text", text: formatSearchResults(query, response.results, response.rawText) }],
@@ -429,6 +441,18 @@ export function createReadWebPageTool(deps: MmrWebToolDeps): ToolDefinition {
       };
       if (objectiveProvided && rawObjective !== undefined) baseDetails.objective = rawObjective;
 
+      // Emit the final content while recording the actually-emitted byte count
+      // and whether the final 256KB cap (applied on top of the reader's own
+      // byte budget, and after excerpt joining) truncated the output. Without
+      // this, details.truncated/bytes reflected only the upstream reader
+      // response and ignored excerpting plus the final content cap.
+      const emit = (text: string): AgentToolResult<ReadWebPageDetails> => {
+        const capped = applyFinalContentCap(text);
+        baseDetails.bytes = Buffer.byteLength(capped.text, "utf8");
+        baseDetails.truncated = response.truncated || capped.truncated;
+        return { content: [{ type: "text", text: capped.text }], details: baseDetails };
+      };
+
       // A fetched-but-unreadable page (JS app shell, placeholder-only, or
       // empty) carries an honest diagnostic in `content`. Return it as-is
       // and never excerpt it, regardless of any objective.
@@ -436,14 +460,12 @@ export function createReadWebPageTool(deps: MmrWebToolDeps): ToolDefinition {
         baseDetails.readableContentFound = false;
         if (response.extractionReason) baseDetails.extractionReason = response.extractionReason;
         baseDetails.fallbackReason = "no_readable_content";
-        const capped = applyFinalContentCap(response.content);
-        return { content: [{ type: "text", text: capped.text }], details: baseDetails };
+        return emit(response.content);
       }
 
       if (!objectiveApplied) {
         if (objectiveProvided) baseDetails.fallbackReason = "blank_objective";
-        const capped = applyFinalContentCap(response.content);
-        return { content: [{ type: "text", text: capped.text }], details: baseDetails };
+        return emit(response.content);
       }
 
       const extraction = extractObjectiveRelevantExcerpts({
@@ -453,14 +475,11 @@ export function createReadWebPageTool(deps: MmrWebToolDeps): ToolDefinition {
       });
       if (!extraction.excerpted || extraction.excerpts.length === 0) {
         baseDetails.fallbackReason = "no_relevant_excerpts";
-        const capped = applyFinalContentCap(response.content);
-        return { content: [{ type: "text", text: capped.text }], details: baseDetails };
+        return emit(response.content);
       }
-      const joined = extraction.excerpts.join(EXCERPT_SEPARATOR);
-      const capped = applyFinalContentCap(joined);
       baseDetails.excerpted = true;
       baseDetails.excerptCount = extraction.excerpts.length;
-      return { content: [{ type: "text", text: capped.text }], details: baseDetails };
+      return emit(extraction.excerpts.join(EXCERPT_SEPARATOR));
     },
   } satisfies ToolDefinition;
 }

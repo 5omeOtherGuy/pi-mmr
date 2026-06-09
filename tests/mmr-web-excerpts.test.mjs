@@ -283,6 +283,22 @@ A passage mentioning house and sparrow separately is less relevant.
     assert.doesNotMatch(joined, /Retrieved 27 September 2019/, "citation-dense passage must be demoted out of the selection");
   });
 
+  it("caps final content on a valid UTF-8 boundary when a multibyte character crosses the cap", async () => {
+    const { applyFinalContentCap, FINAL_CONTENT_CAP_BYTES, TRUNCATION_MARKER } = await importSource(
+      "extensions/mmr-web/excerpts.ts",
+    );
+    const text = `${"a".repeat(FINAL_CONTENT_CAP_BYTES - 1)}\u20actail`;
+    const result = applyFinalContentCap(text);
+    assert.equal(result.truncated, true);
+    assert.ok(result.text.endsWith(TRUNCATION_MARKER));
+    assert.doesNotMatch(result.text, /\uFFFD/, "truncation must not leave a replacement character");
+    const beforeMarker = result.text.slice(0, -TRUNCATION_MARKER.length);
+    assert.ok(
+      Buffer.byteLength(beforeMarker, "utf8") <= FINAL_CONTENT_CAP_BYTES,
+      "content before the marker should not exceed the hard cap",
+    );
+  });
+
   it("keeps fenced code blocks intact", async () => {
     const { extractObjectiveRelevantExcerpts } = await importSource(
       "extensions/mmr-web/excerpts.ts",

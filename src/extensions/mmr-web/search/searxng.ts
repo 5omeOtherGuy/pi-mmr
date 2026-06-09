@@ -148,7 +148,8 @@ export async function searxngSearch(
   url.searchParams.set("format", "json");
   url.searchParams.set("safesearch", "1");
   url.searchParams.set("language", "en");
-  if (args.country) url.searchParams.set("country", args.country.toLowerCase());
+  // SearXNG's search API has no `country` parameter — it is silently ignored
+  // upstream — so we do not send one and report it as unsupported below.
   // Recency maps natively to SearXNG's `time_range` parameter.
   if (args.recency) url.searchParams.set("time_range", SEARXNG_TIME_RANGE_BY_RECENCY[args.recency]);
 
@@ -192,6 +193,15 @@ export async function searxngSearch(
   const appliedFilters: AppliedFilter[] = [...domainFiltered.applied];
   if (args.recency) {
     appliedFilters.push({ filter: "recency", support: "native", honored: "full" });
+  }
+  if (args.country) {
+    appliedFilters.push({
+      filter: "country",
+      support: "unsupported",
+      honored: "none",
+      reason:
+        "SearXNG's search API has no country parameter; this backend does not currently expose SearXNG locale/language targeting, so country is unsupported.",
+    });
   }
 
   if (options.noteUse) options.noteUse();

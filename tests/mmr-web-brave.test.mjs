@@ -76,6 +76,10 @@ describe("mmr-web Brave client - search", () => {
     assert.equal(calls[0].url.origin + calls[0].url.pathname, "https://api.search.brave.com/res/v1/web/search");
     assert.equal(calls[0].url.searchParams.get("q"), "typescript node");
     assert.equal(calls[0].url.searchParams.get("count"), "2");
+    // Cleaner snippets (no highlight markers) and only the web result block
+    // the parser consumes.
+    assert.equal(calls[0].url.searchParams.get("text_decorations"), "false");
+    assert.equal(calls[0].url.searchParams.get("result_filter"), "web");
     assert.equal(calls[0].init.headers["X-Subscription-Token"], "brv-key");
     // The Brave key must NOT be sent in an Authorization header (subscription
     // token model, not bearer auth).
@@ -87,16 +91,21 @@ describe("mmr-web Brave client - search", () => {
     assert.equal(result.truncated, false);
   });
 
-  it("passes the optional country code in uppercase", async () => {
+  it("passes the optional country code in uppercase and reports it native/full", async () => {
     const { braveSearch } = await importSource("extensions/mmr-web/brave.ts");
     const { fetchImpl, calls } = makeFetchMock([
       () => jsonResponse({ web: { results: [] } }),
     ]);
-    await braveSearch(
+    const res = await braveSearch(
       { query: "x", maxResults: 5, maxResultBytes: 10000, country: "de" },
       { apiKey: "k", fetchImpl },
     );
     assert.equal(calls[0].url.searchParams.get("country"), "DE");
+    const country = res.appliedFilters.find((f) => f.filter === "country");
+    assert.deepEqual(
+      { support: country.support, honored: country.honored },
+      { support: "native", honored: "full" },
+    );
   });
 
   it("throws on non-200 responses", async () => {

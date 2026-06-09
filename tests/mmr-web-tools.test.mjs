@@ -68,6 +68,7 @@ describe("mmr-web tool definitions", () => {
     assert.equal(tool.parameters.properties.objective.type, "string");
     assert.equal(tool.parameters.properties.search_queries.type, "array");
     assert.equal(tool.parameters.properties.max_results.type, "number");
+    assert.equal(tool.parameters.properties.country.type, "string");
     assert.doesNotMatch(tool.description, /Jina/);
     assert.match(tool.description, /Brave Search/);
   });
@@ -369,8 +370,12 @@ describe("mmr-web tool definitions", () => {
       {},
     );
     assert.equal(result.details.excerpted, true);
+    // The final 256KB cap fired, so details.truncated must report it (not just
+    // the upstream reader's own truncation flag).
+    assert.equal(result.details.truncated, true);
     const text = result.content[0].text;
     const bytes = Buffer.byteLength(text, "utf8");
+    assert.equal(result.details.bytes, bytes, "details.bytes must match the emitted byte count");
     assert.ok(
       bytes <= FINAL_CONTENT_CAP_BYTES + Buffer.byteLength(TRUNCATION_MARKER, "utf8"),
       `final output (${bytes} bytes) should be capped at FINAL_CONTENT_CAP_BYTES + marker`,
@@ -391,8 +396,12 @@ describe("mmr-web tool definitions", () => {
     });
     const result = await tool.execute("c", { url: "https://example.com/" }, undefined, undefined, {});
     assert.equal(result.details.objectiveApplied, false);
+    // The reader did not truncate (body < maxResultBytes) but the final 256KB
+    // cap did; details.truncated must reflect that.
+    assert.equal(result.details.truncated, true);
     const text = result.content[0].text;
     const bytes = Buffer.byteLength(text, "utf8");
+    assert.equal(result.details.bytes, bytes, "details.bytes must match the emitted byte count");
     assert.ok(
       bytes <= FINAL_CONTENT_CAP_BYTES + Buffer.byteLength(TRUNCATION_MARKER, "utf8"),
       `final output (${bytes} bytes) should be capped at FINAL_CONTENT_CAP_BYTES + marker`,

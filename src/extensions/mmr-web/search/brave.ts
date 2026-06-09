@@ -106,6 +106,14 @@ export async function braveSearch(
     ? DOMAIN_FILTER_CANDIDATE_COUNT
     : Math.min(Math.max(args.maxResults, 1), 20);
   url.searchParams.set("count", String(requestedCount));
+  // Suppress Brave's highlight decoration markers (private-use characters it
+  // wraps around matched query terms) so result snippets are clean text, and
+  // ask only for the `web` result block that parseStructuredResults consumes
+  // so the response is not padded with news/video/discussion blocks we drop.
+  url.searchParams.set("text_decorations", "false");
+  url.searchParams.set("result_filter", "web");
+  // Country/region targeting maps natively to Brave's `country` parameter
+  // (ISO 3166-1 alpha-2, uppercased).
   if (args.country) url.searchParams.set("country", args.country.toUpperCase());
   // Recency maps natively to Brave's `freshness` parameter.
   if (args.recency) url.searchParams.set("freshness", BRAVE_FRESHNESS_BY_RECENCY[args.recency]);
@@ -142,6 +150,9 @@ export async function braveSearch(
   const appliedFilters: AppliedFilter[] = [...domainFiltered.applied];
   if (args.recency) {
     appliedFilters.push({ filter: "recency", support: "native", honored: "full" });
+  }
+  if (args.country) {
+    appliedFilters.push({ filter: "country", support: "native", honored: "full" });
   }
 
   return { results, appliedFilters, ...body };

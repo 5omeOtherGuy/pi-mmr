@@ -27,7 +27,7 @@ export interface SearchResultEntry {
  * report whether it was enforced natively, post-filtered locally, or could
  * not be honored at all.
  */
-export type FilterName = "include_domains" | "exclude_domains" | "recency";
+export type FilterName = "include_domains" | "exclude_domains" | "recency" | "country";
 
 /** How a backend applied a given filter. */
 export type FilterSupport = "native" | "post_filter" | "unsupported";
@@ -62,7 +62,12 @@ export interface SearchArgs {
   signal?: AbortSignal;
   maxResultBytes: number;
   timeoutMs?: number;
-  /** Optional two-letter country code; backends that honor it use it as-is. */
+  /**
+   * Optional ISO 3166-1 alpha-2 country code for region targeting. Only the
+   * Brave backend honors it natively; SearXNG and DuckDuckGo report it as an
+   * unsupported filter (via {@link AppliedFilter}) rather than silently
+   * dropping it.
+   */
   country?: string;
   /** Keep only results whose hostname matches one of these domains (suffix-aware). */
   includeDomains?: string[];

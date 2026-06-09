@@ -110,7 +110,8 @@ function cacheKey(query: string, maxResults: number, args: DuckDuckGoSearchArgs)
   const include = (args.includeDomains ?? []).join(",");
   const exclude = (args.excludeDomains ?? []).join(",");
   const recency = args.recency ?? "";
-  return [query, maxResults, include, exclude, recency].join("\u0000");
+  const country = args.country ?? "";
+  return [query, maxResults, include, exclude, recency, country].join("\u0000");
 }
 
 function readCache(state: DuckDuckGoState, key: string, now: number): DuckDuckGoSearchResponse | undefined {
@@ -143,9 +144,13 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
-    .replace(/&#x27;/g, "'")
-    .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
+    // Hex numeric entities (e.g. &#x27; &#x2014;) — generic decoder so DDG
+    // titles/snippets are not left with visible &#x...; escapes.
+    .replace(/&#[xX]([0-9a-fA-F]+);/g, (_, h) => {
+      const code = Number.parseInt(h, 16);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    })
     .replace(/&#(\d+);/g, (_, d) => {
       const code = Number(d);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
@@ -346,6 +351,18 @@ export async function duckduckgoSearch(
       honored: "none",
       reason:
         "DuckDuckGo HTML results do not expose reliable publication dates; configure SearXNG or Brave to filter by recency.",
+    });
+  }
+  if (args.country) {
+    // This backend does not region-target the DuckDuckGo HTML endpoint, so a
+    // country filter cannot be honored. Report it truthfully rather than
+    // silently dropping it.
+    appliedFilters.push({
+      filter: "country",
+      support: "unsupported",
+      honored: "none",
+      reason:
+        "DuckDuckGo HTML results are not region-filtered by this backend; configure Brave for native country targeting.",
     });
   }
 

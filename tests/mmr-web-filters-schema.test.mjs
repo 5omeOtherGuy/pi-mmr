@@ -50,6 +50,9 @@ describe("web_search schema — filter fields", () => {
       ? recency.enum
       : variants.map((v) => v.const).filter((v) => typeof v === "string");
     assert.deepEqual([...values].sort(), ["day", "month", "week", "year"]);
+    // country is an optional 2-letter string
+    assert.equal(props.country.type, "string");
+    assert.equal(props.country.pattern, "^[A-Za-z]{2}$");
     // all new fields remain optional
     assert.deepEqual(tool.parameters.required, ["objective"]);
   });
@@ -90,6 +93,34 @@ describe("web_search execute — filter passthrough and reporting", () => {
     assert.deepEqual({ s: include.support, h: include.honored }, { s: "post_filter", h: "full" });
     const recency = result.details.filters.find((f) => f.filter === "recency");
     assert.deepEqual({ s: recency.support, h: recency.honored }, { s: "native", h: "full" });
+  });
+
+  it("passes a country code to the Brave backend and reports it native/full in details.filters", async () => {
+    const { createWebSearchTool } = await importSource("extensions/mmr-web/tools.ts");
+    const { fetchImpl, calls } = makeFetchMock(() => braveJson([{ title: "A", url: "https://x/a" }]));
+    const tool = createWebSearchTool({
+      getSettings: () => settings(),
+      getBraveOptions: () => ({ apiKey: "brv", fetchImpl }),
+    });
+    const result = await tool.execute("cc", { objective: "x", country: "DE" }, undefined, undefined, {});
+    // normalized to lowercase by the tool, then uppercased by the Brave backend
+    assert.equal(calls[0].url.searchParams.get("country"), "DE");
+    const country = result.details.filters.find((f) => f.filter === "country");
+    assert.deepEqual({ s: country.support, h: country.honored }, { s: "native", h: "full" });
+  });
+
+  it("rejects an invalid country code before any network call", async () => {
+    const { createWebSearchTool } = await importSource("extensions/mmr-web/tools.ts");
+    const { fetchImpl, calls } = makeFetchMock(() => braveJson([]));
+    const tool = createWebSearchTool({
+      getSettings: () => settings(),
+      getBraveOptions: () => ({ apiKey: "brv", fetchImpl }),
+    });
+    await assert.rejects(
+      () => tool.execute("cx", { objective: "x", country: "deu" }, undefined, undefined, {}),
+      /invalid parameters|country/i,
+    );
+    assert.equal(calls.length, 0);
   });
 
   it("reports details.filters as an empty array when no filters are requested", async () => {

@@ -666,12 +666,17 @@ Prompt guidelines:
 - Use web_search only for public, non-sensitive research; do not include secrets, API keys, or private data in web_search.objective or web_search.search_queries.
 
 Description:
-Search the web for information relevant to a research objective. Use when you need up-to-date or precise documentation. Use `read_web_page` to fetch full content from a specific URL. The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains) and `recency` (day/week/month/year) restricts by publication window. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.
+Search the web for information relevant to a research objective. Use when you need up-to-date or precise documentation. Use `read_web_page` to fetch full content from a specific URL. The active backend is one of: SearXNG (user-configured self-hosted instance via MMR_WEB_SEARXNG_URL, no API key required), Brave Search (requires BRAVE_API_KEY; a free `Data for AI` subscription key is sufficient), or DuckDuckGo HTML (built-in no-key fallback, best-effort and may be rate-limited). Optional filters are best-effort per backend: `include_domains`/`exclude_domains` restrict or drop results by host (suffix-aware, so a domain also matches its subdomains), `recency` (day/week/month/year) restricts by publication window, and `country` (ISO 3166-1 alpha-2) targets a region. Prefer these structured filters over `site:`/date operators written into the query text. A backend honors each filter natively, via local post-filter, or reports it as unsupported; `details.filters` reports the actual enforcement for every requested filter so nothing is silently ignored. Do NOT include secrets, API keys, or private data in the objective or search queries; they are sent to the upstream search engine.
 
 Parameters:
 ```json
 {
   "properties": {
+    "country": {
+      "description": "Optional ISO 3166-1 alpha-2 country code (e.g. \"de\", \"jp\") to target a region. Honored natively only by the Brave backend; SearXNG and DuckDuckGo report it as unsupported in details.filters rather than silently ignoring it.",
+      "pattern": "^[A-Za-z]{2}$",
+      "type": "string"
+    },
     "exclude_domains": {
       "description": "Best-effort blocklist of domains to drop from results. Same normalization and suffix-aware matching as include_domains. A domain cannot appear in both lists. See details.filters for actual enforcement.",
       "items": {
@@ -742,7 +747,7 @@ Prompt guidelines:
 - Use read_web_page only for public http(s) pages; do not use read_web_page for localhost, private IPs, link-local hosts, or non-Internet URLs.
 
 Description:
-Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns excerpts relevant to that objective. The `forceRefetch` flag is accepted for compatibility but does not change behavior: the custom reader always performs a live fetch, so every read already returns the latest content. Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.
+Read the contents of a web page at a given URL. When only the url parameter is set, it returns the contents of the webpage converted to Markdown. When an objective is provided, it returns the most relevant verbatim excerpts (selected locally by keyword relevance, not summarized). The `forceRefetch` flag is accepted for compatibility but does not change behavior: the custom reader always performs a live fetch, so every read already returns the latest content. Do NOT use for localhost, private IPs, link-local hosts, or non-Internet URLs. Content is fetched directly through mmr-web's custom in-process reader, converted to Markdown with Readability + Turndown when available, and falls back to the lightweight built-in extractor when the page is not article-like or the Markdown pipeline cannot load.
 
 Parameters:
 ```json
@@ -753,7 +758,7 @@ Parameters:
       "type": "boolean"
     },
     "objective": {
-      "description": "A natural-language description of the research goal. If set, only relevant excerpts will be returned. If not set, the full Markdown content of the web page will be returned.",
+      "description": "A natural-language description of the research goal. When set, the most relevant verbatim excerpts of the page are selected locally (keyword relevance, not summarization) and returned; when not set, the full Markdown content of the web page is returned.",
       "type": "string"
     },
     "url": {
