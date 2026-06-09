@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 
-const FORMAT_MODULE = "extensions/mmr-subagents/async-task-tool-format.ts";
-const SCHEMA_MODULE = "extensions/mmr-subagents/async-task-tool-schemas.ts";
+const FORMAT_MODULE = "extensions/mmr-async-tasks/async-task-tool-format.ts";
+const SCHEMA_MODULE = "extensions/mmr-async-tasks/async-task-tool-schemas.ts";
 
 after(cleanupLoadedSource);
 

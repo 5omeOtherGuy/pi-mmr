@@ -23,7 +23,7 @@ import type {
 import {
   formatMmrWorkerTokens,
   stripMmrWorkerModelProvider,
-} from "./worker-usage-format.js";
+} from "../mmr-subagents/worker-usage-format.js";
 
 /**
  * Minimal theme shape both surfaces share: foreground colouring + bold. The

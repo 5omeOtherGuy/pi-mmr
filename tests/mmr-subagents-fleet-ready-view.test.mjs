@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 
-const VIEW_MODULE = "extensions/mmr-subagents/background-task-view.ts";
+const VIEW_MODULE = "extensions/mmr-async-tasks/background-task-view.ts";
 
 after(cleanupLoadedSource);
 

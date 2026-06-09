@@ -8,6 +8,15 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Changed
 
+- **Breaking (extension split):** `mmr-async-tasks` now owns the background-task
+  tools `start_task`, `task_poll`, `task_wait`, and `task_cancel`, including the
+  async task registry, background-task widget, completion delivery, and
+  `session_shutdown` cleanup. `mmr-subagents` now owns only the blocking worker
+  tools (`finder`, `oracle`, `librarian`, and `Task`) plus custom subagent
+  registration. The new authoritative feature gate is `mmr-async-tasks`; the
+  deprecated `mmr-subagents.async-tasks` gate remains as a compatibility alias.
+  Public tool names and async task ids/status/group semantics are unchanged.
+
 - `mmr-history` / `mmr-subagents`: `mmr-history` now owns and registers the
   internal `history-reader` subagent prompt builder used by `read_session`.
   `mmr-subagents` no longer registers `history-reader`, and oracle child

@@ -8,14 +8,12 @@ import { type LibrarianToolDeps, isLibrarianGithubToolPrerequisiteRegistered, re
 import { type MmrAdvisorToolDeps, registerOracleTool } from "./oracle.js";
 import { registerMmrSubagentsPromptBuilders } from "./prompts.js";
 import { type TaskToolDeps, registerTaskParentPromptCapture, registerTaskTool } from "./task.js";
-import { type AsyncTaskToolDeps, MMR_SUBAGENTS_ASYNC_PUSH_ENV, registerAsyncTaskTools } from "./async-task-tools.js";
 import {
   type RegisterMmrCustomSubagentToolsOptions,
   countLegacyClaudeSubagentCandidates,
   registerMmrCustomSubagentTools,
 } from "./custom-runtime.js";
 import { resolveEnabledMmrCustomSubagents } from "./custom-config.js";
-import { parseBoolEnv } from "../mmr-core/internal/env.js";
 import {
   createMmrSubagentsFeatureGateProvider,
   createMmrSubagentsToolProvider,
@@ -44,7 +42,6 @@ export interface MmrSubagentsFactoryOverrides {
   oracle?: MmrAdvisorToolDeps;
   task?: TaskToolDeps;
   librarian?: LibrarianToolDeps;
-  asyncTasks?: AsyncTaskToolDeps;
   customSubagents?: RegisterMmrCustomSubagentToolsOptions;
 }
 
@@ -71,22 +68,7 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
     registerTaskTool(pi, overrides.task ?? {});
     registerLibrarianTool(pi, overrides.librarian ?? {});
     const customSubagentTools = registerMmrCustomSubagentTools(pi, overrides.customSubagents ?? {});
-    // User ceiling for automatic async completion delivery: on by default; the
-    // env gate can disable both in-turn context notices and idle-wake pushes.
-    // Individual starts can opt out with start_task({ notify: false }), and the
-    // registry bounds idle-wake pushes. Test overrides win so deterministic
-    // tests control the seam.
-    const asyncPushCeiling = parseBoolEnv(process.env[MMR_SUBAGENTS_ASYNC_PUSH_ENV]) ?? true;
-    registerAsyncTaskTools(pi, {
-      enableCompletionPush: asyncPushCeiling,
-      finderDeps: overrides.finder,
-      taskDeps: overrides.task,
-      librarianDeps: overrides.librarian,
-      ...(overrides.asyncTasks ?? {}),
-    });
     pi.on("tool_result", maybeNumberFinderReadToolResult);
-    // registerAsyncTaskTools owns session_shutdown for its resolved registry,
-    // including injected registries in tests, so teardown has a single owner.
     // Clear session-scoped worker-model fallback state at session
     // boundaries so one session's failure counts and stored overrides can
     // never leak into another (including the degenerate undefined-session
@@ -106,7 +88,6 @@ export function createMmrSubagentsExtension(overrides: MmrSubagentsFactoryOverri
       oracle: true,
       Task: true,
       librarian: () => isLibrarianGithubToolPrerequisiteRegistered(pi),
-      asyncTasks: true,
       customTools: () => customSubagentTools.map((tool) => tool.name),
     };
     registerMmrFeatureGateProvider(createMmrSubagentsFeatureGateProvider(capabilities));

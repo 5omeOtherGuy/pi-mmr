@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 
-const TOOLS_MODULE = "extensions/mmr-subagents/async-task-tools.ts";
-const REGISTRY_MODULE = "extensions/mmr-subagents/async-task-registry.ts";
+const TOOLS_MODULE = "extensions/mmr-async-tasks/async-task-tools.ts";
+const REGISTRY_MODULE = "extensions/mmr-async-tasks/async-task-registry.ts";
 
 after(cleanupLoadedSource);
 

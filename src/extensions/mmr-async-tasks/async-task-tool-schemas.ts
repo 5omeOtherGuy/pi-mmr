@@ -11,7 +11,7 @@ import {
   START_TASK_AGENT_EXAMPLES,
   START_TASK_GROUP_FANOUT_GUIDANCE,
   START_TASK_SELECTION_GUIDANCE,
-} from "./tool-guidance.js";
+} from "../mmr-subagents/tool-guidance.js";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const TASK_POLL_TOOL_NAME = "task_poll";

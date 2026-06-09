@@ -104,13 +104,16 @@ describe("mmr-subagents package wiring", () => {
     assert.equal(root.MMR_SUBAGENTS_FEATURE_GATE, "mmr-subagents");
     assert.deepEqual(
       [...root.MMR_SUBAGENTS_OWNED_TOOLS].sort(),
-      ["Task", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+      ["Task", "finder", "librarian", "oracle"],
     );
+    assert.equal(root.MMR_ASYNC_TASKS_PROVIDER_NAME, "mmr-async-tasks");
+    assert.equal(root.MMR_ASYNC_TASKS_FEATURE_GATE, "mmr-async-tasks");
     assert.equal(root.MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE, "mmr-subagents.async-tasks");
     assert.deepEqual(
-      [...root.MMR_SUBAGENTS_ASYNC_TASK_TOOLS],
+      [...root.MMR_ASYNC_TASK_TOOLS],
       ["start_task", "task_poll", "task_wait", "task_cancel"],
     );
+    assert.deepEqual([...root.MMR_SUBAGENTS_ASYNC_TASK_TOOLS], [...root.MMR_ASYNC_TASK_TOOLS]);
     assert.equal(typeof root.createStartTaskTool, "function");
     assert.equal(typeof root.createTaskPollTool, "function");
     assert.equal(typeof root.createTaskWaitTool, "function");
@@ -202,12 +205,12 @@ describe("mmr-subagents extension factory", () => {
     const names = tools.map((tool) => tool.name).sort();
     assert.deepEqual(
       names,
-      ["Task", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
-      "this slice registers the shipped mmr-subagents Pi tools plus the async background task tools",
+      ["Task", "finder", "librarian", "oracle"],
+      "mmr-subagents registers only the blocking worker tools after async extraction",
     );
     assert.equal(typeof handlers.get("tool_result"), "function", "finder installs a read-result normalizer");
     assert.equal(typeof handlers.get("before_agent_start"), "function", "Task captures the parent prompt for mode-derived workers");
-    assert.equal(typeof handlers.get("session_shutdown"), "function", "async tasks install a session_shutdown cleanup");
+    assert.equal(typeof handlers.get("session_shutdown"), "undefined", "async tasks own session_shutdown cleanup");
     assert.equal(typeof handlers.get("session_start"), "function", "clears session-scoped worker-fallback state on new/fork sessions");
   });
 

@@ -57,7 +57,7 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
       "read_mcp_resource",
     ],
     promptRoute: "default",
-    featureGates: ["mmr-subagents", "mmr-subagents.async-tasks"],
+    featureGates: ["mmr-subagents", "mmr-async-tasks"],
   },
 
   smartGPT: {
@@ -92,7 +92,7 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
       "read_mcp_resource",
     ],
     promptRoute: "default",
-    featureGates: ["mmr-subagents", "mmr-subagents.async-tasks"],
+    featureGates: ["mmr-subagents", "mmr-async-tasks"],
   },
 
   rush: {
@@ -131,7 +131,7 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
       "task_list",
     ],
     promptRoute: "rush",
-    featureGates: ["mmr-subagents", "mmr-subagents.async-tasks"],
+    featureGates: ["mmr-subagents", "mmr-async-tasks"],
   },
 
   large: {
@@ -166,7 +166,7 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
       "read_mcp_resource",
     ],
     promptRoute: "default",
-    featureGates: ["mmr-subagents", "mmr-subagents.async-tasks"],
+    featureGates: ["mmr-subagents", "mmr-async-tasks"],
   },
 
   deep: {
@@ -205,7 +205,7 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
       "handoff",
     ],
     promptRoute: "deep",
-    featureGates: ["mmr-subagents", "mmr-subagents.async-tasks", "mmr-history", "mmr-web"],
+    featureGates: ["mmr-subagents", "mmr-async-tasks", "mmr-history", "mmr-web"],
   },
 
   free: {

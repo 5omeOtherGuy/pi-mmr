@@ -6,7 +6,7 @@ import {
   type MmrWorkerResult,
   type MmrWorkerTrailItem,
   type MmrWorkerUsageStats,
-} from "./runner.js";
+} from "../mmr-subagents/runner.js";
 import {
   ASYNC_TASK_GROUP_LABEL_MAX_LEN,
   assertValidGroupId,

@@ -39,7 +39,8 @@ import type {
  */
 const RESERVED_GATE_REASONS: Record<string, string> = {
   "mmr-subagents": "Reserved for the mmr-subagents extension; not yet provided.",
-  "mmr-subagents.async-tasks": "Reserved for the mmr-subagents async background task tools; not yet provided.",
+  "mmr-async-tasks": "Reserved for the mmr-async-tasks extension; not yet provided.",
+  "mmr-subagents.async-tasks": "Deprecated compatibility gate for mmr-async-tasks background task tools; not yet provided.",
   "mmr-history": "Reserved for the mmr-history extension; not yet provided.",
   "mmr-web": "Reserved for the mmr-web extension; not yet provided.",
   "mmr-patch": "Reserved for the mmr-patch extension; not yet provided.",

@@ -368,14 +368,24 @@ export type { MmrGithubFactoryOverrides } from "./extensions/mmr-github/index.js
 //     ORACLE_DEFAULT_MODEL_PREFERENCES is an Internal/legacy convenience
 //     constant) ---
 export {
-  MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE,
-  MMR_SUBAGENTS_ASYNC_TASK_TOOLS,
   MMR_SUBAGENTS_FEATURE_GATE,
   MMR_SUBAGENTS_OWNED_TOOLS,
   MMR_SUBAGENTS_PROVIDER_NAME,
   createMmrSubagentsFeatureGateProvider,
   createMmrSubagentsToolProvider,
 } from "./extensions/mmr-subagents/provider.js";
+export {
+  MMR_ASYNC_TASKS_FEATURE_GATE,
+  MMR_ASYNC_TASKS_PROVIDER_NAME,
+  MMR_ASYNC_TASK_TOOLS,
+  MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE,
+  MMR_SUBAGENTS_ASYNC_TASK_TOOLS,
+  createMmrAsyncTasksFeatureGateProvider,
+  createMmrAsyncTasksToolProvider,
+} from "./extensions/mmr-async-tasks/provider.js";
+export { createMmrAsyncTasksExtension } from "./extensions/mmr-async-tasks/index.js";
+export type { MmrAsyncTasksFactoryOverrides } from "./extensions/mmr-async-tasks/index.js";
+export type { MmrAsyncTasksCapabilities } from "./extensions/mmr-async-tasks/provider.js";
 export { createMmrSubagentsExtension } from "./extensions/mmr-subagents/index.js";
 export type { MmrSubagentsFactoryOverrides } from "./extensions/mmr-subagents/index.js";
 export type { MmrSubagentsCapabilities } from "./extensions/mmr-subagents/provider.js";
@@ -502,12 +512,12 @@ export {
   createTaskPollTool,
   createTaskWaitTool,
   registerAsyncTaskTools,
-} from "./extensions/mmr-subagents/async-task-tools.js";
+} from "./extensions/mmr-async-tasks/async-task-tools.js";
 export type {
   AsyncTaskAgentName,
   AsyncTaskToolDeps,
   AsyncTaskToolDetails,
-} from "./extensions/mmr-subagents/async-task-tools.js";
+} from "./extensions/mmr-async-tasks/async-task-tools.js";
 export {
   ASYNC_TASK_CANCEL_DEAD_AFTER_MS,
   ASYNC_TASK_MAX_RUNTIME_MS,
@@ -522,7 +532,7 @@ export {
   getMmrAsyncTaskRegistry,
   isValidAsyncTaskGroupId,
   toPublicAsyncTaskSnapshot,
-} from "./extensions/mmr-subagents/async-task-registry.js";
+} from "./extensions/mmr-async-tasks/async-task-registry.js";
 export type {
   MmrAsyncTaskBoard,
   MmrAsyncTaskBoardEntry,
@@ -537,7 +547,7 @@ export type {
   StartAsyncTaskArgs,
   StartAsyncTaskResult,
   WaitForAsyncTaskResult,
-} from "./extensions/mmr-subagents/async-task-registry.js";
+} from "./extensions/mmr-async-tasks/async-task-registry.js";
 export {
   DEFAULT_MMR_WORKER_KILL_TIMEOUT_MS,
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,

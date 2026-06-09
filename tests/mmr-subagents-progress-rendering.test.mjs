@@ -1357,7 +1357,7 @@ describe("background task rendering", () => {
         description: "Confirm background widget header removed",
         prompt:
           "Verify the background-task widget no longer renders a 'Background agents' header and renders " +
-          "agent rows directly. Check src/extensions/mmr-subagents/background-task-widget.ts " +
+          "agent rows directly. Check src/extensions/mmr-async-tasks/background-task-widget.ts " +
           "renderWidgetLines. Return file path and line numbers.",
         final: { worker: "mmr-subagents.finder", reportedModel: "openai-codex/gpt-5.4-mini" },
       },
@@ -1820,7 +1820,7 @@ describe("inline background card animation", () => {
     // Advance the loader frame on the SHARED background-task-view singleton (the
     // stable URL progress-rendering imports internally), not a cache-busted
     // importSource copy, so the card under test reads the frame we advance.
-    const viewUrl = pathToFileURL(path.join(getPreparedSourceRoot(), "extensions/mmr-subagents/background-task-view.ts")).href;
+    const viewUrl = pathToFileURL(path.join(getPreparedSourceRoot(), "extensions/mmr-async-tasks/background-task-view.ts")).href;
     const { advanceLoaderFrame } = await import(viewUrl);
     const now = Date.now();
     const board = singleBoard({ createdAtMs: now - 100_000, startedAtMs: now - 100_000, updatedAtMs: now });

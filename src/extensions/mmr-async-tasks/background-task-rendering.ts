@@ -16,7 +16,7 @@ import {
   type RenderStatus,
   type SubagentProgressDetails,
   type SubagentTheme,
-} from "./subagent-render-format.js";
+} from "../mmr-subagents/subagent-render-format.js";
 
 export function backgroundTaskRenderStatus(status: string | undefined): RenderStatus | undefined {
   if (status === "running" || status === "cancelling") return "running";

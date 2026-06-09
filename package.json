@@ -28,6 +28,7 @@
       "./src/extensions/mmr-web/index.ts",
       "./src/extensions/mmr-github/index.ts",
       "./src/extensions/mmr-subagents/index.ts",
+      "./src/extensions/mmr-async-tasks/index.ts",
       "./src/extensions/mmr-history/index.ts"
     ]
   },
@@ -41,6 +42,7 @@
     "./extensions/mmr-web": "./src/extensions/mmr-web/index.ts",
     "./extensions/mmr-github": "./src/extensions/mmr-github/index.ts",
     "./extensions/mmr-subagents": "./src/extensions/mmr-subagents/index.ts",
+    "./extensions/mmr-async-tasks": "./src/extensions/mmr-async-tasks/index.ts",
     "./extensions/mmr-history": "./src/extensions/mmr-history/index.ts"
   },
   "scripts": {

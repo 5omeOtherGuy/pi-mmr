@@ -1,11 +1,11 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { MmrWorkerTrailItem } from "./worker-trail.js";
+import type { MmrWorkerTrailItem } from "../mmr-subagents/worker-trail.js";
 import {
   buildTaskFinalResult,
   buildTaskProgressResult,
   type TaskDetailsContext,
-} from "./task.js";
+} from "../mmr-subagents/task.js";
 import {
   isValidAsyncTaskGroupId,
   type MmrAsyncTaskBoard,

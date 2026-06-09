@@ -4,7 +4,7 @@ import { after, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { cleanupLoadedSource, getPreparedSourceRoot, importSource } from "./helpers/load-src.mjs";
 
-const WIDGET_MODULE = "extensions/mmr-subagents/background-task-widget.ts";
+const WIDGET_MODULE = "extensions/mmr-async-tasks/background-task-widget.ts";
 const ABOVE_EDITOR_ORDER_MODULE = "extensions/mmr-core/above-editor-order.ts";
 
 after(cleanupLoadedSource);
