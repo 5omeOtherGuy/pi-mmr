@@ -57,7 +57,13 @@ async function resetMmrGithubToolSourcePaths() {
     __resetMmrGithubToolSourcePathsForTests,
     registerMmrGithubToolSourcePath,
   } = await importSource(MMR_GITHUB_TOOL_OWNERSHIP_MODULE);
+  // Clear core's generic owner-scoped registry too: librarian activation now
+  // validates through mmr-core's hasOwnedToolsFromOwner, and
+  // registerMmrGithubToolSourcePath mirrors the path under the "mmr-github"
+  // owner there. Resetting both keeps the cases isolated.
+  const { __resetMmrOwnedToolSourcePathsForTests } = await importSource("extensions/mmr-core/owned-tools.ts");
   __resetMmrGithubToolSourcePathsForTests();
+  __resetMmrOwnedToolSourcePathsForTests();
   registerMmrGithubToolSourcePath(GITHUB_SOURCE_PATH);
 }
 

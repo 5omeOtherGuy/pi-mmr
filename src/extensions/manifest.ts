@@ -225,14 +225,14 @@ export const MMR_EXTENSION_MANIFEST: readonly MmrExtensionManifestEntry[] = Obje
  *
  *  - `mmr-web`       : `config-flow.ts` dispatches into the web config flow.
  *  - `mmr-custom-subagents` : `config-flow.ts` dispatches into the custom subagents config flow.
- *  - `mmr-github`    : `subagent-activation.ts` validates librarian-owned tools.
  *
  * Target: invert these so siblings register into core, leaving the set empty.
+ * (`mmr-github` was removed once `subagent-activation.ts` switched to the
+ * generic owner-scoped owned-tools registry for librarian gating.)
  */
 export const MMR_CORE_SIBLING_IMPORT_EXCEPTIONS: readonly string[] = Object.freeze([
   "mmr-web",
   "mmr-custom-subagents",
-  "mmr-github",
 ]);
 
 /** Convenience: the set of canonical extension directory names. */

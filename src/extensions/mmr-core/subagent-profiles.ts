@@ -46,6 +46,26 @@ export type MmrSubagentBaseMode = MmrModeKey | "from-parent";
  * with the profile-resolved route, activation fails closed before any
  * model/tool mutation.
  */
+/**
+ * Owner-scoped tool prerequisite for a subagent profile. Each group names the
+ * canonical owning extension (e.g. `"mmr-github"`) and the concrete tool names
+ * that must be present AND owned by that extension (matched by
+ * `sourceInfo.path`) in the worker's tool inventory. Subagent activation
+ * validates these fail-closed via `mmr-core`'s generic owned-tools registry,
+ * which lets `mmr-core` gate a worker (e.g. `librarian` on `mmr-github` repo
+ * tools) without importing the owning sibling extension.
+ */
+export interface MmrRequiredOwnedToolGroup {
+  /** Canonical owning extension name, e.g. `"mmr-github"`. */
+  readonly owner: string;
+  /** Tool names that must be present and owned by `owner`. */
+  readonly toolNames: readonly string[];
+  /** Human-readable phrase for the fail-closed message; defaults to an owner/tool list. */
+  readonly description?: string;
+  /** Optional remediation hint appended in parentheses to the fail-closed message. */
+  readonly unmetHint?: string;
+}
+
 export interface MmrSubagentProfile {
   /** Profile identifier used by `--mmr-subagent`. */
   readonly name: string;
@@ -76,6 +96,13 @@ export interface MmrSubagentProfile {
    * omitted; `resolveMmrSubagentInvocation` enforces the subtraction.
    */
   readonly denyTools?: readonly string[];
+  /**
+   * Owner-scoped tool prerequisites enforced at activation. When set, the
+   * worker fails closed unless every named tool is present AND owned by the
+   * declared extension. Lets `mmr-core` gate owner-specific tools (e.g.
+   * `librarian` repo tools owned by `mmr-github`) without importing the owner.
+   */
+  readonly requiredOwnedTools?: readonly MmrRequiredOwnedToolGroup[];
   /** Optional maximum inference turns for future in-process runners. */
   readonly maxTurns?: number;
   /**
@@ -115,6 +142,22 @@ export interface MmrSubagentProfile {
   /** Subagent workers never persist mode/subagent state through Pi entries. */
   readonly persistSubagentState: false;
 }
+
+/**
+ * Read-only GitHub repository provider tools owned by `mmr-github`. The
+ * `librarian` profile activates these by name and also requires them to be
+ * `mmr-github`-owned at runtime; defined once so the allowlist and the
+ * ownership requirement never drift.
+ */
+const LIBRARIAN_REPO_TOOLS = [
+  "read_github",
+  "list_directory_github",
+  "glob_github",
+  "search_github",
+  "commit_search",
+  "diff_github",
+  "list_repositories",
+] as const;
 
 /**
  * Deep-freeze a JSON-shaped value (objects, arrays, primitives only).
@@ -229,14 +272,17 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
     // Read-only GitHub repository provider tools owned by `mmr-github`.
     // The worker activates these by name through `--tools`; they are not
     // part of any user-facing mode allowlist.
-    tools: [
-      "read_github",
-      "list_directory_github",
-      "glob_github",
-      "search_github",
-      "commit_search",
-      "diff_github",
-      "list_repositories",
+    tools: [...LIBRARIAN_REPO_TOOLS],
+    // Fail closed unless the repo tools are present AND owned by `mmr-github`,
+    // validated through mmr-core's generic owned-tools registry (no import of
+    // mmr-github from core).
+    requiredOwnedTools: [
+      {
+        owner: "mmr-github",
+        toolNames: [...LIBRARIAN_REPO_TOOLS],
+        description: "mmr-github-owned read-only GitHub tools",
+        unmetHint: "set MMR_GITHUB_ENABLE=true",
+      },
     ],
     promptRoute: "standalone",
     promptBuilder: "librarian",

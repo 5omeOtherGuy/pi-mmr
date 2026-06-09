@@ -8,6 +8,16 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Changed
 
+- `mmr-core` no longer imports `mmr-github` to gate the `librarian` subagent.
+  Subagent profiles can now declare owner-scoped tool prerequisites
+  (`requiredOwnedTools`), validated fail-closed at activation through a generic
+  owner-scoped owned-tools registry in `mmr-core` (`registerMmrOwnedToolSourcePath`
+  / `hasOwnedToolsFromOwner`). `mmr-github` registers its tool source paths under
+  the `"mmr-github"` owner, so `librarian` still fails closed unless the
+  read-only GitHub tools are present and `mmr-github`-owned. `mmr-github` is
+  removed from the core sibling-import exception list; the librarian gating
+  behavior and message are unchanged.
+
 - **Breaking (extension split):** `mmr-custom-subagents` now owns custom Markdown
   subagent loading/config/import/runtime behavior, dynamic `sa__*` tool
   registration, custom profile/prompt registration, custom mode-extra-tool

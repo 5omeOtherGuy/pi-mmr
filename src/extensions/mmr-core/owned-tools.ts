@@ -28,14 +28,19 @@
 
 const MMR_OWNED_TOOLS_GLOBAL_KEY = "__pi_mmr_owned_tools_v1__";
 const MMR_OWNED_EXT_PATHS_GLOBAL_KEY = "__pi_mmr_owned_extension_paths_v1__";
+const MMR_OWNED_TOOL_SOURCE_PATHS_BY_OWNER_GLOBAL_KEY = "__pi_mmr_owned_tool_source_paths_by_owner_v1__";
 
 const globalStore = globalThis as typeof globalThis & {
   [MMR_OWNED_TOOLS_GLOBAL_KEY]?: Set<string>;
   [MMR_OWNED_EXT_PATHS_GLOBAL_KEY]?: Set<string>;
+  [MMR_OWNED_TOOL_SOURCE_PATHS_BY_OWNER_GLOBAL_KEY]?: Map<string, Set<string>>;
 };
 
 const ownedToolNames: Set<string> = (globalStore[MMR_OWNED_TOOLS_GLOBAL_KEY] ??= new Set<string>());
 const ownedExtensionPaths: Set<string> = (globalStore[MMR_OWNED_EXT_PATHS_GLOBAL_KEY] ??= new Set<string>());
+const ownedToolSourcePathsByOwner: Map<string, Set<string>> = (globalStore[
+  MMR_OWNED_TOOL_SOURCE_PATHS_BY_OWNER_GLOBAL_KEY
+] ??= new Map<string, Set<string>>());
 
 /**
  * Register a concrete Pi tool name as owned by the `pi-mmr` package.
@@ -76,6 +81,63 @@ export function getMmrOwnedToolNames(): readonly string[] {
  */
 export function getMmrOwnedExtensionPaths(): readonly string[] {
   return [...ownedExtensionPaths];
+}
+
+/**
+ * Register an extension entrypoint `sourceInfo.path` under a named owner
+ * (the canonical extension name, e.g. `"mmr-github"`). This is the generic,
+ * owner-scoped counterpart to {@link registerMmrOwnedExtensionPath}: it lets
+ * `mmr-core` verify that a specific tool is owned by a *specific* sibling
+ * extension without importing that sibling. Owning extensions call this once
+ * with `fileURLToPath(import.meta.url)`.
+ *
+ * Safe to call repeatedly; idempotent. No-ops on empty owner or path.
+ */
+export function registerMmrOwnedToolSourcePath(owner: string, absolutePath: string): void {
+  const ownerKey = owner.trim();
+  const trimmed = absolutePath.trim();
+  if (ownerKey.length === 0 || trimmed.length === 0) return;
+  let paths = ownedToolSourcePathsByOwner.get(ownerKey);
+  if (paths === undefined) {
+    paths = new Set<string>();
+    ownedToolSourcePathsByOwner.set(ownerKey, paths);
+  }
+  paths.add(trimmed);
+}
+
+/**
+ * Snapshot of the entrypoint source paths registered under `owner`.
+ */
+export function getMmrOwnedToolSourcePaths(owner: string): readonly string[] {
+  const paths = ownedToolSourcePathsByOwner.get(owner.trim());
+  return paths ? [...paths] : [];
+}
+
+/**
+ * Fail-closed ownership check: returns `true` only when EVERY name in
+ * `requiredToolNames` is present in `allTools` with a `sourceInfo.path`
+ * registered under `owner` via {@link registerMmrOwnedToolSourcePath}.
+ *
+ * Returns `false` when the owner has no registered paths, the required list
+ * is empty, a required tool is absent, its source metadata is missing, or a
+ * third-party registration has taken over the name (path not in the owner
+ * set). This lets `mmr-core` gate a worker on owner-specific tools without
+ * importing the owning extension.
+ */
+export function hasOwnedToolsFromOwner(
+  owner: string,
+  requiredToolNames: readonly string[],
+  allTools: readonly ToolInfoLike[],
+): boolean {
+  if (requiredToolNames.length === 0) return false;
+  const ownerPaths = ownedToolSourcePathsByOwner.get(owner.trim());
+  if (ownerPaths === undefined || ownerPaths.size === 0) return false;
+  return requiredToolNames.every((name) => {
+    const match = allTools.find((tool) => tool.name === name);
+    const sourcePath = match?.sourceInfo?.path;
+    if (typeof sourcePath !== "string" || sourcePath.length === 0) return false;
+    return ownerPaths.has(sourcePath);
+  });
 }
 
 /**
@@ -125,9 +187,18 @@ export function shouldDropToolForFreeMode(name: string, allTools: readonly ToolI
 }
 
 /**
- * Test-only: clear both registries. Production code must not call this.
+ * Test-only: clear the owner-scoped tool source-path registry. Production
+ * code must not call this.
+ */
+export function __resetMmrOwnedToolSourcePathsForTests(): void {
+  ownedToolSourcePathsByOwner.clear();
+}
+
+/**
+ * Test-only: clear all registries. Production code must not call this.
  */
 export function __resetMmrOwnedToolsForTests(): void {
   ownedToolNames.clear();
   ownedExtensionPaths.clear();
+  ownedToolSourcePathsByOwner.clear();
 }

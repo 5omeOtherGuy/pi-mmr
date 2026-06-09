@@ -8,7 +8,17 @@
  * `mmr-github` by source path, not just by name. A third-party extension that
  * later re-registers any of these names is therefore preserved and never
  * satisfies the librarian gate.
+ *
+ * Registration also mirrors each source path into `mmr-core`'s generic
+ * owner-scoped registry under the `"mmr-github"` owner, so child-process
+ * subagent activation can gate `librarian` on `mmr-github`-owned repo tools
+ * without `mmr-core` importing this module.
  */
+
+import { registerMmrOwnedToolSourcePath } from "../mmr-core/owned-tools.js";
+
+/** Canonical owner key used in `mmr-core`'s owner-scoped tool registry. */
+export const MMR_GITHUB_TOOL_OWNER = "mmr-github";
 
 const MMR_GITHUB_TOOL_SOURCE_PATHS_GLOBAL_KEY = "__pi_mmr_github_tool_source_paths_v1__";
 
@@ -38,6 +48,7 @@ export function registerMmrGithubToolSourcePath(absolutePath: string): void {
   const trimmed = absolutePath.trim();
   if (trimmed.length === 0) return;
   toolSourcePaths.add(trimmed);
+  registerMmrOwnedToolSourcePath(MMR_GITHUB_TOOL_OWNER, trimmed);
 }
 
 export function getMmrGithubToolSourcePaths(): readonly string[] {

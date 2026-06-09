@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { hasMmrGithubOwnedTools, type MmrGithubToolInfoLike } from "../mmr-github/tool-ownership.js";
+import { hasOwnedToolsFromOwner, type ToolInfoLike } from "./owned-tools.js";
 import { isMmrModeKey } from "./modes.js";
 import { setMmrSubagentState, type MmrSubagentState } from "./runtime.js";
 import { loadMmrCoreSettings } from "./settings.js";
@@ -7,7 +7,7 @@ import {
   MMR_SUBAGENT_MODEL_PREFERENCES_ENV,
   parseMmrSubagentModelPreferencesEnv,
 } from "./subagent-model-override-env.js";
-import { getMmrSubagentProfile, listMmrSubagentProfiles } from "./subagent-profiles.js";
+import { getMmrSubagentProfile, listMmrSubagentProfiles, type MmrSubagentProfile } from "./subagent-profiles.js";
 import {
   MMR_SUBAGENT_ACTIVATION_FAILURE_STDERR_PREFIX,
   resolveMmrSubagentInvocation,
@@ -48,7 +48,12 @@ export function failClosedSubagent(message: string, ctx: ExtensionContext): neve
   throw new Error(message);
 }
 
-export function readMmrGithubToolInfos(pi: ExtensionAPI): readonly MmrGithubToolInfoLike[] | undefined {
+/**
+ * Read the worker's current tool inventory as generic `{ name, sourceInfo }`
+ * records, used by owner-scoped ownership checks. Returns `undefined` only when
+ * the tool list cannot be read; an empty array means no tools are registered.
+ */
+export function readMmrToolInfos(pi: ExtensionAPI): readonly ToolInfoLike[] | undefined {
   try {
     const tools = pi.getAllTools();
     if (!Array.isArray(tools)) return undefined;
@@ -66,18 +71,28 @@ export function readMmrGithubToolInfos(pi: ExtensionAPI): readonly MmrGithubTool
   }
 }
 
-export function validateLibrarianRepoToolOwnership(
+/**
+ * Fail-closed validation of a profile's owner-scoped tool prerequisites
+ * (`profile.requiredOwnedTools`). Each group must be satisfied by tools that
+ * are both present and owned by the declared extension (matched through
+ * `mmr-core`'s generic owned-tools registry). Profiles without requirements
+ * (the common case) are a no-op. This keeps `mmr-core` free of imports from
+ * the owning sibling extensions (e.g. `mmr-github`).
+ */
+export function validateRequiredOwnedTools(
   pi: ExtensionAPI,
-  profileName: string,
+  profile: MmrSubagentProfile,
   ctx: ExtensionContext,
 ): void {
-  if (profileName !== "librarian") return;
-  const tools = readMmrGithubToolInfos(pi);
-  if (tools && hasMmrGithubOwnedTools(tools)) return;
-  failClosedSubagent(
-    'Subagent "librarian" requires mmr-github-owned read-only GitHub tools (set MMR_GITHUB_ENABLE=true).',
-    ctx,
-  );
+  const groups = profile.requiredOwnedTools;
+  if (groups === undefined || groups.length === 0) return;
+  const tools = readMmrToolInfos(pi) ?? [];
+  for (const group of groups) {
+    if (hasOwnedToolsFromOwner(group.owner, group.toolNames, tools)) continue;
+    const requirement = group.description ?? `${group.owner}-owned tools: ${group.toolNames.join(", ")}`;
+    const hint = group.unmetHint ? ` (${group.unmetHint})` : "";
+    failClosedSubagent(`Subagent "${profile.name}" requires ${requirement}${hint}.`, ctx);
+  }
 }
 
 export async function applyMmrSubagentProfile(
@@ -171,7 +186,7 @@ export async function applyMmrSubagentProfile(
     failClosedSubagent(invocation.message, ctx);
   }
 
-  validateLibrarianRepoToolOwnership(pi, profile.name, ctx);
+  validateRequiredOwnedTools(pi, profile, ctx);
 
   const activeWorkerTools = [...invocation.workerTools];
 
