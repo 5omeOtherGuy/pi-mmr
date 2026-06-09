@@ -103,6 +103,46 @@ describe("mmr-web DuckDuckGo client - search", () => {
     assert.equal(result.results[0].description, "Typed JavaScript");
   });
 
+  it("decodes hex and decimal numeric HTML entities in titles and snippets", async () => {
+    const { duckduckgoSearch } = await importSource("extensions/mmr-web/search/duckduckgo.ts");
+    const html = ddgResultsPage({
+      // &#x2014; = em dash, &#x27; = apostrophe, &#8212; = em dash (decimal)
+      title1: "Rust &#x2014; Memory Safety", url1: "https://example.com/rust",
+      snippet1: "Ferris&#x27;s guide &#8212; ownership",
+      title2: "Plain", url2: "https://example.org/p", snippet2: "no entities",
+    });
+    const { fetchImpl } = makeFetchMock([() => htmlResponse(html)]);
+    const result = await duckduckgoSearch(
+      { query: "rust", maxResults: 5, maxResultBytes: 100_000 },
+      { fetchImpl, state: freshState() },
+    );
+    assert.equal(result.results[0].title, "Rust \u2014 Memory Safety");
+    assert.equal(result.results[0].description, "Ferris's guide \u2014 ownership");
+    // No raw numeric entity escapes should survive in model-visible text.
+    assert.doesNotMatch(result.results[0].title, /&#/);
+    assert.doesNotMatch(result.results[0].description, /&#/);
+  });
+
+  it("reports a requested country filter as unsupported/none with a reason", async () => {
+    const { duckduckgoSearch } = await importSource("extensions/mmr-web/search/duckduckgo.ts");
+    const html = ddgResultsPage({
+      title1: "A", url1: "https://example.com/a", snippet1: "alpha",
+      title2: "B", url2: "https://example.org/b", snippet2: "beta",
+    });
+    const { fetchImpl } = makeFetchMock([() => htmlResponse(html)]);
+    const result = await duckduckgoSearch(
+      { query: "x", maxResults: 5, maxResultBytes: 100_000, country: "de" },
+      { fetchImpl, state: freshState() },
+    );
+    const country = result.appliedFilters.find((f) => f.filter === "country");
+    assert.deepEqual(
+      { support: country.support, honored: country.honored },
+      { support: "unsupported", honored: "none" },
+    );
+    assert.equal(typeof country.reason, "string");
+    assert.ok(country.reason.length > 0);
+  });
+
   it("filters out result URLs that fail the public-web SSRF policy", async () => {
     const { duckduckgoSearch } = await importSource("extensions/mmr-web/search/duckduckgo.ts");
     const html = ddgResultsPage({

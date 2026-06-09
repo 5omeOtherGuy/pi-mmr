@@ -339,7 +339,8 @@ export function applyFinalContentCap(text: string): { text: string; truncated: b
   }
   const slice = Buffer.from(text, "utf8")
     .subarray(0, FINAL_CONTENT_CAP_BYTES)
-    .toString("utf8");
+    .toString("utf8")
+    .replace(/\uFFFD+$/u, "");
   return { text: slice + TRUNCATION_MARKER, truncated: true };
 }
 

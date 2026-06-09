@@ -21,7 +21,10 @@ Shipped, disabled by default; opt-in via `MMR_WEB_ENABLE=true`.
 - ✅ Pluggable `SearchBackend` interface under `src/extensions/mmr-web/search/`
   with a factory in `backend.ts` (Phase 1).
 - ✅ **Brave Search** backend (`search/brave.ts`) — `api.search.brave.com`,
-  requires `BRAVE_API_KEY` in the environment.
+  requires `BRAVE_API_KEY` in the environment. Requests set
+  `text_decorations=false` (snippets without highlight markers) and
+  `result_filter=web` (only the result block the parser consumes), and map an
+  optional `country` (ISO 3166-1 alpha-2) to Brave's native `country` param.
 - ✅ **SearXNG** backend (`search/searxng.ts`) — user-controlled instance,
   no upstream key. URL via `mmrWeb.searxngUrl` or `MMR_WEB_SEARXNG_URL`.
   Detects HTML responses (JSON output disabled in `settings.yml`) and
@@ -30,6 +33,9 @@ Shipped, disabled by default; opt-in via `MMR_WEB_ENABLE=true`.
   `uddg=` click-tracker decoded locally; 2-min query cache; per-process
   60-second backoff on 403/429/bot pages. Best-effort by design.
 - ✅ `auto` mode precedence: `searxng` → `brave` → `duckduckgo`.
+- ✅ Optional `country` filter (ISO 3166-1 alpha-2): native on Brave, reported
+  `unsupported` on SearXNG (no `country` param on its search API) and
+  DuckDuckGo, so it is never silently dropped.
 - ✅ Explicit per-tool overrides via `mmrWeb.searchBackend` /
   `MMR_WEB_SEARCH_BACKEND`.
 

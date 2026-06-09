@@ -8,6 +8,18 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Added
 
+- `mmr-web`: `web_search` gains an optional `country` filter (ISO 3166-1
+  alpha-2, e.g. `"de"`). It is honored natively by the Brave backend (sent as
+  Brave's `country` request param) and reported truthfully per backend in the
+  tool result `details.filters[]`: `native`/`full` for Brave, and
+  `unsupported`/`none` (with a remediation reason) for SearXNG and DuckDuckGo,
+  which do not region-filter on this surface. Invalid codes are rejected before
+  any network call via the `^[A-Za-z]{2}$` schema pattern. Covered by
+  `tests/mmr-web-filters-schema.test.mjs`,
+  `tests/mmr-web-search-filters-backends.test.mjs`, `tests/mmr-web-brave.test.mjs`,
+  `tests/mmr-web-duckduckgo.test.mjs`, and `tests/mmr-web-tools.test.mjs`, with
+  the model-visible schema/description refreshed in the
+  `tests/fixtures/mmr-effective-surface/*.core+web.md` snapshots.
 - `mmr-subagents`: `start_task` gains a `fleet` form for declaring a whole
   fan-out in one call. `start_task({ fleet: { groups: [{ group_label?, members:
   [...] }] } })` creates every group and member up front in a new `ready` state,
@@ -28,6 +40,18 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Changed
 
+- `mmr-web`: the Brave `web_search` backend now requests `text_decorations=false`
+  and `result_filter=web`, so result snippets no longer carry Brave's highlight
+  decoration markers and the response is limited to the `web` result block the
+  parser actually consumes (no wasted bytes on news/video/discussion blocks).
+  Model-visible wording is tightened: the `web_search` description tells the
+  model to prefer the structured `include_domains`/`exclude_domains`/`recency`/
+  `country` filters over `site:`/date operators written into the query text, and
+  the `read_web_page` description and `objective` parameter now state that
+  objective extraction returns the most relevant verbatim excerpts selected
+  locally (keyword relevance, not summarization). Covered by
+  `tests/mmr-web-brave.test.mjs`, `tests/mmr-phase-c-metadata.test.mjs`, and the
+  refreshed effective-surface snapshots.
 - `mmr-subagents`: the model-visible group orchestration guidance now routes
   same-step fan-out to the `start_task.fleet` form instead of the contradictory
   "issue the opener and every sibling in a single step" / "reuse the returned
@@ -188,6 +212,19 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Fixed
 
+- `mmr-web`: `read_web_page` `details.truncated` and `details.bytes` now reflect
+  the actually-emitted output. Previously they reported only the upstream
+  reader's own byte budget, so output trimmed by the final 256KB context cap (or
+  reshaped by objective excerpting) could be marked `truncated: false` with a
+  stale byte count. The final content cap and excerpt join now feed both fields.
+  Covered by `tests/mmr-web-tools.test.mjs`.
+- `mmr-web`: the DuckDuckGo HTML backend now decodes generic hexadecimal numeric
+  HTML entities (e.g. `&#x2014;`, `&#x27;`) in result titles and snippets,
+  alongside the existing decimal and named-entity handling, so model-visible text
+  no longer leaks raw `&#x…;` escapes. The no-op `country` query param the
+  SearXNG backend previously set (SearXNG's search API silently ignores it) is
+  removed. Covered by `tests/mmr-web-duckduckgo.test.mjs` and
+  `tests/mmr-web-search-filters-backends.test.mjs`.
 - `mmr-subagents`: the inline background-task card (single + group) now animates
   instead of freezing on one frame — the spinner advances ⠋→⠙→…, the elapsed
   chip ticks up, and rows flip ⠋→✓ as the live board changes.

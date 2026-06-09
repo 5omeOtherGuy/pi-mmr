@@ -93,6 +93,27 @@ describe("searxng backend — filters", () => {
     assert.deepEqual({ support: recency.support, honored: recency.honored }, { support: "native", honored: "full" });
   });
 
+  it("does not send a country param (SearXNG ignores it) and reports it unsupported/none", async () => {
+    const { searxngSearch } = await importSource("extensions/mmr-web/search/searxng.ts");
+    const { fetchImpl, calls } = captureFetch(() =>
+      new Response(searxngBody(["https://a.com/1"]), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const res = await searxngSearch(
+      { ...BASE_ARGS, query: "x", country: "de" },
+      { url: "http://127.0.0.1:8080", fetchImpl },
+    );
+    assert.equal(calls[0].url.searchParams.has("country"), false);
+    const country = res.appliedFilters.find((f) => f.filter === "country");
+    assert.deepEqual(
+      { support: country.support, honored: country.honored },
+      { support: "unsupported", honored: "none" },
+    );
+    assert.equal(
+      country.reason,
+      "SearXNG's search API has no country parameter; this backend does not currently expose SearXNG locale/language targeting, so country is unsupported.",
+    );
+  });
+
   it("post-filters domains and reports exclude_domains post_filter/full", async () => {
     const { searxngSearch } = await importSource("extensions/mmr-web/search/searxng.ts");
     const { fetchImpl } = captureFetch(() =>
