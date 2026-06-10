@@ -212,6 +212,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-core`: re-authored the deep-mode prompt fragments (intro, posture sections, closing line) for sharper hypothesis-driven guidance; deep prompt fixtures updated to match.
 
+- `mmr-core`: deep-mode method posture now keeps multiple candidate explanations or approaches alive (prompt wording fix); deep prompt fixtures updated.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest
