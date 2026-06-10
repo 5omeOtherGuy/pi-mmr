@@ -67,6 +67,24 @@ function makeImmediateRunner() {
   };
 }
 
+/**
+ * A runner that classifies each member by its prompt: a non-zero exitCode for
+ * the chosen prompt (which the registry maps to a `failed` member), exit 0
+ * otherwise. Used to characterize mixed-outcome fleet-group settlement.
+ */
+function makeClassifiedRunner(failForPrompt) {
+  const calls = [];
+  return {
+    runner: {
+      run(options) {
+        calls.push(options);
+        return Promise.resolve(makeWorkerResult({ exitCode: failForPrompt(options.prompt) ? 1 : 0 }));
+      },
+    },
+    calls,
+  };
+}
+
 async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
@@ -79,7 +97,7 @@ function counter(prefix, hex = false) {
   };
 }
 
-async function makeFleetToolset(registryDeps = {}) {
+async function makeFleetToolset(registryDeps = {}, runnerOverride) {
   const tools = await importSource(TOOLS_MODULE);
   const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
   const registry = createMmrAsyncTaskRegistry({
@@ -87,7 +105,7 @@ async function makeFleetToolset(registryDeps = {}) {
     groupIdFactory: counter("group_", true),
     ...registryDeps,
   });
-  const runner = makeImmediateRunner();
+  const runner = runnerOverride ?? makeImmediateRunner();
   let scheduled;
   const deps = {
     registry,
@@ -190,5 +208,46 @@ describe("start_task fleet execution", () => {
     launch();
     await flush();
     assert.ok(widgetCalls.length > afterDeclare, "widget refreshed again at launch");
+  });
+});
+
+// Characterization of the fleet-execution seam (buildMember / executeFleet / group
+// settle). These pin behavior the eventual start-task-engine split must preserve:
+// per-member dispatch and how mixed member outcomes roll up to a group status.
+describe("start_task fleet settle/dispatch characterization", () => {
+  it("forwards each member's own prompt to its own worker run (per-member dispatch)", async () => {
+    const { startTask, runner, launch } = await makeFleetToolset();
+    await startTask.execute("call-1", FLEET, undefined, undefined, CTX);
+    launch();
+    await flush();
+    assert.equal(runner.calls.length, 3, "every declared member ran exactly once");
+    const prompts = runner.calls.map((c) => c.prompt).sort();
+    assert.deepEqual(
+      prompts,
+      ["prompt 1", "prompt 2", "prompt 3"],
+      "each member's own prompt reached its worker (no cross-member bleed)",
+    );
+    assert.ok(
+      runner.calls.every((c) => c.profileName === "task-subagent"),
+      "every member resolved through the Task subagent profile",
+    );
+  });
+
+  it("rolls a mixed success/failure fleet group up to a failed group with per-outcome counts", async () => {
+    const oneGroup = {
+      fleet: { groups: [{ members: [taskMember(1), taskMember(2), taskMember(3)] }] },
+    };
+    const scripted = makeClassifiedRunner((prompt) => prompt === "prompt 2");
+    const { startTask, registry, launch } = await makeFleetToolset({}, scripted);
+    await startTask.execute("call-1", oneGroup, undefined, undefined, CTX);
+    launch();
+    await flush();
+    const finished = registry.listTasks("S").finished;
+    assert.equal(finished.length, 3, "all three members settled");
+    const group = registry.getGroup("S", finished[0].groupId);
+    assert.equal(group.status, "failed", "one failed member rolls the group up to failed (failed wins)");
+    assert.equal(group.counts.total, 3);
+    assert.equal(group.counts.succeeded, 2);
+    assert.equal(group.counts.failed, 1);
   });
 });
