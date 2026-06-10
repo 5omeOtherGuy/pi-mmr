@@ -114,12 +114,12 @@ Alt+R              # toggle the active mode's thinking preset (where supported)
 
 | I need to... | Use | Owner |
 | --- | --- | --- |
-| Patch files safely | `apply_patch` | [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) |
-| Track session work | `task_list` | [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) |
+| Patch files safely | `apply_patch` | [`mmr-patch`](src/extensions/mmr-patch/README.md) |
+| Track session work | `task_list` | [`mmr-tasks`](src/extensions/mmr-tasks/README.md) |
 | Search the codebase by behavior | `finder` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
 | Ask for deep advice or review | `oracle` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
 | Run bounded child work | `Task` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
-| Run independent work in the background | `start_task` / `task_poll` / `task_wait` / `task_cancel` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) |
+| Run independent work in the background | `start_task` / `task_poll` / `task_wait` / `task_cancel` | [`mmr-async-tasks`](src/extensions/mmr-async-tasks/README.md) |
 | Research GitHub repositories | `librarian` | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) + [`mmr-github`](src/extensions/mmr-github/README.md) |
 | Search the web | `web_search` | [`mmr-web`](src/extensions/mmr-web/README.md) |
 | Read public web pages | `read_web_page` | [`mmr-web`](src/extensions/mmr-web/README.md) |
@@ -145,7 +145,8 @@ Independent work can run as a **background fleet**: `start_task` launches a work
 | Extension | Default | User value |
 | --- | --- | --- |
 | [`mmr-core`](src/extensions/mmr-core/README.md) | On | Locked modes, model resolution, thinking policy, tool allowlists, prompt rewrite, diagnostics |
-| [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) | On | Safe patching (`apply_patch`) and session-local todo tracking (`task_list`) |
+| [`mmr-patch`](src/extensions/mmr-patch/README.md) | On | Safe patching via `apply_patch` |
+| [`mmr-tasks`](src/extensions/mmr-tasks/README.md) | On | Session-local todo tracking via `task_list` |
 | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) | On | `finder`, `oracle`, `Task`, gated `librarian`, background task fleet, and custom Markdown subagents |
 | [`mmr-session-fallback`](src/extensions/mmr-session-fallback/README.md) | On | Interactive fallback when subscription routes hit quota, rate limits, or Claude subscription capacity stalls |
 | [`mmr-web`](src/extensions/mmr-web/README.md) | Off | `web_search` and `read_web_page` via SearXNG, Brave, or DuckDuckGo |

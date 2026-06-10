@@ -40,11 +40,20 @@ Use Task to update the focused docs file and run git diff --check.
 Use librarian to explain how owner/repo implements request cancellation.
 ```
 
-## Toolbox
+## Patch
+
+Owned by [`mmr-patch`](../src/extensions/mmr-patch/README.md).
 
 | I need to... | Use | Notes |
 | --- | --- | --- |
 | Apply a focused patch | `apply_patch` | Local workspace edits only |
+
+## Tasks
+
+Owned by [`mmr-tasks`](../src/extensions/mmr-tasks/README.md).
+
+| I need to... | Use | Notes |
+| --- | --- | --- |
 | Track multi-step work | `task_list` | Session-local; rendered in the Pi UI |
 
 ## Optional reach

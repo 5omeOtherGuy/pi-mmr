@@ -2,7 +2,7 @@
 
 **Audience.** Developers writing code that imports from `pi-mmr` and wants the stable programmatic surface owned by the non-core extensions.
 
-**Scope.** Package-root re-exports owned by `mmr-toolbox`, `mmr-web`, `mmr-subagents`, `mmr-history`, and `mmr-session-fallback`. The `mmr-core` runtime, locked-mode resolution, prompt assembly, and feature-gate APIs live in [`mmr-core-api.md`](./mmr-core-api.md).
+**Scope.** Package-root re-exports owned by `mmr-patch`, `mmr-tasks`, `mmr-web`, `mmr-subagents`, `mmr-async-tasks`, `mmr-custom-subagents`, `mmr-history`, and `mmr-session-fallback`. The `mmr-core` runtime, locked-mode resolution, prompt assembly, and feature-gate APIs live in [`mmr-core-api.md`](./mmr-core-api.md).
 
 **Related.** Package overview: [`../README.md`](../README.md). Documentation conventions: [`documentation-style-guide.md`](./documentation-style-guide.md).
 
@@ -37,29 +37,57 @@ the package root.
 
 ---
 
-## `mmr-toolbox`
+## `mmr-patch`
 
-Local-utility extension: ships a real `apply_patch` custom tool and a
-session-local `task_list` (todo) tool. Other toolbox capabilities remain
-deferred and are reported as such through `mmr-core` diagnostics.
+Local-utility extension: ships a real `apply_patch` custom tool for safe
+workspace edits.
 
 ### Stability
 
-Stable. The `apply_patch` and `task_list` Pi tools, their schemas, and
-their session-state shapes are part of the supported surface.
+Stable. The `apply_patch` Pi tool, its schema, and its result shape are
+part of the supported surface.
 
 ### Re-exports from the package root
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `registerMmrToolboxProviders` | function | Registers the toolbox MMR tool provider. Called by the extension entrypoint; safe to call from a host that bypasses the default extension load. |
+| `registerMmrPatchProviders` | function | Registers the patch MMR tool provider. Called by the extension entrypoint; safe to call from a host that bypasses the default extension load. |
 | `ApplyPatchError` | class | Thrown by the apply-patch engine for structured patch failures. |
+
+### Usage
+
+Hosts that load `pi-mmr` through Pi's extension manifest do not need to
+call any of these directly. See
+[`../src/extensions/mmr-patch/README.md`](../src/extensions/mmr-patch/README.md).
+
+---
+
+## `mmr-tasks`
+
+Local-utility extension: ships a session-local `task_list` (todo) tool
+and its pinned task-list widget.
+
+### Stability
+
+Stable. The `task_list` Pi tool, its schema, and its session-state shape
+are part of the supported surface.
+
+### Re-exports from the package root
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `registerMmrTasksProviders` | function | Registers the tasks MMR tool provider. Called by the extension entrypoint; safe to call from a host that bypasses the default extension load. |
 | `createTodoListTool` | function | Constructs the `task_list` Pi tool (returns the Pi tool definition). |
 | `refreshTodoWidget` | function | Refreshes the pinned task-list widget. |
 | `TASK_LIST_WIDGET_ID` | constant | Stable widget id for the pinned task list. |
 | `TodoValidationError` | class | Validation error surfaced by the `task_list` schema. |
 | `TODO_STATE_ENTRY`, `TODO_STATE_VERSION` | constants | Persisted session-state entry name and version. |
 | `findLatestPersistedTodoState`, `parsePersistedTodoState`, `toPersistedTodoState` | functions | Read/parse/serialize the persisted task-list state. |
+
+> Deprecated: `registerMmrToolboxProviders` is still re-exported from the
+> package root by the unregistered `mmr-toolbox` compatibility shim, which
+> now only re-exports `mmr-patch` and `mmr-tasks`. New code should call
+> `registerMmrPatchProviders` and `registerMmrTasksProviders` directly.
 
 ### Re-exported types
 
@@ -73,7 +101,8 @@ Hosts that load `pi-mmr` through Pi's extension manifest do not need to
 call any of these directly. Consumers that build their own Pi runtime,
 or that want to inspect persisted task-list state from outside a Pi
 session, can use the `PersistedTodoState` helpers safely; they perform
-their own validation and never throw on malformed input.
+their own validation and never throw on malformed input. See
+[`../src/extensions/mmr-tasks/README.md`](../src/extensions/mmr-tasks/README.md).
 
 ---
 
@@ -189,7 +218,6 @@ changes.
 | `buildHistoryReaderWorkerSystemPrompt`, `buildLibrarianWorkerRolePrompt` | functions | Cross-extension prompt builders kept in `mmr-subagents/prompts.ts`. |
 | `runMmrSubagentWorker`, `createChildCliMmrSubagentRunner`, `createMmrSubagentRunnerFromRunWorker`, `buildMmrWorkerArgs`, `classifyMmrWorkerOutcome`, `truncateMmrWorkerOutput`, `getMmrWorkerFinalOutput`, `hasUsableMmrWorkerFinalOutput`, `emptyMmrWorkerUsageStats`, `resolveMmrWorkerPiInvocation`, `resolveMmrWorkerPiInvocationFromEnv` | functions | Worker-runner contract and helpers. |
 | `DEFAULT_MMR_WORKER_KILL_TIMEOUT_MS`, `DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT`, `MMR_WORKER_INLINE_PROMPT_BYTE_LIMIT`, `MMR_WORKER_TRAIL_LIMIT` | constants | Worker-runner defaults. |
-| `discoverMmrCustomSubagents`, `parseMmrCustomSubagentMarkdown`, `normalizeMmrCustomSubagentToolPatterns`, `toMmrCustomSubagentToolName`, `MMR_CUSTOM_SUBAGENT_TOOL_PREFIX`, `MMR_CUSTOM_SUBAGENT_MAX_FILE_BYTES`, `MMR_CUSTOM_SUBAGENT_MAX_TOOL_NAME_LENGTH`, `DEFAULT_MMR_CUSTOM_SUBAGENT_MAX_SCAN_DEPTH` | functions/constants | Custom subagent Markdown discovery. Discovery only; registration is a separate explicit step. |
 
 ### Re-exported types
 
@@ -208,9 +236,12 @@ changes.
 `MmrWorkerPiInvocationEnv`, `MmrWorkerProcess`,
 `MmrWorkerProgressSnapshot`, `MmrWorkerResult`, `MmrWorkerRunnerDeps`,
 `MmrWorkerSpawn`, `MmrWorkerTrailItem`, `MmrWorkerUsageStats`,
-`RunMmrSubagentWorkerOptions`, `ClassifyMmrWorkerOutcomeOptions`,
-`DiscoverMmrCustomSubagentsArgs`, `MmrCustomSubagentDefinition`,
-`ParseMmrCustomSubagentMarkdownArgs`.
+`RunMmrSubagentWorkerOptions`, `ClassifyMmrWorkerOutcomeOptions`.
+
+> Note: the background-fleet tools and custom Markdown subagents were
+> extracted into the `mmr-async-tasks` and `mmr-custom-subagents`
+> extensions; their public surfaces are documented in their own sections
+> below.
 
 > Note: `TaskStatus` is intentionally **not** a named package-root export.
 > Consumers that need the status discriminator should use
@@ -223,6 +254,93 @@ The runner-contract helpers and worker prompt builders are intended for
 hosts that compose their own subagent pipelines (for example, tests
 that exercise the worker contract without spawning a child Pi). The
 default extension factory wires everything Pi needs in a normal load.
+
+---
+
+## `mmr-async-tasks`
+
+Background-fleet extension extracted from `mmr-subagents`. It owns the
+background worker tools (`start_task`, `task_poll`, `task_wait`,
+`task_cancel`), a session-scoped registry of worker lifecycles, and the
+`mmr-async-tasks` feature gate. It runs `finder`/`librarian`/`Task`
+workers in the background and reuses the worker-runner contract owned by
+`mmr-subagents`.
+
+Stable for: provider/factory entrypoints, owned-tool name constants,
+registry constructors and snapshot helpers, and registry/board types.
+Tool descriptions and progress text are model-visible behavior covered
+by deterministic tests; treat changes to them as behavior changes.
+
+### Re-exports from the package root
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `createMmrAsyncTasksExtension` | function | Factory producing the Pi extension. |
+| `createMmrAsyncTasksToolProvider` | function | MMR tool provider for the owned background-fleet tool names. |
+| `createMmrAsyncTasksFeatureGateProvider` | function | Feature-gate provider for `mmr-async-tasks`. |
+| `MMR_ASYNC_TASKS_FEATURE_GATE`, `MMR_ASYNC_TASKS_PROVIDER_NAME`, `MMR_ASYNC_TASK_TOOLS` | constants | Stable identifiers. |
+| `MMR_SUBAGENTS_ASYNC_TASKS_FEATURE_GATE`, `MMR_SUBAGENTS_ASYNC_TASK_TOOLS`, `MMR_SUBAGENTS_ASYNC_PUSH_ENV` | constants | Backward-compatible aliases from the pre-extraction `mmr-subagents` names. |
+| `ASYNC_TASK_TOOL_NAMES`, `START_TASK_TOOL_NAME`, `TASK_POLL_TOOL_NAME`, `TASK_WAIT_TOOL_NAME`, `TASK_CANCEL_TOOL_NAME` | constants | Owned tool-name identifiers. Tested directly. |
+| `createStartTaskTool`, `createTaskPollTool`, `createTaskWaitTool`, `createTaskCancelTool`, `registerAsyncTaskTools` | functions | Individual tool factories and the bulk registrar. |
+| `createMmrAsyncTaskRegistry`, `getMmrAsyncTaskRegistry`, `isValidAsyncTaskGroupId`, `toPublicAsyncTaskSnapshot` | functions | Session-scoped registry constructor/accessor and snapshot helpers. |
+| `ASYNC_TASK_MAX_RUNTIME_MS`, `ASYNC_TASK_STALLED_AFTER_MS`, `ASYNC_TASK_CANCEL_DEAD_AFTER_MS`, `ASYNC_TASK_TERMINAL_TTL_MS`, `ASYNC_TASK_OBSERVED_TERMINAL_TTL_MS`, `DEFAULT_ASYNC_TASK_MAX_RUNNING_PER_SESSION`, `DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION`, `DEFAULT_TASK_WAIT_TIMEOUT_MS`, `MAX_TASK_WAIT_TIMEOUT_MS` | constants | Registry lifecycle, concurrency, and wait-timeout defaults. |
+
+### Re-exported types
+
+`MmrAsyncTasksFactoryOverrides`, `MmrAsyncTasksCapabilities`,
+`AsyncTaskAgentName`, `AsyncTaskToolDeps`, `AsyncTaskToolDetails`,
+`MmrAsyncTaskRegistry`, `MmrAsyncTaskRegistryDeps`,
+`MmrAsyncTaskSnapshot`, `MmrAsyncTaskInternalSnapshot`,
+`MmrAsyncTaskStatus`, `MmrAsyncTaskFreshness`, `MmrAsyncTaskBoard`,
+`MmrAsyncTaskBoardEntry`, `MmrAsyncTaskGroupSnapshot`,
+`MmrAsyncTaskGroupStatus`, `StartAsyncTaskArgs`, `StartAsyncTaskResult`,
+`WaitForAsyncTaskResult`.
+
+### Usage
+
+The registry constructor and snapshot helpers are intended for hosts and
+tests that drive background workers without a live session. The default
+extension factory wires the tools, registry, and completion delivery Pi
+needs in a normal load.
+
+---
+
+## `mmr-custom-subagents`
+
+Custom Markdown subagent extension extracted from `mmr-subagents`. It
+discovers project-local Markdown subagent definitions, persists which are
+enabled, and registers per-subagent worker tools (named with the
+`MMR_CUSTOM_SUBAGENT_TOOL_PREFIX`) behind the `mmr-custom-subagents`
+feature gate.
+
+Stable for: provider/factory entrypoints, the Markdown discovery/parse
+helpers, owned tool-name prefix and scan limits, and discovery types.
+Discovery is separate from registration; registration is an explicit
+step wired by the extension factory.
+
+### Re-exports from the package root
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `createMmrCustomSubagentsExtension` | function | Factory producing the Pi extension. |
+| `createMmrCustomSubagentsToolProvider` | function | MMR tool provider for discovered custom-subagent tools. |
+| `createMmrCustomSubagentsFeatureGateProvider` | function | Feature-gate provider for `mmr-custom-subagents`. |
+| `MMR_CUSTOM_SUBAGENTS_FEATURE_GATE`, `MMR_CUSTOM_SUBAGENTS_PROVIDER_NAME` | constants | Stable identifiers. |
+| `discoverMmrCustomSubagents`, `parseMmrCustomSubagentMarkdown`, `normalizeMmrCustomSubagentToolPatterns`, `toMmrCustomSubagentToolName` | functions | Markdown discovery, parsing, tool-pattern normalization, and tool-name derivation. Discovery only. |
+| `MMR_CUSTOM_SUBAGENT_TOOL_PREFIX`, `MMR_CUSTOM_SUBAGENT_MAX_FILE_BYTES`, `MMR_CUSTOM_SUBAGENT_MAX_TOOL_NAME_LENGTH`, `DEFAULT_MMR_CUSTOM_SUBAGENT_MAX_SCAN_DEPTH` | constants | Owned tool-name prefix and discovery bounds. |
+
+### Re-exported types
+
+`MmrCustomSubagentsFactoryOverrides`, `MmrCustomSubagentsCapabilities`,
+`DiscoverMmrCustomSubagentsArgs`, `MmrCustomSubagentDefinition`,
+`ParseMmrCustomSubagentMarkdownArgs`.
+
+### Usage
+
+The discovery and parse helpers let hosts and tests enumerate
+project-local Markdown subagent definitions without registering tools.
+The default extension factory wires discovery, the `/mmr-config` flow,
+and gated tool registration in a normal load.
 
 ---
 

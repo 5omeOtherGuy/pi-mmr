@@ -6,14 +6,17 @@
 
 ## Current implementation state
 
-`pi-mmr` is one installable Pi package containing modular extensions. Today the package registers seven extensions:
+`pi-mmr` is one installable Pi package containing modular extensions. Today the package registers ten extensions:
 
 - `mmr-core` — implemented;
 - `mmr-session-fallback` — implemented; interactive session-scoped fallback on subscription quota/rate-limit errors;
-- `mmr-toolbox` — implemented (`apply_patch`, `task_list`); some capabilities deferred;
+- `mmr-patch` — implemented (`apply_patch`);
+- `mmr-tasks` — implemented (`task_list` plus the pinned task-list widget);
 - `mmr-web` — implemented; opt-in via `MMR_WEB_ENABLE`; `web_search` works no-key out of the box (DuckDuckGo HTML fallback) and prefers SearXNG (user-controlled URL) or Brave (with `BRAVE_API_KEY`) when configured; an opt-in managed SearXNG sidecar can spawn/stop a local instance on demand;
 - `mmr-github` — implemented; opt-in read-only GitHub repository tools used directly and by the `librarian` worker gate;
-- `mmr-subagents` — concrete workers shipped (`finder`, `oracle`, `Task`, `librarian`) plus custom Markdown subagents; owns `Task`/`finder`/`oracle`/`librarian` logical names and the `mmr-subagents` feature gate. Shipped workers use the `mmr-core` subagent execution route (`--mmr-subagent <name>`) so the child Pi process applies a profile-resolved model/thinking/tool allowlist verbatim; `librarian` remains `gated` until the required read-only GitHub tools are registered and source-owned by `mmr-github`; the feature gate reports `enabled` with the active capability list.
+- `mmr-subagents` — concrete workers shipped (`finder`, `oracle`, `Task`, `librarian`); owns `Task`/`finder`/`oracle`/`librarian` logical names and the `mmr-subagents` feature gate. Shipped workers use the `mmr-core` subagent execution route (`--mmr-subagent <name>`) so the child Pi process applies a profile-resolved model/thinking/tool allowlist verbatim; `librarian` remains `gated` until the required read-only GitHub tools are registered and source-owned by `mmr-github`; the feature gate reports `enabled` with the active capability list.
+- `mmr-async-tasks` — implemented; owns the background fleet tools `start_task`, `task_poll`, `task_wait`, and `task_cancel`.
+- `mmr-custom-subagents` — implemented; owns custom Markdown subagents (discovery and registration).
 - `mmr-history` — opt-in global local Pi session lookup; registers `find_session` and `read_session` when enabled. `read_session` runs through the in-process `history-reader` subagent with a deterministically redacted packet, falling back to lexical extraction on worker failure.
 
 Implemented in `mmr-core`:
@@ -31,11 +34,15 @@ Implemented in `mmr-core`:
 - session-identity primitive (`MmrSessionIdentity`) for downstream extensions;
 - public helper exports for future extensions ([`mmr-core-api.md`](mmr-core-api.md)).
 
-Implemented in `mmr-toolbox`:
+Implemented in `mmr-patch`:
 
 - `apply_patch` custom Pi tool with `{ patchText: string }` schema accepting a structured patch envelope (`*** Begin Patch` / `*** Add|Delete|Update File:` / `*** Move to:` / `@@` hunks matched by context, with consecutive `@@` lines for scope narrowing). Repeated ops on the same file compose against an in-memory virtual state. Absolute paths inside `ctx.cwd` *or* inside any sibling worktree of the same git repository (discovered via `git worktree list --porcelain`) are accepted; paths outside the active workspace and the discovered same-repo worktree roots are rejected. The entire read-validate-write window is held under Pi's per-file mutation queue keyed by canonical realpath. Ambiguous body matches are rejected (the model must add context or an `@@` anchor) rather than first-match-wins.
-- `task_list` custom Pi tool: a session-local todo list with strict `{ tasks: [{ content, activeForm, status, subtasks? }] }` whole-list replacement, persisted as `mmr-toolbox.todo-state` `CustomEntry` records in the current Pi session log.
-- MMR tool provider that maps logical `apply_patch` and `task_list` to the concrete toolbox tools. `mmr-core` also prefers exact concrete tools over fallbacks when Pi exposes them.
+- MMR tool provider that maps the logical `apply_patch` name to the concrete patch tool. `mmr-core` also prefers exact concrete tools over fallbacks when Pi exposes them.
+
+Implemented in `mmr-tasks`:
+
+- `task_list` custom Pi tool: a session-local todo list with strict `{ tasks: [{ content, activeForm, status, subtasks? }] }` whole-list replacement, persisted as `mmr-tasks.todo-state` `CustomEntry` records in the current Pi session log.
+- MMR tool provider that maps the logical `task_list` name to the concrete tasks tool, plus the pinned task-list widget.
 
 Implemented in `mmr-web`:
 
@@ -72,10 +79,13 @@ Other extensions own higher-risk or higher-variance capabilities and plug into c
 |---|---|---|
 | `mmr-core` | Mode registry, mode commands/flags, model and thinking resolution, request-policy hook, tool allowlist enforcement, mode prompt rewrite, mode state, session-identity primitive, shared contracts. | Implemented. |
 | `mmr-session-fallback` | Session-scoped quota/rate-limit fallback picker, managed model update, persisted override, retry-message rewrite. | Implemented. |
-| `mmr-toolbox` | Local utility tools that are not locked-mode state, history, web, subagents, or provider payload work: `apply_patch`, `task_list`, deferred `chart`. | Implemented (deferred capabilities still deferred). |
+| `mmr-patch` | Safe file patching: the `apply_patch` local utility tool and its structured patch engine. | Implemented. |
+| `mmr-tasks` | Session-local todo tracking: the `task_list` tool and its pinned task-list widget. | Implemented. |
 | `mmr-web` | `web_search`, `read_web_page`, web/network policy, pluggable SearXNG/Brave/DuckDuckGo backends, custom reader with Readability + Turndown, and the opt-in managed SearXNG sidecar. | Implemented (opt-in). |
 | `mmr-github` | Read-only GitHub repository tools, token/env handling, response bounds, source-owned tool registration for `librarian`. | Implemented (opt-in). |
-| `mmr-subagents` | `Task`, `finder`, `oracle`, `librarian`, worker runner, custom Markdown subagents. Non-GitHub repository-provider variants remain deferred. | Implemented with gated `librarian`. |
+| `mmr-subagents` | `Task`, `finder`, `oracle`, `librarian`, worker runner. Non-GitHub repository-provider variants remain deferred. | Implemented with gated `librarian`. |
+| `mmr-async-tasks` | Background fleet tools: `start_task`, `task_poll`, `task_wait`, `task_cancel`. | Implemented. |
+| `mmr-custom-subagents` | Custom Markdown subagent discovery and registration. | Implemented. |
 | `mmr-history` | `find_session`, `read_session`, future `handoff`, local session indexing, privacy gates. | Initial gated session lookup slice implemented. |
 | `mmr-skills` | Callable `skill` tool that loads and applies skill bodies through Pi-compatible skill discovery. | Planned. |
 | `mmr-toolbox-mcp` | MCP resource/tool discovery and `read_mcp_resource`. Diagnostics belong to user-configured MCP/IDE tools, not a canonical pi-mmr logical tool. | Planned. |
@@ -90,10 +100,13 @@ Preferred direction:
 ```text
 mmr-core
   <- mmr-session-fallback
-  <- mmr-toolbox
+  <- mmr-patch
+  <- mmr-tasks
   <- mmr-web
   <- mmr-github
   <- mmr-subagents
+  <- mmr-async-tasks
+  <- mmr-custom-subagents
   <- mmr-history
   <- mmr-skills
   <- mmr-toolbox-mcp
@@ -162,8 +175,8 @@ All tool names below are concrete Pi tool names. Modes, subagent profiles, custo
 | `grep` | Pi (core) | Identity-resolved. |
 | `find` | Pi (core) | Identity-resolved. |
 | `ls` | Pi (core) | Identity-resolved. |
-| `apply_patch` | `mmr-toolbox` | Real tool in `mmr-toolbox`; deferred when the extension is not loaded. Deep mode requests `apply_patch`, `edit`, and `write` independently. |
-| `task_list` | `mmr-toolbox` | Real tool in `mmr-toolbox` (session-local todo); kept available in every enforced mode until each mode explicitly adopts a future `Task` subagent replacement. |
+| `apply_patch` | `mmr-patch` | Real tool in `mmr-patch`; deferred when the extension is not loaded. Deep mode requests `apply_patch`, `edit`, and `write` independently. |
+| `task_list` | `mmr-tasks` | Real tool in `mmr-tasks` (session-local todo); kept available in every enforced mode until each mode explicitly adopts a future `Task` subagent replacement. |
 | `chart` | `mmr-toolbox` | Deferred. |
 | `web_search` | `mmr-web` | Active when network is enabled. Uses SearXNG when configured, Brave when keyed, and DuckDuckGo HTML as a no-key fallback. `WebSearchDetails.backend` reports the concrete path. |
 | `read_web_page` | `mmr-web` | Active when network is enabled; uses the custom in-process reader and needs no provider key. |
@@ -186,16 +199,16 @@ All tool names below are concrete Pi tool names. Modes, subagent profiles, custo
 
 ## `apply_patch` ownership
 
-`apply_patch` is a patch/diff-style file editing primitive, especially useful for single-file edits. Its long-term owner is `mmr-toolbox`, not `mmr-core`, because a real implementation is a local utility tool with safety and file-mutation semantics separate from locked-mode resolution. The `mmr-toolbox` implementation:
+`apply_patch` is a patch/diff-style file editing primitive, especially useful for single-file edits. Its long-term owner is `mmr-patch`, not `mmr-core`, because a real implementation is a local utility tool with safety and file-mutation semantics separate from locked-mode resolution. The `mmr-patch` implementation:
 
 - accepts a structured patch payload rather than arbitrary shell text;
 - validates target paths against the current workspace (plus sibling worktrees of the same git repository) and Pi safety rules;
 - applies the patch atomically where practical;
 - reports clear hunks/failures without partially hiding edits;
 - avoids network access and provider payload mutation;
-- registers itself through `registerMmrToolProvider(...)`. The exact-name status catalog in `mmr-core` credits `mmr-toolbox` as the owner of `apply_patch` even when extension module caches are isolated, so `/mmr-status` always names the right owning extension.
+- registers itself through `registerMmrToolProvider(...)`. The exact-name status catalog in `mmr-core` credits `mmr-patch` as the owner of `apply_patch` even when extension module caches are isolated, so `/mmr-status` always names the right owning extension.
 
-When `mmr-toolbox` is not loaded, deep mode's `apply_patch` request resolves as `deferred`. Deep mode also requests `edit` and `write` directly, so narrow edit/write capability is preserved by request structure (not by registry fallback).
+When `mmr-patch` is not loaded, deep mode's `apply_patch` request resolves as `deferred`. Deep mode also requests `edit` and `write` directly, so narrow edit/write capability is preserved by request structure (not by registry fallback).
 
 ## Module notes
 
@@ -211,11 +224,17 @@ Owns read-only GitHub repository access. Token handling, response bounds, reposi
 
 Owns callable skill loading. Pi already has native skill resources; this module should bridge `skill` tool calls to Pi-compatible skill discovery without duplicating the whole skill system.
 
-### `mmr-toolbox`
+### `mmr-patch`
 
-Owns local utility tools that are neither model workers nor history/web/provider behavior. This includes patch application, session-local task lists, and the deferred image/artifact inspection and chart rendering surfaces. Diagnostics belong to user-configured MCP/IDE tools rather than a canonical pi-mmr tool.
+Owns the `apply_patch` local utility tool and its structured patch engine — a file-mutation primitive that is neither a model worker nor history/web/provider behavior. See [`src/extensions/mmr-patch/README.md`](../src/extensions/mmr-patch/README.md).
 
-New toolbox tools must follow the multi-surface design pattern documented in [`src/extensions/mmr-toolbox/README.md`](../src/extensions/mmr-toolbox/README.md#design-pattern-for-new-toolbox-tools): full guidance (grammar, rules, reliability tips, worked examples, and inline departure notes) belongs in the tool `description`; short high-signal cues belong in `promptGuidelines`; the one-line `promptSnippet` belongs in the tool list; and human/implementer context belongs in this README. Behavioral notes that matter to the model must be called out inline in the model-visible description, not only in docs.
+New local utility tools must follow the multi-surface design pattern: full guidance (grammar, rules, reliability tips, worked examples, and inline departure notes) belongs in the tool `description`; short high-signal cues belong in `promptGuidelines`; the one-line `promptSnippet` belongs in the tool list; and human/implementer context belongs in the owning extension's README. Behavioral notes that matter to the model must be called out inline in the model-visible description, not only in docs.
+
+### `mmr-tasks`
+
+Owns the session-local `task_list` tool and its pinned task-list widget. State is persisted as `mmr-tasks.todo-state` `CustomEntry` records in the current Pi session log. See [`src/extensions/mmr-tasks/README.md`](../src/extensions/mmr-tasks/README.md).
+
+> The deferred image/artifact inspection and `chart` rendering surfaces remain unbuilt local utilities; diagnostics belong to user-configured MCP/IDE tools rather than a canonical pi-mmr tool. The former combined `mmr-toolbox` extension is now an unregistered, deprecated compatibility shim that only re-exports `mmr-patch` and `mmr-tasks`.
 
 ### `mmr-toolbox-mcp`
 
@@ -228,7 +247,7 @@ Owns MCP-specific discovery and resource reads. Keep this separate from `mmr-too
 ## Implementation order
 
 1. Keep hardening `mmr-core` public contracts and docs.
-2. Continue hardening implemented `mmr-toolbox` tools (`apply_patch`, `task_list`) and add deferred local utilities only when needed.
+2. Continue hardening implemented local utility tools `apply_patch` (`mmr-patch`) and `task_list` (`mmr-tasks`) and add deferred local utilities only when needed.
 3. Continue `mmr-github`/`mmr-subagents` by hardening source-owned librarian gating and designing deferred non-GitHub repository-provider variants behind explicit gates.
 4. Continue `mmr-history` with handoff support and richer local or remote session indexing behind explicit privacy gates.
 5. Implement `mmr-skills` as an opt-in capability module.

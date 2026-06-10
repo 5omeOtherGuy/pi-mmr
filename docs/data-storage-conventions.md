@@ -65,7 +65,7 @@ The archived `task_list` coordination prototype used this shape:
 - In-process mutex: `withTaskStoreLock(storePath, fn)` chained promises per store path; the cleanup `finally` removed the entry so the inflight map stayed bounded.
 - Tests injected `baseDir` (a `mkdtempSync` directory) so suites did not pollute the developer's real `~/.pi/`.
 
-Active `mmr-toolbox task_list` no longer uses this on-disk convention. It is a session-local todo list persisted via Pi `CustomEntry` records in the current session log (`{ version: 2, tasks }`, while existing flat version 1 entries remain readable). Existing files under `data/pi-mmr/task-list/` are intentionally left orphaned and can be recovered by checking out `archive/task-list-coordination-prototype-v1`.
+The active `mmr-tasks task_list` no longer uses this on-disk convention. It is a session-local todo list persisted as `mmr-tasks.todo-state` `CustomEntry` records in the current session log (`{ version: 2, tasks }`, while existing flat version 1 entries remain readable). Existing files under `data/pi-mmr/task-list/` are intentionally left orphaned and can be recovered by checking out `archive/task-list-coordination-prototype-v1`.
 
 ## When you're about to ship a new feature that persists data
 
