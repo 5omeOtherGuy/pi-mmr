@@ -77,6 +77,24 @@ describe("above-editor dashboard", () => {
     assert.match(lines[0], /^⠋ Task one +│ ▸ Group ● running · 1\/2/);
   });
 
+  it("exposes the visible left-pane row budget while rendering the right pane", () => {
+    const { ctx, calls } = makeCtx();
+    const observedBudgets = [];
+    mod.updateAboveEditorDashboardSlot(ctx, "left", "task", ["task 1", "task 2", "task 3"]);
+    mod.updateAboveEditorDashboardSlot(ctx, "right", "background", () => ({
+      render: () => {
+        observedBudgets.push(mod.getAboveEditorDashboardSlotRowBudget("right"));
+        return ["agent"];
+      },
+      invalidate: () => {},
+    }));
+
+    const widget = calls.at(-1).value({}, {});
+    widget.render(100);
+    assert.deepEqual(observedBudgets, [3]);
+    assert.equal(mod.getAboveEditorDashboardSlotRowBudget("right"), undefined, "row budget is scoped to the render pass");
+  });
+
   it("stacks instead of column-splitting on narrow widths", () => {
     const { ctx, calls } = makeCtx();
     mod.updateAboveEditorDashboardSlot(ctx, "left", "task", ["todo"]);

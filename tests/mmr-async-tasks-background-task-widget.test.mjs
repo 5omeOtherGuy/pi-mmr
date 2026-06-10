@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { cleanupLoadedSource, getPreparedSourceRoot, importSource } from "./helpers/load-src.mjs";
 
 const WIDGET_MODULE = "extensions/mmr-async-tasks/background-task-widget.ts";
+const ABOVE_EDITOR_DASHBOARD_MODULE = "extensions/mmr-core/above-editor-dashboard.ts";
 const ABOVE_EDITOR_ORDER_MODULE = "extensions/mmr-core/above-editor-order.ts";
 
 after(cleanupLoadedSource);
@@ -92,6 +93,62 @@ describe("background-task widget", () => {
     assert.ok(bgIdx >= 0, "the background widget was set");
     assert.ok(tlIdx >= 0, "the lower widget re-asserted itself");
     assert.ok(bgIdx < tlIdx, "the background widget stays above the task_list widget");
+  });
+
+  it("uses the combined dashboard row budget so three finder groups fit beside an 11-row task list", async () => {
+    const { refreshBackgroundTaskWidget } = await importSource(WIDGET_MODULE);
+    const dashboard = await importSource(ABOVE_EDITOR_DASHBOARD_MODULE);
+    dashboard.resetAboveEditorDashboardForTest();
+    const { ctx, calls } = makeCtx();
+    dashboard.updateAboveEditorDashboardSlot(ctx, "left", "pi-mmr-task-list", [
+      "⠋ Reviewing finder test group 1",
+      "  ├─ – Finder test 1",
+      "  ├─ – Finder test 2",
+      "  └─ – Finder test 3",
+      "– Review finder test group 2",
+      "  ├─ – Finder test 4",
+      "  ├─ – Finder test 5",
+      "  └─ – Finder test 6",
+      "– Review finder test group 3",
+      "  ├─ – Finder test 7",
+      "  └─ – Finder test 8",
+    ]);
+    const now = Date.now();
+    const entries = [
+      ["t1", "group_1", "Finder test 1"],
+      ["t2", "group_1", "Finder test 2"],
+      ["t3", "group_1", "Finder test 3"],
+      ["t4", "group_2", "Finder test 4"],
+      ["t5", "group_2", "Finder test 5"],
+      ["t6", "group_2", "Finder test 6"],
+      ["t7", "group_3", "Finder test 7"],
+      ["t8", "group_3", "Finder test 8"],
+    ].map(([taskId, groupId, description]) => makeEntry({
+      taskId,
+      groupId,
+      description,
+      createdAtMs: now - 100_000,
+      startedAtMs: now - 100_000,
+      updatedAtMs: now,
+      runtimeMs: 12_000,
+    }));
+    refreshBackgroundTaskWidget(
+      ctx,
+      makeBoard({ generatedAtMs: now, counts: { active: 8, stalled: 0, finished: 0 }, active: entries }),
+      (groupId) => ({
+        groupId,
+        status: "running",
+        label: groupId === "group_1" ? "Finder test group 1" : groupId === "group_2" ? "Finder test group 2" : "Finder test group 3",
+        counts: { running: groupId === "group_3" ? 2 : 3, succeeded: 0, failed: 0, cancelled: 0, partial: 0, total: groupId === "group_3" ? 2 : 3 },
+      }),
+    );
+
+    const widget = calls.at(-1).value({ requestRender() {} }, theme);
+    const text = widget.render(140).join("\n");
+    assert.match(text, /Finder test group 2/);
+    assert.match(text, /Finder test group 3/);
+    assert.doesNotMatch(text, /… 5 more/);
+    dashboard.resetAboveEditorDashboardForTest();
   });
 
   it("registers a factory listing active and stalled agents, not finished ones", async () => {

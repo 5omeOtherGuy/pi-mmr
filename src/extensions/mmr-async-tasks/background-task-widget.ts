@@ -17,7 +17,10 @@
  * the registry board; it owns no state.
  */
 
-import { updateAboveEditorDashboardSlot } from "../mmr-core/above-editor-dashboard.js";
+import {
+  getAboveEditorDashboardSlotRowBudget,
+  updateAboveEditorDashboardSlot,
+} from "../mmr-core/above-editor-dashboard.js";
 import { reassertLowerAboveEditorWidgets } from "../mmr-core/above-editor-order.js";
 import type { MmrAsyncTaskBoard } from "./async-task-registry.js";
 import {
@@ -204,6 +207,7 @@ function renderWidgetLines(
   sections: readonly WidgetSection[],
   theme: BackgroundViewTheme | undefined,
   activeFrame: string | undefined,
+  maxRows = WIDGET_MAX_ROWS,
 ): string[] {
   const safeFg = makeSafeFg(theme);
   const hasGroups = sections.some((s) => s.groupId !== undefined);
@@ -225,12 +229,12 @@ function renderWidgetLines(
   for (let i = 0; i < blocks.length; i += 1) {
     const block = blocks[i];
     const remainingLineTotal = blocks.slice(i).reduce((sum, b) => sum + b.lines.length, 0);
-    if (used + remainingLineTotal <= WIDGET_MAX_ROWS) {
+    if (used + remainingLineTotal <= maxRows) {
       for (let j = i; j < blocks.length; j += 1) out.push(...blocks[j].lines);
       break;
     }
 
-    const reserveOverflowLineLimit = WIDGET_MAX_ROWS - 1;
+    const reserveOverflowLineLimit = maxRows - 1;
     if (used + block.lines.length <= reserveOverflowLineLimit) {
       out.push(...block.lines);
       used += block.lines.length;
@@ -316,6 +320,7 @@ export function refreshBackgroundTaskWidget(
               revealSections(sections, Date.now()),
               theme,
               hasActive ? currentLoaderFrame() : undefined,
+              Math.max(WIDGET_MAX_ROWS, getAboveEditorDashboardSlotRowBudget("right") ?? 0),
             ),
             width,
           ),

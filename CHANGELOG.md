@@ -147,9 +147,12 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
   widget still renders standalone when the other slot is empty. The dashboard
   slot registry is process-wide so cache-isolated `mmr-toolbox` and
   `mmr-subagents` extension loads still meet in the same dashboard instead of
-  rendering as two separate stacked widgets. Covered by
-  `tests/mmr-core-above-editor-dashboard.test.mjs` plus the existing task-list
-  and background-widget tests.
+  rendering as two separate stacked widgets. In the combined dashboard, the
+  background-agent pane now receives the visible task-list height as a row
+  budget, so multiple finder groups can fill the right column instead of
+  collapsing to an early `… N more` overflow line while the left column still
+  has visible rows. Covered by `tests/mmr-core-above-editor-dashboard.test.mjs`
+  plus the existing task-list and background-widget tests.
 
 - `mmr-history`: `read_session` / `find_session` content redaction is now
   **opt-in** and OFF by default. For the local same-user case these tools exist

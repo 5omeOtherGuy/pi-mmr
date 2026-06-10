@@ -46,6 +46,7 @@ interface SlotState {
 interface DashboardStore {
   slots: Partial<Record<AboveEditorDashboardSlot, SlotState>>;
   showingCombined: boolean;
+  rowBudgets: Partial<Record<AboveEditorDashboardSlot, number>>;
 }
 
 const DASHBOARD_STORE_KEY = Symbol.for("pi-mmr.above-editor-dashboard");
@@ -55,7 +56,7 @@ function dashboardStore(): DashboardStore {
   const globalStore = globalThis as unknown as { [key: symbol]: DashboardStore | undefined };
   const existing = globalStore[DASHBOARD_STORE_KEY];
   if (existing) return existing;
-  const store: DashboardStore = { slots: {}, showingCombined: false };
+  const store: DashboardStore = { slots: {}, showingCombined: false, rowBudgets: {} };
   globalStore[DASHBOARD_STORE_KEY] = store;
   return store;
 }
@@ -113,11 +114,15 @@ function makeCombinedWidget(left: SlotState, right: SlotState): AboveEditorDashb
     return {
       render: (width) => {
         const columns = columnWidths(width);
-        return combineLines(
-          leftComponent.render(columns.left),
-          rightComponent.render(columns.right),
-          width,
-        );
+        const leftLines = leftComponent.render(columns.left);
+        const store = dashboardStore();
+        store.rowBudgets.right = leftLines.length;
+        try {
+          const rightLines = rightComponent.render(columns.right);
+          return combineLines(leftLines, rightLines, width);
+        } finally {
+          delete store.rowBudgets.right;
+        }
       },
       invalidate: () => {
         leftComponent.invalidate();
@@ -129,6 +134,10 @@ function makeCombinedWidget(left: SlotState, right: SlotState): AboveEditorDashb
       },
     };
   };
+}
+
+export function getAboveEditorDashboardSlotRowBudget(slot: AboveEditorDashboardSlot): number | undefined {
+  return dashboardStore().rowBudgets[slot];
 }
 
 export function updateAboveEditorDashboardSlot(
@@ -172,5 +181,7 @@ export function resetAboveEditorDashboardForTest(): void {
   const store = dashboardStore();
   delete store.slots.left;
   delete store.slots.right;
+  delete store.rowBudgets.left;
+  delete store.rowBudgets.right;
   store.showingCombined = false;
 }
