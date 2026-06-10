@@ -62,7 +62,24 @@ const MODES = ["smart", "rush", "large", "deep"];
 // identifies the start of a block in the rendered prompt; the substrings
 // must appear in this order. Phase D will rewrite block authoring but must
 // preserve this ordering.
-const EXPECTED_BLOCK_ORDER = [
+const EXPECTED_NON_LARGE_BLOCK_ORDER = [
+  '<mmr_mode name="',
+  "## Autonomy and persistence",
+  "## Executing actions with care",
+  "## Working with the user",
+  "## Response style",
+  "## Tool use",
+  "Available tools:",
+  "Guidelines:",
+  "Pi documentation (",
+  "## Tool execution policy",
+  "# Project Context",
+  "<available_skills>",
+  "Current date:",
+  "Current working directory:",
+];
+
+const EXPECTED_LARGE_BLOCK_ORDER = [
   '<mmr_mode name="',
   "## Autonomy and persistence",
   "## Executing actions with care",
@@ -93,8 +110,9 @@ describe("Phase B baseline: buildMmrPromptLayer block ordering", () => {
         baseSystemPrompt: BASE_PROMPT,
       });
 
+      const expectedBlockOrder = mode === "large" ? EXPECTED_LARGE_BLOCK_ORDER : EXPECTED_NON_LARGE_BLOCK_ORDER;
       let cursor = 0;
-      for (const marker of EXPECTED_BLOCK_ORDER) {
+      for (const marker of expectedBlockOrder) {
         const idx = rendered.indexOf(marker, cursor);
         assert.notEqual(
           idx,

@@ -13,6 +13,27 @@ const EXPECTED_SEQUENCE = [
   "verification",
   "careful-actions",
   "mode-posture",
+  "collaboration",
+  "response-style",
+  "tool-lead-in",
+  "active-tools",
+  "active-guidelines",
+  "builtin-tool-guidance",
+  "pi-docs",
+  "shared-tool-guidance",
+  "diagrams",
+  "file-links",
+  "preserved-tail",
+];
+
+const EXPECTED_LARGE_SEQUENCE = [
+  "identity",
+  "autonomy",
+  "discovery-discipline",
+  "pragmatism",
+  "verification",
+  "careful-actions",
+  "mode-posture",
   "tool-lead-in",
   "active-tools",
   "active-guidelines",
@@ -75,7 +96,11 @@ describe("mmr-core prompt registry", () => {
       const recipe = MMR_MODE_PROMPT_RECIPES[mode];
       assert.equal(recipe.mode, mode);
       assert.equal(recipe.basePromptId, "pi-native-default-v1");
-      const expectedFragments = mode === "rush" ? EXPECTED_RUSH_SEQUENCE : MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE;
+      const expectedFragments = mode === "rush"
+        ? EXPECTED_RUSH_SEQUENCE
+        : mode === "large"
+          ? EXPECTED_LARGE_SEQUENCE
+          : MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE;
       assert.deepEqual(recipe.fragments, expectedFragments, `${mode}: expected fragment sequence`);
       assert.equal(recipe.tag, mode);
       assert.equal(typeof recipe.intro, "string");
@@ -104,8 +129,8 @@ describe("mmr-core prompt registry", () => {
     }
   });
 
-  it("lets a mode recipe drop a shared coding fragment (rush omits diagrams)", () => {
-    const { MMR_MODE_PROMPT_RECIPES, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE } = registry;
+  it("lets mode recipes specialize the shared fragment sequence", () => {
+    const { MMR_MODE_PROMPT_RECIPES, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE, MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE } = registry;
     assert.equal(MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE.includes("diagrams"), false, "rush sequence must omit diagrams");
     assert.deepEqual(
       MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE,
@@ -113,6 +138,8 @@ describe("mmr-core prompt registry", () => {
       "rush must keep every default fragment except diagrams",
     );
     assert.deepEqual(MMR_MODE_PROMPT_RECIPES.rush.fragments, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE);
+    assert.deepEqual(MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE, EXPECTED_LARGE_SEQUENCE);
+    assert.deepEqual(MMR_MODE_PROMPT_RECIPES.large.fragments, MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE);
     for (const mode of ["smart", "smartGPT", "large", "deep"]) {
       assert.equal(
         MMR_MODE_PROMPT_RECIPES[mode].fragments.includes("diagrams"),
@@ -139,24 +166,31 @@ describe("mmr-core prompt registry", () => {
     // ids, in order — this is the single source of truth shared with the registry.
     assert.deepEqual([...modules.SHARED_CODING_GUIDANCE_FRAGMENT_IDS], codingIds);
     assert.deepEqual(Object.keys(modules.SHARED_CODING_GUIDANCE_FRAGMENTS), codingIds);
-    // The default sequence keeps coding ids in canonical relative order, while
-    // intentionally splitting task/risk posture before tool guidance and
-    // communication-style guidance after it.
-    let previousIndex = -1;
+    // The default sequence intentionally splits coding guidance: task/risk
+    // posture and user-collaboration style sit before tool guidance, while
+    // diagrams/file-link style remains after the tool policy.
     for (const id of codingIds) {
-      const index = MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf(id);
-      assert.ok(index > previousIndex, `${id}: coding fragment must preserve canonical relative order`);
-      previousIndex = index;
+      assert.notEqual(MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf(id), -1, `${id}: coding fragment must be present`);
     }
     assert.ok(
       MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("careful-actions") <
+        MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("collaboration"),
+      "task/risk posture must precede collaboration style",
+    );
+    assert.ok(
+      MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("collaboration") <
         MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("tool-lead-in"),
-      "task/risk posture must precede tool guidance",
+      "collaboration style must precede tool guidance",
+    );
+    assert.ok(
+      MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("response-style") <
+        MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("tool-lead-in"),
+      "response style must precede tool guidance",
     );
     assert.ok(
       MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("tool-lead-in") <
         MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.indexOf("diagrams"),
-      "style-oriented guidance must follow tool guidance",
+      "diagrams/file-link style must follow tool guidance",
     );
     // Every registry entry keeps key === id === blockKind.
     for (const [key, def] of Object.entries(MMR_PROMPT_FRAGMENTS)) {

@@ -66,6 +66,7 @@ const AUTONOMY_HEADING = "## Autonomy and persistence";
 const CAREFUL_ACTIONS_HEADING = "## Executing actions with care";
 const TOOL_USE_HEADING = "## Tool use";
 const DIAGRAMS_HEADING = "## Diagrams";
+const COLLABORATION_HEADING = "## Working with the user";
 const RESPONSE_STYLE_HEADING = "## Response style";
 
 function assertBefore(prompt, before, after, message) {
@@ -94,8 +95,8 @@ describe("assembleActiveSurface() prompt-tail drift hardening", () => {
 
     assertBefore(first.systemPrompt, AUTONOMY_HEADING, TOOL_USE_HEADING, "fresh smart prompt");
     assertBefore(first.systemPrompt, CAREFUL_ACTIONS_HEADING, TOOL_USE_HEADING, "fresh smart prompt");
+    assertBefore(first.systemPrompt, RESPONSE_STYLE_HEADING, TOOL_USE_HEADING, "fresh smart prompt");
     assertBefore(first.systemPrompt, TOOL_USE_HEADING, DIAGRAMS_HEADING, "fresh smart prompt");
-    assertBefore(first.systemPrompt, DIAGRAMS_HEADING, RESPONSE_STYLE_HEADING, "fresh smart prompt");
 
     const second = assembleActiveSurface({
       state: createState("smart"),
@@ -107,6 +108,32 @@ describe("assembleActiveSurface() prompt-tail drift hardening", () => {
     assert.equal(second.systemPrompt.split(AUTONOMY_HEADING).length - 1, 1, "autonomy heading must not duplicate");
     assert.equal(second.systemPrompt.split(TOOL_USE_HEADING).length - 1, 1, "tool-use heading must not duplicate");
   });
+
+  for (const mode of PROMPTED_MODES.filter((mode) => mode !== "large")) {
+    it(`places user-collaboration and response style before tool guidance for ${mode}`, () => {
+      const first = assembleActiveSurface({
+        state: createState(mode),
+        baseSystemPrompt: BASE_PROMPT,
+        activeToolManifest: [],
+      });
+      assert.equal(first.passthroughReason, undefined, `${mode}: first assembly must rewrite Pi's prompt`);
+      assertBefore(first.systemPrompt, COLLABORATION_HEADING, TOOL_USE_HEADING, `${mode} fresh prompt`);
+      assertBefore(first.systemPrompt, RESPONSE_STYLE_HEADING, TOOL_USE_HEADING, `${mode} fresh prompt`);
+      assertBefore(first.systemPrompt, "Current date:", "Current working directory:", `${mode} fresh prompt`);
+      assertBefore(first.systemPrompt, TOOL_USE_HEADING, "Current date:", `${mode} fresh prompt`);
+
+      const second = assembleActiveSurface({
+        state: createState(mode),
+        baseSystemPrompt: first.systemPrompt,
+        activeToolManifest: [],
+      });
+      assert.equal(second.systemPrompt, first.systemPrompt, `${mode}: style-before-tools prompt must re-assemble byte-stably`);
+      assert.equal(second.passthroughReason, undefined, `${mode}: re-assembly must remain a real rewrite`);
+      assert.equal(second.systemPrompt.split(COLLABORATION_HEADING).length - 1, 1, `${mode}: collaboration heading must not duplicate`);
+      assert.equal(second.systemPrompt.split(RESPONSE_STYLE_HEADING).length - 1, 1, `${mode}: response style heading must not duplicate`);
+      assert.equal(second.systemPrompt.split(TOOL_USE_HEADING).length - 1, 1, `${mode}: tool-use heading must not duplicate`);
+    });
+  }
 
   for (const mode of PROMPTED_MODES) {
     it(`re-assembling a ${mode} prompt is byte-stable and still a real rewrite`, () => {

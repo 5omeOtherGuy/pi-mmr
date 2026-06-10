@@ -80,8 +80,29 @@ function renderMmrOwnedTailFragment(
 function renderPostPiDocsMmrTail(previousRecipe: MmrModePromptRecipe): string {
   const piDocsIndex = previousRecipe.fragments.indexOf("pi-docs");
   if (piDocsIndex === -1) return "";
-  return previousRecipe.fragments
-    .slice(piDocsIndex + 1)
+  const tailFragments = previousRecipe.fragments.slice(piDocsIndex + 1);
+  const ownedTail = tailFragments
+    .map((fragmentId) => renderMmrOwnedTailFragment(fragmentId, previousRecipe))
+    .filter((fragmentText): fragmentText is string => fragmentText !== undefined)
+    .join("\n\n");
+  let lastOwnedTailFragment: MmrPromptFragmentId | undefined;
+  for (let i = tailFragments.length - 1; i >= 0; i -= 1) {
+    const fragmentId = tailFragments[i];
+    if (fragmentId === undefined) continue;
+    if (renderMmrOwnedTailFragment(fragmentId, previousRecipe) === undefined) continue;
+    lastOwnedTailFragment = fragmentId;
+    break;
+  }
+  return lastOwnedTailFragment === undefined || lastOwnedTailFragment === "response-style"
+    ? ownedTail
+    : `${ownedTail}\n\n`;
+}
+
+function renderPostureFirstMmrTail(previousRecipe: MmrModePromptRecipe): string {
+  const tailFragments: MmrPromptFragmentId[] = ["shared-tool-guidance"];
+  if (previousRecipe.fragments.includes("diagrams")) tailFragments.push("diagrams");
+  tailFragments.push("file-links", "collaboration", "response-style");
+  return tailFragments
     .map((fragmentId) => renderMmrOwnedTailFragment(fragmentId, previousRecipe))
     .filter((fragmentText): fragmentText is string => fragmentText !== undefined)
     .join("\n\n");
@@ -110,11 +131,12 @@ const PREVIOUS_MMR_TAILS: readonly string[] = [
     Object.values(MMR_MODE_PROMPT_RECIPES)
       .flatMap((previousRecipe) => [
         renderPostPiDocsMmrTail(previousRecipe),
+        renderPostureFirstMmrTail(previousRecipe),
         renderLegacyMmrTail(previousRecipe),
       ])
       .filter((tail) => tail.length > 0),
   ),
-];
+].sort((a, b) => b.length - a.length);
 
 /**
  * Locate the end of a previously-injected MMR tail that sits immediately
@@ -268,7 +290,7 @@ export function assembleActiveSurface(
 
   // Each fragment owns its trailing separators so that concatenating all
   // rendered blocks reproduces the systemPrompt byte-for-byte.
-  const renderFragment = (fragmentId: MmrPromptFragmentId): MmrPromptBlock | null => {
+  const renderFragment = (fragmentId: MmrPromptFragmentId, index: number): MmrPromptBlock | null => {
     switch (fragmentId) {
       case "identity":
         return {
@@ -342,17 +364,15 @@ export function assembleActiveSurface(
           text: `${recipe.postureSections}\n\n`,
           source: "mmr-core",
         };
-      case "response-style":
-        // Last MMR-owned fragment before Pi's preserved tail; the tail's
-        // leading blank line supplies the separator, so this fragment must
-        // not add its own trailing `\n\n` (keeps the byte-exact boundary the
-        // removed easter-egg fragment previously held).
+      case "response-style": {
+        const isBeforePreservedTail = recipe.fragments[index + 1] === "preserved-tail";
         return {
           id: `response-style:${mode}`,
           kind: "response-style",
-          text: `${MMR_RESPONSE_STYLE_HEADING}\n\n${recipe.closingLine}`,
+          text: `${MMR_RESPONSE_STYLE_HEADING}\n\n${recipe.closingLine}${isBeforePreservedTail ? "" : "\n\n"}`,
           source: "mmr-core",
         };
+      }
       case "preserved-tail":
         return {
           id: "preserved-tail",
@@ -368,7 +388,7 @@ export function assembleActiveSurface(
   };
 
   const blocks = recipe.fragments
-    .map((fragmentId) => renderFragment(fragmentId))
+    .map((fragmentId, index) => renderFragment(fragmentId, index))
     .filter((block): block is MmrPromptBlock => block !== null);
 
   const systemPrompt = blocks.map((b) => b.text).join("");

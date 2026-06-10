@@ -97,6 +97,27 @@ export const MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE = [
   "verification",
   "careful-actions",
   "mode-posture",
+  "collaboration",
+  "response-style",
+  "tool-lead-in",
+  "active-tools",
+  "active-guidelines",
+  "builtin-tool-guidance",
+  "pi-docs",
+  "shared-tool-guidance",
+  "diagrams",
+  "file-links",
+  "preserved-tail",
+] as const satisfies readonly MmrPromptFragmentId[];
+
+export const MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE = [
+  "identity",
+  "autonomy",
+  "discovery-discipline",
+  "pragmatism",
+  "verification",
+  "careful-actions",
+  "mode-posture",
   "tool-lead-in",
   "active-tools",
   "active-guidelines",
@@ -115,8 +136,7 @@ export const MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE = [
  * optimizes for latency and token economy with terse output, so the
  * multi-line box-drawing example is the lowest-value shared section for it.
  * Every other shared coding fragment (autonomy, discovery, pragmatism,
- * verification, careful actions, file links, collaboration) is retained, and
- * all other modes keep the full default sequence.
+ * verification, careful actions, file links, collaboration) is retained.
  */
 export const MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE = MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.filter(
   (fragmentId) => fragmentId !== "diagrams",
@@ -271,7 +291,7 @@ export const MMR_MODE_PROMPT_RECIPES = {
   smart: recipe("smart"),
   smartGPT: recipe("smartGPT"),
   rush: recipe("rush", MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE),
-  large: recipe("large"),
+  large: recipe("large", MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE),
   deep: recipe("deep"),
 } satisfies Record<PromptedMmrModeKey, MmrModePromptRecipe>;
 

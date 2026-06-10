@@ -185,12 +185,21 @@ describe("Phase D: assembleActiveSurface() public API", () => {
       const responseStyleIdx = kinds.indexOf("response-style");
       assert.ok(autonomyIdx < carefulActionsIdx, `mode ${mode}: task/risk posture must stay in order`);
       assert.ok(carefulActionsIdx < modePostureIdx, `mode ${mode}: shared posture must precede mode posture`);
-      assert.ok(modePostureIdx < toolLeadInIdx, `mode ${mode}: posture must precede tool guidance`);
-      assert.ok(toolLeadInIdx < piDocsIdx, `mode ${mode}: Pi tool/docs blocks must stay in order`);
-      assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool execution policy`);
-      assert.ok(sharedToolIdx < fileLinksIdx, `mode ${mode}: tool execution policy must precede style guidance`);
-      assert.ok(fileLinksIdx < collaborationIdx, `mode ${mode}: style guidance must stay in order`);
-      assert.ok(collaborationIdx < responseStyleIdx, `mode ${mode}: style guidance must precede response style`);
+      if (mode === "large") {
+        assert.ok(modePostureIdx < toolLeadInIdx, `mode ${mode}: posture must precede tool guidance`);
+        assert.ok(toolLeadInIdx < piDocsIdx, `mode ${mode}: Pi tool/docs blocks must stay in order`);
+        assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool execution policy`);
+        assert.ok(sharedToolIdx < fileLinksIdx, `mode ${mode}: tool execution policy must precede style guidance`);
+        assert.ok(fileLinksIdx < collaborationIdx, `mode ${mode}: style guidance must stay in order`);
+        assert.ok(collaborationIdx < responseStyleIdx, `mode ${mode}: style guidance must precede response style`);
+      } else {
+        assert.ok(modePostureIdx < collaborationIdx, `mode ${mode}: mode posture must precede collaboration style`);
+        assert.ok(collaborationIdx < responseStyleIdx, `mode ${mode}: collaboration style must precede response style`);
+        assert.ok(responseStyleIdx < toolLeadInIdx, `mode ${mode}: response style must precede tool guidance`);
+        assert.ok(toolLeadInIdx < piDocsIdx, `mode ${mode}: Pi tool/docs blocks must stay in order`);
+        assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool execution policy`);
+        assert.ok(sharedToolIdx < fileLinksIdx, `mode ${mode}: tool execution policy must precede remaining style guidance`);
+      }
       assert.match(result.blocks[sharedToolIdx].text, /## Tool execution policy/);
       assert.match(result.blocks[autonomyIdx].text, /## Autonomy and persistence/);
       assert.match(result.blocks[collaborationIdx].text, /## Working with the user/);

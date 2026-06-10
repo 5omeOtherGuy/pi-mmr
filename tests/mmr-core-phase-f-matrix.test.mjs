@@ -61,7 +61,24 @@ const MODE_FOREIGN_MARKERS = {
 };
 
 // Expected coarse block order. Matches the existing Phase B baseline.
-const EXPECTED_BLOCK_ORDER = [
+const EXPECTED_NON_LARGE_BLOCK_ORDER = [
+  '<mmr_mode name="',
+  "## Autonomy and persistence",
+  "## Executing actions with care",
+  "## Working with the user",
+  "## Response style",
+  "## Tool use",
+  "Available tools:",
+  "Guidelines:",
+  "## Built-in tool guidance",
+  "Pi documentation (",
+  "## Tool execution policy",
+  "# Project Context",
+  "Current date:",
+  "Current working directory:",
+];
+
+const EXPECTED_LARGE_BLOCK_ORDER = [
   '<mmr_mode name="',
   "## Autonomy and persistence",
   "## Executing actions with care",
@@ -161,8 +178,9 @@ describe("Phase F: per-mode structural invariants across the matrix", () => {
         baseSystemPrompt: BASE_PROMPT,
         activeToolManifest: [],
       });
+      const expectedBlockOrder = mode === "large" ? EXPECTED_LARGE_BLOCK_ORDER : EXPECTED_NON_LARGE_BLOCK_ORDER;
       let cursor = 0;
-      for (const marker of EXPECTED_BLOCK_ORDER) {
+      for (const marker of expectedBlockOrder) {
         const idx = result.systemPrompt.indexOf(marker, cursor);
         assert.notEqual(idx, -1, `${mode}: missing block marker "${marker}" at/after offset ${cursor}`);
         cursor = idx + marker.length;
@@ -224,6 +242,8 @@ describe("Phase F: per-mode structural invariants across the matrix", () => {
       const postureIdx = sp.indexOf(MODE_MARKERS[mode] === '<mmr_mode name="smart">' || MODE_MARKERS[mode] === '<mmr_mode name="smartGPT">'
         ? "## Smart mode"
         : MODE_MARKERS[mode]);
+      const collaborationIdx = sp.indexOf("## Working with the user");
+      const responseStyleIdx = sp.indexOf("## Response style");
       const toolHeadingIdx = sp.indexOf(MMR_TOOL_USE_HEADING);
       const leadInIdx = sp.indexOf(MMR_TOOL_USE_POSTURE_LINE);
       const availIdx = sp.indexOf("Available tools:");
@@ -231,18 +251,25 @@ describe("Phase F: per-mode structural invariants across the matrix", () => {
       const docsIdx = sp.indexOf("Pi documentation (");
       const sharedToolIdx = sp.indexOf("## Tool execution policy");
       const styleIdx = mode === "rush" ? sp.indexOf("## File links") : sp.indexOf("## Diagrams");
-      const responseStyleIdx = sp.indexOf("## Response style");
       assert.ok(toolHeadingIdx !== -1 && leadInIdx !== -1, `${mode}: missing tool-use heading or lead-in`);
       assert.ok(autonomyIdx < carefulActionsIdx, `${mode}: task/risk posture must stay in order`);
       assert.ok(carefulActionsIdx < postureIdx, `${mode}: shared posture must precede mode posture`);
-      assert.ok(postureIdx < toolHeadingIdx, `${mode}: mode posture must precede tool guidance`);
+      if (mode === "large") {
+        assert.ok(postureIdx < toolHeadingIdx, `${mode}: mode posture must precede tool guidance`);
+        assert.ok(sharedToolIdx < styleIdx, `${mode}: shared tool policy must precede style guidance`);
+        assert.ok(styleIdx < collaborationIdx, `${mode}: style guidance must precede collaboration`);
+        assert.ok(collaborationIdx < responseStyleIdx, `${mode}: collaboration must precede response style`);
+      } else {
+        assert.ok(postureIdx < collaborationIdx, `${mode}: mode posture must precede collaboration`);
+        assert.ok(collaborationIdx < responseStyleIdx, `${mode}: collaboration must precede response style`);
+        assert.ok(responseStyleIdx < toolHeadingIdx, `${mode}: response style must precede tool guidance`);
+        assert.ok(sharedToolIdx < styleIdx, `${mode}: shared tool policy must precede remaining style guidance`);
+      }
       assert.ok(toolHeadingIdx < availIdx, `${mode}: ## Tool use must precede Available tools:`);
       assert.ok(leadInIdx < availIdx, `${mode}: tool-use lead-in must precede Available tools:`);
       assert.ok(availIdx < guidelinesIdx, `${mode}: Available tools must precede Guidelines`);
       assert.ok(guidelinesIdx < docsIdx, `${mode}: Guidelines must precede Pi documentation`);
       assert.ok(docsIdx < sharedToolIdx, `${mode}: Pi documentation must precede shared tool guidance`);
-      assert.ok(sharedToolIdx < styleIdx, `${mode}: shared tool policy must precede style guidance`);
-      assert.ok(styleIdx < responseStyleIdx, `${mode}: style guidance must precede response style`);
     });
   }
 });
