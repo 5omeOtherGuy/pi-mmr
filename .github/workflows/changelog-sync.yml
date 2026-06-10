@@ -75,3 +75,13 @@ jobs:
           git add CHANGELOG.md
           git commit -m "chore(changelog): sync from PR #${{ github.event.pull_request.number }} body"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      # Close the gap the local notice-by-default policy leaves open: if an
+      # agent forgot both the marker block and a direct edit, nothing else
+      # enforces a changelog entry. This runs AFTER the sync commit, so a
+      # marker-block PR already has CHANGELOG.md in its diff and passes. The
+      # `skip-changelog` label / fork / bot cases are filtered by the job `if:`.
+      - name: Require a changelog entry for monitored changes
+        env:
+          CHANGELOG_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/require-changelog-entry.mjs

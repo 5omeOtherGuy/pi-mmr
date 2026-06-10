@@ -6,7 +6,71 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ## Unreleased
 
+### Added
+
+- Workflow tooling: new npm scripts make parallel-worktree development
+  token-cheap while preserving every existing safety check.
+  `npm run link:node-modules` symlinks a task worktree's `node_modules` at the
+  primary checkout's install (idempotent; refuses to clobber a real install),
+  so parallel worktrees share one install instead of each running `npm ci`.
+  `npm run gate` runs `npm test`, `npm run check`, and `npm run pack:dry-run`
+  as one quiet-on-success step (prints only a summary line, or the failing
+  step's output). `npm run preflight` collapses the worktree preflight
+  (fetch + primary-freshness probe) into one status line, and
+  `npm run cleanup:worktree -- <path> [branch]` collapses post-merge cleanup
+  (worktree remove + branch delete + fetch/prune + `sync:primary`) into one
+  status line. The underlying `check:primary-fresh` and `sync:primary`
+  behavior is unchanged.
+
+- Workflow tooling: `npm run worktrees:report` prints a read-only worktree
+  hygiene report comparing each task worktree against `origin/main`. It
+  classifies worktrees as `STALE` (branch tip fully in `origin/main` and the
+  tree is clean — safe to prune, with the exact `cleanup:worktree` command
+  shown), `DIRTY` (no unmerged commits but uncommitted changes — in-progress,
+  not pruned), or `ACTIVE` (commits not yet in `origin/main`). It never removes
+  anything, so stale leftovers are pruned deliberately.
+
+- Workflow tooling: `npm run link:node-modules` now also symlinks the
+  gitignored, primary-only `AGENTS.md` into the worktree (never clobbering an
+  existing file), so sessions and subagents whose cwd is a worktree can read the
+  workflow instructions. The `changelog-sync` workflow now runs
+  `scripts/require-changelog-entry.mjs` after its sync commit to fail a PR whose
+  monitored changes left `CHANGELOG.md` untouched (no marker block and no manual
+  edit), restoring the changelog guarantee without any local pre-test cost
+  (covered by `tests/check-changelog-policy.test.mjs`).
+
+### Fixed
+
+- Workflow tooling: `npm run gate` no longer reports `PASS` after a failing
+  step. The step exit code is now captured immediately instead of from an `if`
+  compound (which is `0` when its condition fails), so a failing step is
+  reported with its real exit code and the gate stops and exits non-zero.
+  Failure output is tail-truncated to the last 200 lines with the full-log path
+  printed, capping the token cost of a failed run.
+
+- Workflow tooling: `npm run preflight` no longer false-`PASS`es when run from
+  inside a worktree. It now resolves the primary checkout via
+  `git rev-parse --git-common-dir` and probes primary freshness there, instead
+  of relying on `check-primary-fresh.sh`'s worktree no-op.
+
+- Workflow tooling: `npm run cleanup:worktree` guards against destroying
+  committed-but-unmerged work. When `gh` is available it refuses (exit 11) to
+  force-delete a branch with no merged PR unless `--force` is given, prints the
+  deleted branch's tip SHA for one-command recovery, and always applies
+  `sync:primary` to the resolved primary checkout (removing the exit-code-12
+  collision when cleanup ran from a sibling worktree).
+
 ### Changed
+
+- Workflow tooling: the pre-test changelog gate no longer forces a manual
+  `CHANGELOG.md` edit. `scripts/check-changelog.mjs` now treats a missing entry
+  for monitored changes as a non-fatal notice; the canonical path is the
+  PR-body marker block that `scripts/sync-changelog-from-pr.mjs` appends at PR
+  time via the `changelog-sync` workflow. The public-safe wording scan, heading
+  shape validation, and `.github/release.yml` category checks still hard-fail.
+  Set `PI_MMR_CHANGELOG_REQUIRE_ENTRY=1` to restore the blocking behavior, or
+  `PI_MMR_CHANGELOG_NOT_NEEDED=1` to silence the notice. New deterministic
+  coverage in `tests/check-changelog-policy.test.mjs`.
 
 - Internal: split the `mmr-async-tasks` public task/group types, registry
   interfaces, and timing/cap constants out of `async-task-registry.ts` into a

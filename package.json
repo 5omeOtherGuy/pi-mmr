@@ -57,6 +57,11 @@
     "check:changelog": "node scripts/check-changelog.mjs",
     "check:primary-fresh": "bash scripts/check-primary-fresh.sh",
     "sync:primary": "bash scripts/sync-primary.sh",
+    "preflight": "bash scripts/worktree-preflight.sh",
+    "link:node-modules": "bash scripts/link-node-modules.sh",
+    "cleanup:worktree": "bash scripts/worktree-cleanup.sh",
+    "worktrees:report": "bash scripts/list-merged-worktrees.sh",
+    "gate": "bash scripts/gate.sh",
     "release:notes": "node scripts/github-release-notes.mjs",
     "pack:dry-run": "npm pack --dry-run"
   },

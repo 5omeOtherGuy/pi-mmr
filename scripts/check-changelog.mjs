@@ -164,6 +164,52 @@ function validateChangelogShape(markdown) {
   return errors;
 }
 
+/**
+ * Pure predicate: do the given changed files require a CHANGELOG.md entry?
+ * True when at least one monitored file changed and CHANGELOG.md itself was
+ * not among the changes. Shared by the local notice path and the CI
+ * enforcement script (scripts/require-changelog-entry.mjs).
+ *
+ * @param {string[]} changedFiles
+ * @returns {boolean}
+ */
+export function requiresChangelogEntry(changedFiles) {
+  const monitored = changedFiles.filter(isMonitored);
+  const changelogChanged = changedFiles.includes("CHANGELOG.md");
+  return monitored.length > 0 && !changelogChanged;
+}
+
+/**
+ * Decide whether a missing CHANGELOG.md entry should block.
+ *
+ * Default policy: do NOT block. A missing entry is a non-fatal notice, because
+ * the canonical path is the PR-body marker block (see docs/changelog-template.md
+ * "Automated PR-body sync"), which `scripts/sync-changelog-from-pr.mjs` appends
+ * at PR time via the `changelog-sync` workflow. This removes the pre-test manual
+ * CHANGELOG edit. The public-safe scan and shape validation still hard-fail.
+ *
+ * Opt-in strict mode: set `PI_MMR_CHANGELOG_REQUIRE_ENTRY=1` to turn a missing
+ * entry back into a blocking error. `PI_MMR_CHANGELOG_NOT_NEEDED=1` silences the
+ * notice entirely for a deliberately non-user-visible change.
+ *
+ * @returns {{ error?: string, notice?: string }}
+ */
+export function evaluateChangelogEntryPolicy({ monitoredChanges, changelogChanged, env = process.env }) {
+  if (changelogChanged || monitoredChanges.length === 0 || env.PI_MMR_CHANGELOG_NOT_NEEDED === "1") {
+    return {};
+  }
+  const shown = monitoredChanges.slice(0, 12).join(", ") + (monitoredChanges.length > 12 ? ", ..." : "");
+  const message = [
+    "CHANGELOG.md was not updated for monitored pi-mmr changes.",
+    `Changed monitored files: ${shown}`,
+    `Add a public-safe bullet via the PR-body marker block (${templatePath}, "Automated PR-body sync") so changelog-sync appends it at PR time, edit ## Unreleased directly, or set PI_MMR_CHANGELOG_NOT_NEEDED=1 for a deliberately non-user-visible change.`,
+  ].join("\n");
+  if (env.PI_MMR_CHANGELOG_REQUIRE_ENTRY === "1") {
+    return { error: message };
+  }
+  return { notice: message };
+}
+
 function main() {
   const errors = [];
   if (!existsSync(changelogPath)) {
@@ -181,13 +227,9 @@ function main() {
   const changedFiles = getChangedFiles();
   const monitoredChanges = changedFiles.filter(isMonitored);
   const changelogChanged = changedFiles.includes("CHANGELOG.md");
-  if (monitoredChanges.length > 0 && !changelogChanged && process.env.PI_MMR_CHANGELOG_NOT_NEEDED !== "1") {
-    errors.push([
-      "CHANGELOG.md must be updated for substantial pi-mmr changes.",
-      `Changed monitored files: ${monitoredChanges.slice(0, 12).join(", ")}${monitoredChanges.length > 12 ? ", ..." : ""}`,
-      `Add a public-safe bullet under ## Unreleased using ${templatePath}, or set PI_MMR_CHANGELOG_NOT_NEEDED=1 only for a deliberately non-user-visible change.`,
-    ].join("\n"));
-  }
+  const { error, notice } = evaluateChangelogEntryPolicy({ monitoredChanges, changelogChanged });
+  if (error) errors.push(error);
+  if (notice) console.error(`note: ${notice}`);
 
   if (errors.length > 0) {
     console.error(errors.map((error) => `- ${error}`).join("\n"));
@@ -195,4 +237,14 @@ function main() {
   }
 }
 
-main();
+const invokedAsCli = (() => {
+  try {
+    return Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
+
+if (invokedAsCli) {
+  main();
+}
