@@ -35,6 +35,11 @@ function includesOverloadOnly(message: string): boolean {
   return /overloaded/i.test(message) && !includesRateLimit(message) && !includesHardQuota(message);
 }
 
+function includesSilentAnthropicStreamStall(message: string): boolean {
+  return /upstream_capacity_signal=silent_200_stream/i.test(message)
+    && /retryable=true/i.test(message);
+}
+
 export function classifyMmrSessionFallbackError(input: MmrSessionFallbackErrorInput): MmrSessionFallbackErrorClassification {
   const provider = normalize(input.provider);
   const message = normalize(input.errorMessage);
@@ -65,6 +70,14 @@ export function classifyMmrSessionFallbackError(input: MmrSessionFallbackErrorIn
   }
 
   if (lowerProvider === "claude-subscription") {
+    if (includesSilentAnthropicStreamStall(message)) {
+      return {
+        kind: "anthropic-overload",
+        shouldPrompt: true,
+        friendlyMessage: "The active Claude subscription route reported degraded upstream capacity.",
+      };
+    }
+
     // Overload is normally transient and handled by Pi's auto-retry. By the
     // time it reaches message_end the auto-retries are exhausted, so a
     // persistent overload of the active Claude route is worth offering an

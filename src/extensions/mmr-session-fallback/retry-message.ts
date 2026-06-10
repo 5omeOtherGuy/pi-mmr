@@ -13,9 +13,12 @@ export function createMmrSessionFallbackRetryMessage(
   override: PersistedMmrSessionFallbackOverride,
   originalError: string | undefined,
 ): MmrSessionFallbackAssistantMessage {
+  const reason = override.reasonKind === "anthropic-overload"
+    ? "upstream capacity"
+    : "rate limit";
   return {
     ...message,
     stopReason: "error",
-    errorMessage: `rate limit: pi-mmr applied a session fallback to ${override.selectedProvider}/${override.selectedModel} with thinking:${override.thinkingLevel}. Retrying this turn with the selected model. Original error: ${originalError ?? "provider quota error"}`,
+    errorMessage: `${reason}: pi-mmr applied a session fallback to ${override.selectedProvider}/${override.selectedModel} with thinking:${override.thinkingLevel}. Retrying this turn with the selected model. Original error: ${originalError ?? "provider quota error"}`,
   };
 }

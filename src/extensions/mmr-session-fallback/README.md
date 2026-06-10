@@ -1,6 +1,6 @@
 # mmr-session-fallback
 
-Session-scoped quota-fallback extension. When the active locked-mode route reports a quota or rate-limit error from a subscription-backed provider, it prompts the user to pick a fallback model + thinking level, applies the selection through `mmr-core`'s managed-model-update guard, persists a session-scoped override, and rewrites Pi's error so the current turn retries through Pi's normal retry loop.
+Session-scoped provider-fallback extension. When the active locked-mode route reports a quota/rate-limit error or a Claude subscription capacity/degraded-stream failure, it prompts the user to pick a fallback model + thinking level, applies the selection through `mmr-core`'s managed-model-update guard, persists a session-scoped override, and rewrites Pi's error so the current turn retries through Pi's normal retry loop.
 
 Package overview: [`../../../README.md`](../../../README.md). Planning: [`ROADMAP.md`](ROADMAP.md). Public API: [`../../../docs/public-api.md`](../../../docs/public-api.md).
 
@@ -8,13 +8,13 @@ Package overview: [`../../../README.md`](../../../README.md). Planning: [`ROADMA
 
 | Default | Provides | Requires | Diagnostics |
 | --- | --- | --- | --- |
-| On | Interactive quota fallback prompt + session-scoped override | none | `/mmr-status` (`Configured fallback:`), session-log custom entries |
+| On | Interactive quota/capacity fallback prompt + session-scoped override | none | `/mmr-status` (`Configured fallback:`), session-log custom entries |
 
 ## When to use it
 
-- The active subscription-backed route hit a usage limit / hard quota / hard rate-limit and you want to keep the turn alive on a different registered model.
+- The active subscription-backed route hit a usage limit / hard quota / hard rate-limit, or the Claude subscription route surfaced a retryable degraded-stream capacity marker, and you want to keep the turn alive on a different registered model.
 - You want fallback selections to stick for the current session and clear automatically on new or forked sessions.
-- You do not want pure overload errors to silently switch your model.
+- You do not want overload/capacity errors to silently switch your model; fallback is interactive and session-scoped.
 
 ## Status and enablement
 
@@ -24,18 +24,19 @@ Always loaded. No-op unless **all** of: locked MMR mode active (not `free`), no 
 
 ### Trigger
 
-Listens on `message_end`. Activates when the assistant turn stops with `stopReason: "error"` and the error is classified as quota/hard rate-limit by [`classifier.ts`](classifier.ts):
+Listens on `message_end`. Activates when the assistant turn stops with `stopReason: "error"` and the error is classified as quota, hard rate-limit, or Claude subscription overload/capacity by [`classifier.ts`](classifier.ts):
 
 | Provider                     | Detected kind          | Pattern                                                                |
 | ---------------------------- | ---------------------- | ---------------------------------------------------------------------- |
 | `openai-codex`               | `openai-usage-limit`   | ChatGPT usage-limit text, generic rate-limit text, or hard-quota text  |
 | `claude-subscription`        | `anthropic-rate-limit` | rate-limit or hard-quota text                                          |
+| `claude-subscription`        | `anthropic-overload`   | `overloaded` text, or `minimalcc-pi`'s `upstream_capacity_signal=silent_200_stream; retryable=true` marker |
 | `github-copilot`             | `copilot-quota`        | rate-limit or hard-quota text                                          |
 | any provider                 | `generic-hard-quota`   | explicit hard-quota text (`usage limit reached`, `quota exceeded`, …)  |
 | subscription-backed provider | `generic-hard-quota`   | rate-limit text on a subscription-backed route                         |
 | anything else                | `not-quota`            | no-op                                                                  |
 
-Pure overload errors without a rate-limit/quota signature are treated as `not-quota` and flow through Pi's normal retry/backoff.
+Non-Claude providers' plain overload text still flows through Pi's normal retry/backoff. Claude subscription overload/capacity signals only offer an interactive fallback after they reach `message_end`; no model is switched silently.
 
 ### Candidates
 
@@ -57,7 +58,7 @@ After the user picks ([`ui.ts`](ui.ts)):
 - `setMmrManagedModelOverride({ kind: "session-fallback", ... })` records the override on the `mmr-core` runtime.
 - `mmr-core`'s mode-state snapshot is republished with `modelFallbackApplied: true`, `modelFallbackReason`, new `provider`/`model`/`thinkingLevel`, and refreshed `effectiveContextWindow`, so `/mmr-status` reflects the fallback.
 - A `mmr-session-fallback.override` custom session entry is appended ([`state.ts`](state.ts)) keyed to `sessionId`: `{ version, sessionId, mode, failingProvider, failingModel, selectedProvider, selectedModel, thinkingLevel, reasonKind, appliedAt }`. A `cleared: true` variant records explicit clears.
-- Pi's `message_end` payload is rewritten ([`retry-message.ts`](retry-message.ts)) to keep `stopReason: "error"` but replace `errorMessage` with `rate limit: pi-mmr applied a session fallback to <provider>/<model> with thinking:<level>. Retrying this turn with the selected model. Original error: <original>`. Pi's retry loop reacts and replays the turn.
+- Pi's `message_end` payload is rewritten ([`retry-message.ts`](retry-message.ts)) to keep `stopReason: "error"` but replace `errorMessage` with `<reason>: pi-mmr applied a session fallback to <provider>/<model> with thinking:<level>. Retrying this turn with the selected model. Original error: <original>`, where `<reason>` is `rate limit` for quota/rate-limit classifications and `upstream capacity` for overload/degraded-stream classifications. Pi's retry loop reacts and replays the turn.
 
 ### Session lifecycle
 
@@ -71,7 +72,7 @@ After the user picks ([`ui.ts`](ui.ts)):
 
 ## Diagnostics and troubleshooting
 
-- **Fallback did not trigger.** Error was not classified as quota/rate-limit, the run is inside a subagent worker, the mode is `free`, or a prompt/override is already active for this session. Check `/mmr-status` for `Configured fallback:` and inspect the original error against the classifier table above.
+- **Fallback did not trigger.** Error was not classified as quota/rate-limit/capacity, the run is inside a subagent worker, the mode is `free`, or a prompt/override is already active for this session. Check `/mmr-status` for `Configured fallback:` and inspect the original error against the classifier table above.
 - **Override did not survive resume.** Persisted entries re-apply only when Pi's reported provider/model still matches the failing route. A different active model on resume is treated as a deliberate user choice and ignored.
 - **`/model` or `/think` did not stick.** Manual model/thinking selections outside the managed guard clear any active fallback. Re-pick the fallback after manual changes.
 
@@ -90,7 +91,7 @@ Canonical catalog: [`../../../docs/public-api.md`](../../../docs/public-api.md).
 
 ## Developer notes
 
-- Strict no-op outside interactive sessions (`ctx.hasUI === false`), inside subagent workers, in `free` mode, and for non-quota classifications.
+- Strict no-op outside interactive sessions (`ctx.hasUI === false`), inside subagent workers, in `free` mode, and for non-quota/non-capacity classifications.
 - Every model/thinking mutation goes through `runMmrManagedModelUpdate(...)` so the native-control Free-mode opt-out is not triggered.
 - Persisted entries use the dedicated entry type and a versioned schema; malformed/older entries return `undefined` from parse helpers.
 - Overrides are session-scoped: re-applied only when the resuming session id matches and Pi reports the same failing route. New/forked sessions never inherit.
