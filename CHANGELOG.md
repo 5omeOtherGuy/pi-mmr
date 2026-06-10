@@ -35,6 +35,15 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
   Dead-code detection is now part of the standard pre-PR/CI gate instead of an
   opt-in step, preventing unused code from accumulating.
 
+- Internal: split the pure Task result/outcome shaping out of
+  `mmr-subagents/task.ts` into a new module, `task-result.ts` (the Task status
+  classifier and its types, the `TaskDetails` projection, progress/final
+  `AgentToolResult` builders, and the synthetic failure-result builders shared
+  with the async `start_task` path). The task entry file re-exports the public
+  surface, so every existing import path and the package barrel resolve
+  unchanged; tool registration and run preparation are untouched. No behavior
+  change.
+
 - Removed dead parameters flagged by the stricter check: the unused `ctx` in the
   `mmr-subagents` `session_start` handler and the unused `args`/`theme`/`context`
   in `renderMmrBackgroundTaskCall` (underscore-prefixed; signature preserved).
