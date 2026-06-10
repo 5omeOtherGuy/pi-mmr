@@ -81,6 +81,6 @@
     "linkedom": "^0.18.12",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2",
-    "typebox": "^1.1.39"
+    "typebox": "^1.2.8"
   }
 }
