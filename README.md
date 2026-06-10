@@ -147,7 +147,7 @@ Independent work can run as a **background fleet**: `start_task` launches a work
 | [`mmr-core`](src/extensions/mmr-core/README.md) | On | Locked modes, model resolution, thinking policy, tool allowlists, prompt rewrite, diagnostics |
 | [`mmr-toolbox`](src/extensions/mmr-toolbox/README.md) | On | Safe patching (`apply_patch`) and session-local todo tracking (`task_list`) |
 | [`mmr-subagents`](src/extensions/mmr-subagents/README.md) | On | `finder`, `oracle`, `Task`, gated `librarian`, background task fleet, and custom Markdown subagents |
-| [`mmr-session-fallback`](src/extensions/mmr-session-fallback/README.md) | On | Interactive fallback when subscription routes hit quota or rate limits |
+| [`mmr-session-fallback`](src/extensions/mmr-session-fallback/README.md) | On | Interactive fallback when subscription routes hit quota, rate limits, or Claude subscription capacity stalls |
 | [`mmr-web`](src/extensions/mmr-web/README.md) | Off | `web_search` and `read_web_page` via SearXNG, Brave, or DuckDuckGo |
 | [`mmr-history`](src/extensions/mmr-history/README.md) | Off | Search and summarize prior local Pi sessions with redaction |
 | [`mmr-github`](src/extensions/mmr-github/README.md) | Off | Read-only GitHub files, directories, search, commits, diffs, repositories |

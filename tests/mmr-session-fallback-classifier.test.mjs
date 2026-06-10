@@ -32,6 +32,24 @@ describe("mmr-session-fallback quota classifier", () => {
     assert.equal(classifyMmrSessionFallbackError({ provider: "openai-codex", errorMessage: "overloaded_error: try again" }).shouldPrompt, false);
   });
 
+  it("treats minimalcc-pi silent 200 stream stalls as Anthropic overload", async () => {
+    const { classifyMmrSessionFallbackError } = await importSource("extensions/mmr-session-fallback/classifier.ts");
+
+    const result = classifyMmrSessionFallbackError({
+      provider: "claude-subscription",
+      errorMessage: "Anthropic Messages API stream made no progress for 45000ms [status=200; request_id=req_x; last_event=toolUseInputDelta; saw_message_stop=false; upstream_capacity_signal=silent_200_stream; retryable=true]",
+    });
+
+    assert.equal(result.shouldPrompt, true);
+    assert.equal(result.kind, "anthropic-overload");
+    assert.match(result.friendlyMessage, /capacity|overload/i);
+    assert.equal(
+      classifyMmrSessionFallbackError({ provider: "openai-codex", errorMessage: "upstream_capacity_signal=silent_200_stream; retryable=true" }).shouldPrompt,
+      false,
+      "the minimalcc-pi marker is only meaningful on the Claude subscription route",
+    );
+  });
+
   it("recognizes OpenAI Codex rate-limit variants", async () => {
     const { classifyMmrSessionFallbackError } = await importSource("extensions/mmr-session-fallback/classifier.ts");
 

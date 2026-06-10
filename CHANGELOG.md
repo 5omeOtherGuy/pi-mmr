@@ -41,6 +41,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Fixed
 
+- `mmr-session-fallback`: treat `minimalcc-pi` retryable HTTP-200 silent stream stalls (`upstream_capacity_signal=silent_200_stream; retryable=true`) on the `claude-subscription` route as Anthropic overload/capacity failures, so locked-mode sessions can use the existing interactive fallback flow instead of repeatedly dead-ending on the same degraded upstream route. The retry message now says `upstream capacity` for overload-class fallbacks instead of labeling every fallback as a rate limit. Covered by classifier and extension tests.
+
 - Workflow tooling: `npm run gate` no longer reports `PASS` after a failing
   step. The step exit code is now captured immediately instead of from an `if`
   compound (which is `0` when its condition fails), so a failing step is

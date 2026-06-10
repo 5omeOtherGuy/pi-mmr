@@ -104,6 +104,43 @@ describe("mmr-session-fallback extension", () => {
     assert.equal(selectCalls.length, 2);
   });
 
+  it("offers a fallback for minimalcc-pi silent 200 stream capacity stalls", async () => {
+    const extension = (await importSource("extensions/mmr-session-fallback/index.ts")).default;
+    const runtime = await loadRuntime();
+    runtime.setMmrModeState(lockedSmartState());
+
+    const { pi, calls, handlers } = createMockPi();
+    const { ctx, selectCalls } = createMockExtensionContext({
+      sessionId: "session-1",
+      models: [FAILING_MODEL, FALLBACK_MODEL, OTHER_MODEL],
+      model: FAILING_MODEL,
+    });
+    ctx.ui.select = async (title, options) => {
+      selectCalls.push({ title, options });
+      if (/fallback model/i.test(title)) return options.find((option) => option.includes("anthropic/claude-opus-4-6"));
+      if (/thinking/i.test(title)) return options.find((option) => option.startsWith("high"));
+      return undefined;
+    };
+    extension(pi);
+
+    const result = await handlers.get("message_end")({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "Anthropic Messages API stream made no progress for 45000ms [status=200; request_id=req_x; last_event=toolUseInputDelta; saw_message_stop=false; upstream_capacity_signal=silent_200_stream; retryable=true]",
+      },
+    }, ctx);
+
+    assert.equal(calls.setModel.length, 1);
+    assert.deepEqual(calls.setModel[0], FALLBACK_MODEL);
+    assert.deepEqual(calls.setThinkingLevel, ["high"]);
+    assert.equal(calls.appendEntry[0][1].reasonKind, "anthropic-overload");
+    assert.match(result.message.errorMessage, /upstream capacity|overload/i);
+    assert.equal(selectCalls.length, 2);
+  });
+
   it("leaves the provider error unchanged when the user cancels", async () => {
     const extension = (await importSource("extensions/mmr-session-fallback/index.ts")).default;
     const runtime = await loadRuntime();
