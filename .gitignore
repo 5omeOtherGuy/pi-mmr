@@ -16,3 +16,4 @@ docs/private/
 # Local-only agent guidance (never published; keep your own copy here).
 AGENTS.md
 .claude/commands/refine-prompt.md
+.claude/commands/audit-prompt.md
