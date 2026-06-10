@@ -62,6 +62,11 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Changed
 
+- Contributor tooling: the pull request template now includes a `changelog-sync`
+  marker-block scaffold under a `## Changelog` heading and points the checklist
+  at it, so the PR-body changelog path is the default rather than something to
+  remember.
+
 - Workflow tooling: the pre-test changelog gate no longer forces a manual
   `CHANGELOG.md` edit. `scripts/check-changelog.mjs` now treats a missing entry
   for monitored changes as a non-fatal notice; the canonical path is the
