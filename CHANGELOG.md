@@ -22,6 +22,14 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
   of `mmr-core` importing those flows. The `/mmr-config` menu and behavior are
   unchanged.
 
+- Internal: split the pure worker-outcome and usage helpers out of
+  `mmr-subagents/runner.ts` into two new modules, `runner-outcome.ts` (outcome
+  classification, final-output extraction/truncation, restricted-child retry
+  predicate) and `worker-usage.ts` (usage-stats shape and accumulation). The
+  runner entry file re-exports the public surface, so every existing import
+  path and the package barrel resolve unchanged; the worker engine
+  (spawn/stream/kill handling) is untouched. No behavior change.
+
 - `npm run check` now enforces no unused locals/parameters
   (`--noUnusedLocals --noUnusedParameters`); `check:unused` is kept as an alias.
   Dead-code detection is now part of the standard pre-PR/CI gate instead of an
