@@ -8,6 +8,23 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Added
 
+- mmr-workers: new `code_review` worker tool. An independent expert reviewer
+  runs in a fresh subagent context, computes the diff itself from a
+  natural-language `diff_description` (merge-base `origin/HEAD` git command
+  whitelist; never `base..head` diffs), reviews it hunk-by-hunk (bugs,
+  hackiness, unnecessary code, shared mutable state, abstraction fit in both
+  directions), and returns a prioritized findings report (severity
+  critical/high/medium/low, type, new-side line ranges, suggested fix).
+  Optional `files` focus and `instructions` emphasis params; blocking by
+  default with `background: true` support, including group fan-out and the
+  `start_task` agent surface. The backing `code-review` subagent profile is
+  standalone and read-only by contract (`read`/`grep`/`find`/`bash`, no
+  MCP/toolbox, prompt-enforced no-mutation guardrails, low persistence, an
+  oversized-diff abort at >100 files / >10,000 lines) and prefers the
+  `antigravity/gemini-3.1-pro` route for reviewer diversity, falling back to
+  `gpt-5.5` and `claude-opus-4-6`. `code_review` joins the smart, smartGPT,
+  large, and deep mode tool lists (not rush) and the `## Using workers`
+  delegation/background sets.
 - mmr-core: new `## Using workers` system-prompt block
   (`worker-tool-guidance.ts`, fragment `using-workers`, rendered after
   `## Built-in tool guidance` and only when worker tools are active). It

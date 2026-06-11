@@ -236,6 +236,6 @@ describe("mmr-core mode activation", () => {
     assert.match(activation.message, /finder: deferred until mmr-subagents ships/);
     assert.match(activation.message, /web_search: deferred until mmr-web ships/);
     assert.match(activation.message, /chart: deferred until mmr-tasks ships/);
-    assert.doesNotMatch(activation.message, /code_review/);
+    assert.match(activation.message, /code_review: deferred until mmr-subagents ships/);
   });
 });

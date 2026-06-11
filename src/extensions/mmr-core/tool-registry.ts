@@ -45,6 +45,7 @@ const DEFAULT_TOOL_CATALOG: Record<string, { owner: string }> = {
   finder: { owner: "mmr-subagents" },
   oracle: { owner: "mmr-subagents" },
   librarian: { owner: "mmr-subagents" },
+  code_review: { owner: "mmr-subagents" },
   start_task: { owner: "mmr-async-tasks" },
   task_poll: { owner: "mmr-async-tasks" },
   task_wait: { owner: "mmr-async-tasks" },

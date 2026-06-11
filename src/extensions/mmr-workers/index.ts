@@ -6,6 +6,7 @@ import { parseBoolEnv } from "../mmr-core/internal/env.js";
 import { resetMmrWorkerFallbackState } from "./fallback.js";
 import { type FinderToolDeps, maybeNumberFinderReadToolResult, registerFinderTool } from "./finder.js";
 import { type LibrarianToolDeps, isLibrarianGithubToolPrerequisiteRegistered, registerLibrarianTool } from "./librarian.js";
+import { type CodeReviewToolDeps, registerCodeReviewTool } from "./code-review.js";
 import { type MmrAdvisorToolDeps, registerOracleTool } from "./oracle.js";
 import { registerMmrSubagentsPromptBuilders } from "./prompts.js";
 import { type TaskToolDeps, registerTaskParentPromptCapture, registerTaskTool } from "./task.js";
@@ -44,6 +45,7 @@ export interface MmrWorkersFactoryOverrides {
   oracle?: MmrAdvisorToolDeps;
   task?: TaskToolDeps;
   librarian?: LibrarianToolDeps;
+  codeReview?: CodeReviewToolDeps;
   asyncTasks?: AsyncTaskToolDeps;
 }
 
@@ -72,6 +74,7 @@ export function createMmrWorkersExtension(overrides: MmrWorkersFactoryOverrides 
     registerTaskParentPromptCapture(pi);
     registerTaskTool(pi, overrides.task ?? {});
     registerLibrarianTool(pi, overrides.librarian ?? {});
+    registerCodeReviewTool(pi, overrides.codeReview ?? {});
     pi.on("tool_result", maybeNumberFinderReadToolResult);
     // Clear session-scoped worker-model fallback state at session
     // boundaries so one session\'s failure counts and stored overrides can
@@ -104,6 +107,7 @@ export function createMmrWorkersExtension(overrides: MmrWorkersFactoryOverrides 
       oracle: true,
       Task: true,
       librarian: () => isLibrarianGithubToolPrerequisiteRegistered(pi),
+      code_review: true,
       asyncTasks: true,
     };
     registerMmrFeatureGateProvider(createMmrWorkersFeatureGateProvider(capabilities));

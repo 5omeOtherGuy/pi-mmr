@@ -105,7 +105,7 @@ describe("mmr-subagents package wiring", () => {
     assert.equal(root.MMR_SUBAGENTS_FEATURE_GATE, "mmr-subagents");
     assert.deepEqual(
       [...root.MMR_SUBAGENTS_OWNED_TOOLS].sort(),
-      ["Task", "finder", "librarian", "oracle"],
+      ["Task", "code_review", "finder", "librarian", "oracle"],
     );
     assert.equal(root.MMR_ASYNC_TASKS_PROVIDER_NAME, "mmr-async-tasks");
     assert.equal(root.MMR_ASYNC_TASKS_FEATURE_GATE, "mmr-async-tasks");
@@ -142,6 +142,12 @@ describe("mmr-subagents package wiring", () => {
     assert.equal(root.selectFinderWorkerModel, undefined, "selectFinderWorkerModel must no longer be exported");
     assert.equal(root.FINDER_TOOL_NAME, "finder");
     assert.deepEqual([...root.FINDER_WORKER_TOOLS].sort(), ["find", "grep", "read"]);
+    assert.equal(typeof root.createCodeReviewTool, "function");
+    assert.equal(typeof root.registerCodeReviewTool, "function");
+    assert.equal(typeof root.buildCodeReviewWorkerSystemPrompt, "function");
+    assert.equal(root.CODE_REVIEW_TOOL_NAME, "code_review");
+    assert.equal(root.CODE_REVIEW_SUBAGENT_PROFILE, "code-review");
+    assert.deepEqual([...root.CODE_REVIEW_WORKER_TOOLS], ["read", "grep", "find", "bash"]);
     assert.equal(typeof root.createOracleTool, "function");
     assert.equal(typeof root.registerOracleTool, "function");
     assert.equal(typeof root.buildOracleWorkerSystemPrompt, "function");
@@ -202,14 +208,14 @@ describe("mmr-subagents package wiring", () => {
 });
 
 describe("mmr-subagents extension factory", () => {
-  it("registers the finder, oracle, Task, and librarian Pi tools plus the read-result normalizer", async () => {
+  it("registers the finder, oracle, Task, librarian, and code_review Pi tools plus the read-result normalizer", async () => {
     const { createMmrWorkersExtension } = await importSource("extensions/mmr-workers/index.ts");
     const { pi, tools, handlers } = makePi();
     createMmrWorkersExtension()(pi);
     const names = tools.map((tool) => tool.name).sort();
     assert.deepEqual(
       names,
-      ["Task", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
+      ["Task", "code_review", "finder", "librarian", "oracle", "start_task", "task_cancel", "task_poll", "task_wait"],
       "mmr-workers registers the blocking worker tools and the background task tools",
     );
     assert.equal(typeof handlers.get("tool_result"), "function", "finder installs a read-result normalizer");

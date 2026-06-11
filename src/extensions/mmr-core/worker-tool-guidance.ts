@@ -30,10 +30,10 @@
  */
 
 /** Worker tools that delegate work to a subagent. */
-const WORKER_DELEGATION_TOOL_NAMES = ["Task", "finder", "librarian", "oracle"] as const;
+const WORKER_DELEGATION_TOOL_NAMES = ["Task", "finder", "librarian", "oracle", "code_review"] as const;
 
 /** Worker surfaces that can run in the background (`oracle` cannot). */
-const BACKGROUND_CAPABLE_TOOL_NAMES = ["Task", "finder", "librarian", "start_task"] as const;
+const BACKGROUND_CAPABLE_TOOL_NAMES = ["Task", "finder", "librarian", "code_review", "start_task"] as const;
 
 /** Background orchestration tools. */
 const BACKGROUND_ORCHESTRATION_TOOL_NAMES = [
@@ -60,6 +60,10 @@ export const FINDER_BACKGROUND_GUIDANCE =
 /** librarian is blocking by default; background runs via `background: true`. */
 export const LIBRARIAN_BACKGROUND_GUIDANCE =
   "librarian is blocking by default: it returns the research result inline. Pass background: true to run the research as a background task while you keep working.";
+
+/** code_review is blocking by default; background runs via `background: true`. */
+export const CODE_REVIEW_BACKGROUND_GUIDANCE =
+  "code_review is blocking by default: it returns the review report inline. Pass background: true to run the review as a background task while you keep working.";
 
 /** oracle can never be backgrounded. */
 export const ORACLE_ALWAYS_BLOCKING_GUIDANCE =

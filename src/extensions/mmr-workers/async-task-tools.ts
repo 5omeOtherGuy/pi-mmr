@@ -11,6 +11,7 @@ import {
 } from "./task.js";
 import type { FinderToolDeps } from "./finder.js";
 import type { LibrarianToolDeps } from "./librarian.js";
+import type { CodeReviewToolDeps } from "./code-review.js";
 import type {
   MmrPreparedWorkerRun,
   MmrPreparedWorkerRunResult,
@@ -110,6 +111,8 @@ export interface AsyncTaskToolDeps extends TaskToolDeps {
   librarianDeps?: LibrarianToolDeps;
   /** Tool-specific seams used when start_task launches the Task agent. */
   taskDeps?: TaskToolDeps;
+  /** Tool-specific seams used when start_task launches the code_review agent. */
+  codeReviewDeps?: CodeReviewToolDeps;
   /**
    * Session-level ceiling: whether the at-most-once completion push is
    * PERMITTED at all this session. Default ON. A caller can opt an
@@ -174,6 +177,7 @@ function baseToolDeps(deps: AsyncTaskToolDeps): Record<string, unknown> {
     finderDeps: _finderDeps,
     librarianDeps: _librarianDeps,
     taskDeps: _taskDeps,
+    codeReviewDeps: _codeReviewDeps,
     ...base
   } = deps;
   return base as Record<string, unknown>;

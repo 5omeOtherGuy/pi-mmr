@@ -661,7 +661,7 @@ describe("async task tools model-visible surface", () => {
     assert.equal(start.parameters.properties.notify.type, "boolean");
     assert.equal(start.parameters.properties.group_label.type, "string");
     assert.deepEqual(start.parameters.properties.capabilityProfile.anyOf.map((entry) => entry.const), ["read-only", "read-write"]);
-    assert.deepEqual(start.parameters.properties.agent.anyOf.map((entry) => entry.const), ["Task", "finder", "librarian"]);
+    assert.deepEqual(start.parameters.properties.agent.anyOf.map((entry) => entry.const), ["Task", "finder", "code_review", "librarian"]);
     assert.equal(start.parameters.required, undefined);
     assert.deepEqual(Object.keys(poll.parameters.properties).sort(), ["group_id", "task_id"]);
     assert.deepEqual(Object.keys(wait.parameters.properties).sort(), ["group_id", "task_id", "timeout_ms"]);

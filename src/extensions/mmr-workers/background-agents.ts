@@ -47,6 +47,14 @@ import {
   TASK_TOOL_NAME,
   type TaskToolDeps,
 } from "./task.js";
+import {
+  CODE_REVIEW_PARAMETERS_SCHEMA,
+  CODE_REVIEW_SUBAGENT_PROFILE,
+  CODE_REVIEW_TOOL_NAME,
+  CODE_REVIEW_WORKER_TOOLS,
+  createCodeReviewRunPreparer,
+  type CodeReviewToolDeps,
+} from "./code-review.js";
 
 /** The agent `start_task` launches when the caller omits `agent`. */
 export const DEFAULT_MMR_BACKGROUND_AGENT = TASK_TOOL_NAME;
@@ -241,6 +249,19 @@ const BUILTIN_BACKGROUND_AGENTS: ReadonlyMap<string, MmrBackgroundAgentDescripto
           workerTools: LIBRARIAN_WORKER_TOOLS,
           depsKey: "librarianDeps",
           prepareRun: (deps, params, ctx) => createLibrarianRunPreparer(deps as LibrarianToolDeps)(params, ctx),
+        },
+      },
+      {
+        agent: CODE_REVIEW_TOOL_NAME,
+        profileName: CODE_REVIEW_SUBAGENT_PROFILE,
+        toolName: CODE_REVIEW_TOOL_NAME,
+        paramsHint: "{diff_description, files?, instructions?}",
+        promptParamKey: "diff_description",
+        start: {
+          parametersSchema: CODE_REVIEW_PARAMETERS_SCHEMA,
+          workerTools: CODE_REVIEW_WORKER_TOOLS,
+          depsKey: "codeReviewDeps",
+          prepareRun: (deps, params, ctx) => createCodeReviewRunPreparer(deps as CodeReviewToolDeps)(params, ctx),
         },
       },
     ] satisfies MmrBackgroundAgentDescriptor[]

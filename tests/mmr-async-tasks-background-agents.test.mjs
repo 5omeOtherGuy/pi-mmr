@@ -75,7 +75,7 @@ describe("background-agent derivation", () => {
   it("derives the built-in agent set from backgroundable profiles, default agent first", async () => {
     const agents = await importSource(AGENTS_MODULE);
     const names = agents.listMmrBackgroundAgents().map((d) => d.agent);
-    assert.deepEqual(names, ["Task", "finder", "librarian"]);
+    assert.deepEqual(names, ["Task", "finder", "code_review", "librarian"]);
   });
 
   it("excludes oracle and history-reader through their backgroundable:false profiles", async () => {
@@ -108,19 +108,19 @@ describe("background-agent derivation", () => {
     const parameters = schemas.buildStartTaskParameters();
     const agentSchema = parameters.properties.agent;
     const literals = agentSchema.anyOf.map((entry) => entry.const);
-    assert.deepEqual(literals, ["Task", "finder", "librarian", "sa__probe"]);
+    assert.deepEqual(literals, ["Task", "finder", "code_review", "librarian", "sa__probe"]);
     assert.match(agentSchema.description, /sa__probe \{task\}/);
     assert.match(parameters.properties.params.description, /for sa__probe use \{task\}/);
-    assert.match(schemas.buildStartTaskDescription(), /Task \(default\), finder, librarian, or sa__probe/);
+    assert.match(schemas.buildStartTaskDescription(), /Task \(default\), finder, code_review, librarian, or sa__probe/);
   });
 
   it("keeps the module-load schema snapshot byte-stable for the built-in set", async () => {
     const schemas = await importSource(SCHEMAS_MODULE);
     const literals = schemas.START_TASK_PARAMETERS.properties.agent.anyOf.map((entry) => entry.const);
-    assert.deepEqual(literals, ["Task", "finder", "librarian"]);
+    assert.deepEqual(literals, ["Task", "finder", "code_review", "librarian"]);
     assert.match(
       schemas.START_TASK_PARAMETERS.properties.agent.description,
-      /Task \{prompt,description\}, finder \{query\}, librarian \{query,context\?\}/,
+      /Task \{prompt,description\}, finder \{query\}, code_review \{diff_description,files\?,instructions\?\}, librarian \{query,context\?\}/,
     );
   });
 });
@@ -191,6 +191,6 @@ describe("start_task with a custom background agent", () => {
     const { createMmrAsyncTaskRegistry } = await importSource(REGISTRY_MODULE);
     const startTask = tools.createStartTaskTool({ registry: createMmrAsyncTaskRegistry({ idFactory: () => "t1" }), sessionKey: "S" });
     const result = await startTask.execute("call-1", { agent: "bogus", params: { task: "x" } }, undefined, undefined, { cwd: "/repo" });
-    assert.match(result.details.errorMessage ?? "", /agent must be one of: Task, finder, librarian, sa__probe\./);
+    assert.match(result.details.errorMessage ?? "", /agent must be one of: Task, finder, code_review, librarian, sa__probe\./);
   });
 });
