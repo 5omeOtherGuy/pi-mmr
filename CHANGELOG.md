@@ -218,6 +218,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-core`: smart, smartGPT, rush, and deep prompts now place user-collaboration and response-style guidance before tool guidance while preserving date/cwd at the end; large mode keeps the prior ordering.
 
+- `mmr-core` / `mmr-subagents`: the worker nonzero-exit output policy is now declared on the subagent profile (`partialOutputPolicy`, default `fail-on-nonzero`; `task-subagent` declares `prefer-usable-output`), and all result shaping classifies through one shared profile-driven classifier with a single exported `details.status` discriminator set. No behavior change; covered by deterministic classifier tests.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest
