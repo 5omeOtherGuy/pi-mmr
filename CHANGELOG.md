@@ -39,6 +39,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
   edit), restoring the changelog guarantee without any local pre-test cost
   (covered by `tests/check-changelog-policy.test.mjs`).
 
+- `mmr-workers`: `finder`, `librarian`, and `Task` accept `background`, `group`, and `notify` — a `background: true` call returns an opaque task id immediately, and parallel calls sharing a `group` key land in one worker group. Oracle remains blocking-only.
+
 ### Fixed
 
 - `mmr-session-fallback`: treat `minimalcc-pi` retryable HTTP-200 silent stream stalls (`upstream_capacity_signal=silent_200_stream; retryable=true`) on the `claude-subscription` route as Anthropic overload/capacity failures, so locked-mode sessions can use the existing interactive fallback flow instead of repeatedly dead-ending on the same degraded upstream route. The retry message now says `upstream capacity` for overload-class fallbacks instead of labeling every fallback as a rate limit. Covered by classifier and extension tests.
@@ -225,6 +227,10 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 - `mmr-subagents` / `mmr-async-tasks`: background worker activity renders through one shared section/card/row path (`background-task-view.ts`); the single, group, and fleet inline cards are the same component, and the live-vs-replay decision is made in one place. No model-visible change; the existing render tests pin the preserved card behavior.
 
 - `mmr-async-tasks` / `mmr-core`: the `start_task` agent surface is now derived from the subagent-profile registry (new profile flags `backgroundable` and `acceptsCapabilityProfile`) instead of hardcoded per-agent branches; enabled custom Markdown subagents can now run as background tasks via `start_task`. No change to the built-in surface; existing tests pin the preserved texts.
+
+- BREAKING — `mmr-workers`: the `mmr-subagents` and `mmr-async-tasks` extensions are merged into one `mmr-workers` extension behind a single feature gate (the pre-merge gate ids remain accepted aliases). The package subpaths and `pi.extensions` entrypoints of the two former extensions are replaced by `./extensions/mmr-workers`.
+
+- `mmr-workers`: `start_task` is deprecated and now a thin compatibility alias for the worker tools' `background` parameter; its description and results carry a deprecation notice. It will be removed in a future release.
 
 ### Added
 
@@ -592,6 +598,7 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-subagents` / `mmr-core`: remove the hidden `cthulu` advisor easter egg and its R'lyehian rendering entirely. Deletes the `cthulu` Pi tool, its standalone subagent profile/prompt builder, the `cthulu` entries from the `mmr-subagents` tool provider/feature capabilities and the `mmr-core` tool-ownership registry, and the `cthulu` name from the `smart`, `smartGPT`, `rush`, `large`, and `deep` locked-mode tool allowlists. The `## The Sunken Rite` roleplay gate and `## Lingering style` blocks are dropped from every locked-mode prompt, and the `MMR_CTHULU_SUMMON_GATE` / `MMR_CTHULU_RITE_ANCHORS` exports and all `CTHULU_*` / `createCthuluTool` / `registerCthuluTool` / `buildCthuluWorkerSystemPrompt` package-root exports are removed. Prompt-assembly re-entrancy is preserved by replacing the gate-as-sentinel idempotency check with an exact structural match of the previously-injected MMR tail (shared tool guidance + shared coding guidance + mode posture + response style) across all known mode templates, so re-assembling an already-rewritten prompt still strips the prior MMR tail instead of duplicating it (including the cross-mode `deep`→`smart` Task base case). Regenerated `mmr-core-prompts`, `mmr-effective-surface`, and `mmr-subagent-surface` fixtures; removed `tests/mmr-subagents-cthulu.test.mjs` and `tests/mmr-subagents-rlyehian.test.mjs`; updated `tests/mmr-subagents-extension.test.mjs`, `tests/mmr-subagents-provider.test.mjs`, `tests/mmr-subagents-progress-rendering.test.mjs`, and `tests/mmr-tool-execution-mode.test.mjs`.
 - `mmr-subagents`: remove the inert, `@deprecated` `defaultModelPreferences` member from the public `MmrAdvisorToolConfig` type and from `ORACLE_TOOL_CONFIG`. It was never read by `createMmrAdvisorTool` (model preferences resolve solely through the `oracle` subagent profile via `resolveAdvisorModelPreferences`), so its presence falsely implied it influenced routing. This is a subtractive change to a public type, but the member was optional and already documented as unused, so only a hypothetical external consumer that *set* it (a no-op) sees a type change. `ORACLE_DEFAULT_MODEL_PREFERENCES` stays exported as a profile-derived legacy convenience constant. Covered by a new `ORACLE_TOOL_CONFIG` regression assertion in `tests/mmr-subagents-oracle.test.mjs`.
+- BREAKING — `createMmrSubagentsExtension`/`createMmrAsyncTasksExtension` (and their overrides types) are replaced by `createMmrWorkersExtension`/`MmrWorkersFactoryOverrides`.
 
 ### Added
 
