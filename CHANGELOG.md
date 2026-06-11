@@ -234,6 +234,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-core`: smart/smartGPT mode posture no longer repeats the spec-refinement and correction-handling rules already stated on the mode intro line, and the rush mode posture now states that rush runs with no extended reasoning (matching its thinking policy). Deep and large mode prompts are unchanged. Mode-prompt and effective-surface fixtures updated.
 
+- **mmr-core**: smart, smartGPT, and large now share the authoritative pair-programming prompt verbatim (no posture section, 4-line response cap); deep returns to the authoritative autonomous-agent framing with a restored Engineering judgment section, outcome-first autonomy, plan right-sizing, and an outcome-first response shape. Rush is unchanged.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest

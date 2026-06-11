@@ -18,7 +18,7 @@ describe("mmr-core prompt templates - structural invariants", () => {
     assert.equal("free" in MMR_MODE_PROMPT_TEMPLATES, false, "free mode must not have a prompt template");
   });
 
-  it("every template has a non-empty tag, intro, postureSections, and closingLine", async () => {
+  it("every template has a non-empty tag, intro, and closingLine; only rush and deep carry a posture", async () => {
     const { MMR_MODE_PROMPT_TEMPLATES } = await importSource("extensions/mmr-core/prompt-templates.ts");
     for (const mode of PROMPTED_MODES) {
       const template = MMR_MODE_PROMPT_TEMPLATES[mode];
@@ -28,9 +28,16 @@ describe("mmr-core prompt templates - structural invariants", () => {
       assert.equal(typeof template.intro, "string");
       assert.ok(template.intro.length > 20, `${mode}: intro is non-trivial`);
       assert.equal(typeof template.postureSections, "string");
-      assert.ok(template.postureSections.length > 100, `${mode}: postureSections is non-trivial`);
       assert.equal(typeof template.closingLine, "string");
       assert.ok(template.closingLine.length > 10, `${mode}: closingLine is non-trivial`);
+    }
+    // The smart family mirrors the authoritative default template, whose
+    // framing lives entirely in the intro and body fragments — no posture.
+    for (const mode of ["smart", "smartGPT", "large"]) {
+      assert.equal(MMR_MODE_PROMPT_TEMPLATES[mode].postureSections, "", `${mode}: smart-family modes render no posture section`);
+    }
+    for (const mode of ["rush", "deep"]) {
+      assert.ok(MMR_MODE_PROMPT_TEMPLATES[mode].postureSections.length > 100, `${mode}: postureSections is non-trivial`);
     }
   });
 
@@ -64,18 +71,12 @@ describe("mmr-core prompt templates - structural invariants", () => {
     }
   });
 
-  it("mode-specific posture headings are present (autonomy/execution/large/deep)", async () => {
+  it("mode-specific posture headings are present (rush/deep)", async () => {
     const { MMR_MODE_PROMPT_TEMPLATES } = await importSource("extensions/mmr-core/prompt-templates.ts");
-    assert.match(MMR_MODE_PROMPT_TEMPLATES.smart.postureSections, /## Smart mode/);
-    assert.match(MMR_MODE_PROMPT_TEMPLATES.smart.postureSections, /balanced autonomy/);
-
     assert.match(MMR_MODE_PROMPT_TEMPLATES.rush.postureSections, /## Rush mode/);
     assert.match(MMR_MODE_PROMPT_TEMPLATES.rush.postureSections, /Discovery: minimum evidence/);
     assert.match(MMR_MODE_PROMPT_TEMPLATES.rush.postureSections, /Communication: outcome first/);
     assert.match(MMR_MODE_PROMPT_TEMPLATES.rush.postureSections, /no extended reasoning/);
-
-    assert.match(MMR_MODE_PROMPT_TEMPLATES.large.postureSections, /## Large mode/);
-    assert.match(MMR_MODE_PROMPT_TEMPLATES.large.postureSections, /Broader context should reduce risk/);
 
     assert.match(MMR_MODE_PROMPT_TEMPLATES.deep.postureSections, /## Deep mode/);
     assert.match(MMR_MODE_PROMPT_TEMPLATES.deep.postureSections, /## Diagnostic gate/);
@@ -86,17 +87,25 @@ describe("mmr-core prompt templates - structural invariants", () => {
     // Each intro must mention its mode or a unique role marker so a copy-paste
     // bug between entries fails loudly.
     assert.match(MMR_MODE_PROMPT_TEMPLATES.rush.intro, /fewest useful tool loops/i);
-    assert.match(MMR_MODE_PROMPT_TEMPLATES.large.intro, /Large mode/i);
     assert.match(MMR_MODE_PROMPT_TEMPLATES.deep.intro, /Deep mode/i);
-    // smart intentionally does not name itself (default mode); just verify
-    // it carries the pair-programming framing it's known for.
+    // The smart family intentionally does not name itself (default framing);
+    // verify it carries the pair-programming framing it's known for.
     assert.match(MMR_MODE_PROMPT_TEMPLATES.smart.intro, /pair programming/i);
   });
 
-  it("closingLine differs between modes (each carries mode-specific response style)", async () => {
+  it("smartGPT and large render the smart system prompt verbatim apart from the mode tag", async () => {
     const { MMR_MODE_PROMPT_TEMPLATES } = await importSource("extensions/mmr-core/prompt-templates.ts");
-    const closings = PROMPTED_MODES.map((mode) => MMR_MODE_PROMPT_TEMPLATES[mode].closingLine);
-    assert.equal(new Set(closings).size, closings.length, "each mode must define a unique closingLine");
+    for (const mode of ["smartGPT", "large"]) {
+      assert.equal(MMR_MODE_PROMPT_TEMPLATES[mode].intro, MMR_MODE_PROMPT_TEMPLATES.smart.intro, `${mode}: intro matches smart`);
+      assert.equal(MMR_MODE_PROMPT_TEMPLATES[mode].postureSections, MMR_MODE_PROMPT_TEMPLATES.smart.postureSections, `${mode}: posture matches smart`);
+      assert.equal(MMR_MODE_PROMPT_TEMPLATES[mode].closingLine, MMR_MODE_PROMPT_TEMPLATES.smart.closingLine, `${mode}: closing matches smart`);
+    }
+  });
+
+  it("closingLine differs between distinct framings (smart family shares one)", async () => {
+    const { MMR_MODE_PROMPT_TEMPLATES } = await importSource("extensions/mmr-core/prompt-templates.ts");
+    const closings = ["smart", "rush", "deep"].map((mode) => MMR_MODE_PROMPT_TEMPLATES[mode].closingLine);
+    assert.equal(new Set(closings).size, closings.length, "smart, rush, and deep must define distinct closing lines");
   });
 
   it("postureSections never re-introduces a leading or trailing blank line that the renderer would double", async () => {

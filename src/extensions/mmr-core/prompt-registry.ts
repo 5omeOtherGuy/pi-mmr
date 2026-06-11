@@ -49,6 +49,7 @@ export type MmrPromptFragmentId =
   | "autonomy"
   | "discovery-discipline"
   | "pragmatism"
+  | "engineering-judgment"
   | "verification"
   | "careful-actions"
   | "diagrams"
@@ -110,14 +111,22 @@ export const MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE = [
   "preserved-tail",
 ] as const satisfies readonly MmrPromptFragmentId[];
 
-export const MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE = [
+/**
+ * Deep reorders the body to the authoritative deep-template sequence
+ * (autonomy, pragmatism, discovery, engineering judgment, verification) and is
+ * the only mode that renders the deep-only `engineering-judgment` fragment.
+ */
+export const MMR_DEEP_PROMPT_FRAGMENT_SEQUENCE = [
   "identity",
   "autonomy",
-  "discovery-discipline",
   "pragmatism",
+  "discovery-discipline",
+  "engineering-judgment",
   "verification",
   "careful-actions",
   "mode-posture",
+  "collaboration",
+  "response-style",
   "tool-lead-in",
   "active-tools",
   "active-guidelines",
@@ -126,8 +135,6 @@ export const MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE = [
   "shared-tool-guidance",
   "diagrams",
   "file-links",
-  "collaboration",
-  "response-style",
   "preserved-tail",
 ] as const satisfies readonly MmrPromptFragmentId[];
 
@@ -220,6 +227,12 @@ export const MMR_PROMPT_FRAGMENTS = {
     source: "mmr-core",
     summary: "Shared pragmatism-and-scope guidance: smallest correct change, avoid one-use abstractions.",
   },
+  "engineering-judgment": {
+    id: "engineering-judgment",
+    blockKind: "engineering-judgment",
+    source: "mmr-core",
+    summary: "Deep-only engineering-judgment guidance: choose conservatively when implementation details are open, scale test coverage with blast radius.",
+  },
   verification: {
     id: "verification",
     blockKind: "verification",
@@ -291,8 +304,8 @@ export const MMR_MODE_PROMPT_RECIPES = {
   smart: recipe("smart"),
   smartGPT: recipe("smartGPT"),
   rush: recipe("rush", MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE),
-  large: recipe("large", MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE),
-  deep: recipe("deep"),
+  large: recipe("large"),
+  deep: recipe("deep", MMR_DEEP_PROMPT_FRAGMENT_SEQUENCE),
 } satisfies Record<PromptedMmrModeKey, MmrModePromptRecipe>;
 
 function templateFromRecipe(recipe: MmrModePromptRecipe): MmrModeBlockTemplate {

@@ -2,7 +2,12 @@ import {
   buildBuiltinToolGuidance,
   extractActiveBuiltinToolNames,
 } from "./builtin-tool-guidance.js";
-import { SHARED_CODING_GUIDANCE_FRAGMENTS, SHARED_TOOL_GUIDANCE } from "./prompt-content.js";
+import {
+  DEEP_ENGINEERING_JUDGMENT,
+  resolveModeCodingGuidanceFragment,
+  SHARED_CODING_GUIDANCE_FRAGMENTS,
+  SHARED_TOOL_GUIDANCE,
+} from "./prompt-content.js";
 import {
   getMmrModePromptRecipe,
   getMmrPromptBase,
@@ -57,9 +62,11 @@ function renderMmrOwnedTailFragment(
     case "diagrams":
     case "file-links":
     case "collaboration":
-      return SHARED_CODING_GUIDANCE_FRAGMENTS[fragmentId];
+      return resolveModeCodingGuidanceFragment(previousRecipe.mode, fragmentId);
+    case "engineering-judgment":
+      return DEEP_ENGINEERING_JUDGMENT;
     case "mode-posture":
-      return previousRecipe.postureSections;
+      return previousRecipe.postureSections === "" ? undefined : previousRecipe.postureSections;
     case "response-style":
       return `${MMR_RESPONSE_STYLE_HEADING}\n\n${previousRecipe.closingLine}`;
     case "identity":
@@ -354,16 +361,25 @@ export function assembleActiveSurface(
         return {
           id: fragmentId,
           kind: fragmentId,
-          text: `${SHARED_CODING_GUIDANCE_FRAGMENTS[fragmentId]}\n\n`,
+          text: `${resolveModeCodingGuidanceFragment(mode, fragmentId)}\n\n`,
+          source: "mmr-core",
+        };
+      case "engineering-judgment":
+        return {
+          id: "engineering-judgment",
+          kind: "engineering-judgment",
+          text: `${DEEP_ENGINEERING_JUDGMENT}\n\n`,
           source: "mmr-core",
         };
       case "mode-posture":
-        return {
-          id: `mode-posture:${mode}`,
-          kind: "mode-posture",
-          text: `${recipe.postureSections}\n\n`,
-          source: "mmr-core",
-        };
+        return recipe.postureSections === ""
+          ? null
+          : {
+              id: `mode-posture:${mode}`,
+              kind: "mode-posture",
+              text: `${recipe.postureSections}\n\n`,
+              source: "mmr-core",
+            };
       case "response-style": {
         const isBeforePreservedTail = recipe.fragments[index + 1] === "preserved-tail";
         return {

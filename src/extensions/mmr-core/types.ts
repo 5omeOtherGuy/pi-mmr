@@ -421,6 +421,7 @@ export type MmrPromptBlockKind =
   | "autonomy"
   | "discovery-discipline"
   | "pragmatism"
+  | "engineering-judgment"
   | "verification"
   | "careful-actions"
   | "diagrams"
