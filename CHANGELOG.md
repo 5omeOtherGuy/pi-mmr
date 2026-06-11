@@ -232,6 +232,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-workers`: `start_task` is deprecated and now a thin compatibility alias for the worker tools' `background` parameter; its description and results carry a deprecation notice. It will be removed in a future release.
 
+- `mmr-core`: smart/smartGPT mode posture no longer repeats the spec-refinement and correction-handling rules already stated on the mode intro line, and the rush mode posture now states that rush runs with no extended reasoning (matching its thinking policy). Deep and large mode prompts are unchanged. Mode-prompt and effective-surface fixtures updated.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest
