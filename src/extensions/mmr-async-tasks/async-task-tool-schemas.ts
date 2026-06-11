@@ -12,6 +12,11 @@ import {
   START_TASK_GROUP_FANOUT_GUIDANCE,
   START_TASK_SELECTION_GUIDANCE,
 } from "../mmr-subagents/tool-guidance.js";
+import {
+  DEFAULT_MMR_BACKGROUND_AGENT,
+  listMmrBackgroundAgents,
+  type MmrBackgroundAgentDescriptor,
+} from "../mmr-subagents/background-agents.js";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const TASK_POLL_TOOL_NAME = "task_poll";
@@ -25,13 +30,22 @@ export const ASYNC_TASK_TOOL_NAMES = [
   TASK_CANCEL_TOOL_NAME,
 ] as const;
 
-// Oracle is intentionally excluded: it is always blocking and can never run
-// as a background agent. The blocking `oracle` tool is unchanged.
+// The BUILT-IN background agent names, kept as a literal const for typing and
+// docs. The live agent set (the schema enum and the dispatch table) is
+// DERIVED from the subagent-profile registry instead: every backgroundable
+// profile with a registered background-agent descriptor, so runtime-registered
+// custom Markdown subagents join without touching this list. Oracle and
+// history-reader are excluded by their profiles' `backgroundable: false`.
 export const ASYNC_TASK_AGENT_NAMES = ["Task", "finder", "librarian"] as const;
 
 export const PULL_NOTICE_MAX_ITEMS = 12;
 export const PULL_NOTICE_LABEL_LIMIT = 120;
-export type AsyncTaskAgentName = typeof ASYNC_TASK_AGENT_NAMES[number];
+/**
+ * A background agent name: one of the built-ins, or any runtime-registered
+ * custom subagent's tool name (`string & {}` keeps the literal hints in
+ * editor completion without rejecting custom names).
+ */
+export type AsyncTaskAgentName = typeof ASYNC_TASK_AGENT_NAMES[number] | (string & {});
 
 /**
  * Run the shared TypeBox validator and return a structured outcome instead of
@@ -125,14 +139,40 @@ export interface AsyncTaskToolDetails {
  */
 export const MMR_SUBAGENTS_ASYNC_PUSH_ENV = "MMR_SUBAGENTS_ASYNC_PUSH";
 
-const START_TASK_AGENT_SCHEMA = Type.Union([
-  Type.Literal("Task"),
-  Type.Literal("finder"),
-  Type.Literal("librarian"),
-], {
-  description:
-    "Background agent to launch. Defaults to Task. Use params for agent-specific inputs: Task {prompt,description}, finder {query}, librarian {query,context?}. Oracle cannot run in the background; it is always blocking.",
-});
+/** `Task {prompt,description}, finder {query}, …` — the schema's compact per-agent input hints. */
+function agentInputHintsCompact(agents: readonly MmrBackgroundAgentDescriptor[]): string {
+  return agents
+    .map((descriptor) => `${descriptor.agent} ${descriptor.paramsHint.replace(/\s+/g, "")}`)
+    .join(", ");
+}
+
+/** `For Task use {prompt, description}; for finder use {query}; …` — the params descriptions. */
+function agentInputHintsLong(agents: readonly MmrBackgroundAgentDescriptor[]): string {
+  return `${agents
+    .map((descriptor, index) => `${index === 0 ? "For" : "for"} ${descriptor.agent} use ${descriptor.paramsHint}`)
+    .join("; ")}.`;
+}
+
+/** `Task (default), finder, or librarian` — the agent list for the tool description. */
+function agentListWithDefault(agents: readonly MmrBackgroundAgentDescriptor[]): string {
+  const names = agents.map((descriptor) =>
+    descriptor.agent === DEFAULT_MMR_BACKGROUND_AGENT ? `${descriptor.agent} (default)` : descriptor.agent,
+  );
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}`;
+}
+
+function buildStartTaskAgentSchema(agents: readonly MmrBackgroundAgentDescriptor[]) {
+  return Type.Union(
+    agents.map((descriptor) => Type.Literal(descriptor.agent)),
+    {
+      description:
+        `Background agent to launch. Defaults to ${DEFAULT_MMR_BACKGROUND_AGENT}. ` +
+        `Use params for agent-specific inputs: ${agentInputHintsCompact(agents)}. ` +
+        "Oracle cannot run in the background; it is always blocking.",
+    },
+  );
+}
 
 const TASK_CAPABILITY_PROFILE_SCHEMA = Type.Union(
   [Type.Literal("read-only"), Type.Literal("read-write")],
@@ -155,88 +195,105 @@ const GROUP_LABEL_SCHEMA = Type.String({
     "Optional human-readable label for the worker group, shown on the orchestration widget header. Honored only on the opening call (group_id:'new'); ignored when joining an existing group. Defaults to the first worker's description when omitted.",
 });
 
-const FLEET_MEMBER_SCHEMA = Type.Object(
-  {
-    agent: Type.Optional(START_TASK_AGENT_SCHEMA),
-    params: Type.Optional(
-      Type.Object(
-        {},
-        {
-          additionalProperties: true,
-          description:
-            "Parameters for this worker's agent. For Task use {prompt, description}; for finder use {query}; for librarian use {query, context?}.",
-        },
+function buildFleetSchema(agents: readonly MmrBackgroundAgentDescriptor[]) {
+  const memberSchema = Type.Object(
+    {
+      agent: Type.Optional(buildStartTaskAgentSchema(agents)),
+      params: Type.Optional(
+        Type.Object(
+          {},
+          {
+            additionalProperties: true,
+            description: `Parameters for this worker's agent. ${agentInputHintsLong(agents)}`,
+          },
+        ),
       ),
-    ),
-    prompt: Type.Optional(
-      Type.String({ description: "Shortcut prompt/query when params is omitted (Task prompt, or finder/librarian query)." }),
-    ),
-    description: Type.Optional(Type.String({ description: "Short display label for this worker." })),
-    capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
-  },
-  {
-    additionalProperties: false,
-    description:
-      "One fleet worker. Do not set a group id here — the runtime mints group ids for the fleet.",
-  },
-);
-
-const FLEET_GROUP_SCHEMA = Type.Object(
-  {
-    group_label: Type.Optional(GROUP_LABEL_SCHEMA),
-    members: Type.Array(FLEET_MEMBER_SCHEMA, {
-      minItems: 1,
-      description: "Workers that make up this group; each renders as one row in the group card.",
-    }),
-  },
-  { additionalProperties: false, description: "One worker group in the fleet." },
-);
-
-const FLEET_SCHEMA = Type.Object(
-  {
-    groups: Type.Array(FLEET_GROUP_SCHEMA, {
-      minItems: 1,
-      description: "The worker groups to declare; each renders as its own group card.",
-    }),
-  },
-  {
-    additionalProperties: false,
-    description:
-      "Declare a whole fan-out in one call: every group and member is created up front and rendered as a ready card before any worker launches, then all launch together. Omit group_id inside fleet (the runtime mints ids), and do not combine fleet with the single-task fields (agent/params/prompt/group_id).",
-  },
-);
-
-export const START_TASK_PARAMETERS = Type.Object(
-  {
-    agent: Type.Optional(START_TASK_AGENT_SCHEMA),
-    fleet: Type.Optional(FLEET_SCHEMA),
-    params: Type.Optional(
-      Type.Object(
-        {},
-        {
-          additionalProperties: true,
-          description:
-            "Parameters for the selected background agent. For Task use {prompt, description}; for finder use {query}; for librarian use {query, context?}.",
-        },
+      prompt: Type.Optional(
+        Type.String({ description: "Shortcut prompt/query when params is omitted (Task prompt, or finder/librarian query)." }),
       ),
-    ),
-    prompt: Type.Optional(Type.String({
+      description: Type.Optional(Type.String({ description: "Short display label for this worker." })),
+      capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
+    },
+    {
+      additionalProperties: false,
       description:
-        "Legacy Task prompt shortcut. Equivalent to params.prompt when agent is omitted or Task.",
-    })),
-    description: Type.Optional(Type.String({ description: "Short display label for the background task." })),
-    capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
-    group_id: Type.Optional(GROUP_ID_SCHEMA),
-    group_label: Type.Optional(GROUP_LABEL_SCHEMA),
-    notify: Type.Optional(
-      Type.Boolean({
-        description:
-          "Automatic completion delivery. ON by default: during an active agent loop, finished work is surfaced before a later model step; when idle, a completion push may wake the session. Pass false to opt out and pull the result explicitly with task_poll/task_wait.",
+        "One fleet worker. Do not set a group id here — the runtime mints group ids for the fleet.",
+    },
+  );
+
+  const groupSchema = Type.Object(
+    {
+      group_label: Type.Optional(GROUP_LABEL_SCHEMA),
+      members: Type.Array(memberSchema, {
+        minItems: 1,
+        description: "Workers that make up this group; each renders as one row in the group card.",
       }),
-    ),
-  },
-  { additionalProperties: false },
-);
+    },
+    { additionalProperties: false, description: "One worker group in the fleet." },
+  );
+
+  return Type.Object(
+    {
+      groups: Type.Array(groupSchema, {
+        minItems: 1,
+        description: "The worker groups to declare; each renders as its own group card.",
+      }),
+    },
+    {
+      additionalProperties: false,
+      description:
+        "Declare a whole fan-out in one call: every group and member is created up front and rendered as a ready card before any worker launches, then all launch together. Omit group_id inside fleet (the runtime mints ids), and do not combine fleet with the single-task fields (agent/params/prompt/group_id).",
+    },
+  );
+}
+
+/**
+ * Build the `start_task` parameters schema from the LIVE derived agent set.
+ * Called at tool registration (so the registered, model-visible schema covers
+ * every agent known at that point) and again inside execute() (so an agent
+ * registered after the async-task tools — activation order is not guaranteed —
+ * still validates).
+ */
+export function buildStartTaskParameters() {
+  const agents = listMmrBackgroundAgents();
+  return Type.Object(
+    {
+      agent: Type.Optional(buildStartTaskAgentSchema(agents)),
+      fleet: Type.Optional(buildFleetSchema(agents)),
+      params: Type.Optional(
+        Type.Object(
+          {},
+          {
+            additionalProperties: true,
+            description: `Parameters for the selected background agent. ${agentInputHintsLong(agents)}`,
+          },
+        ),
+      ),
+      prompt: Type.Optional(Type.String({
+        description:
+          "Legacy Task prompt shortcut. Equivalent to params.prompt when agent is omitted or Task.",
+      })),
+      description: Type.Optional(Type.String({ description: "Short display label for the background task." })),
+      capabilityProfile: Type.Optional(TASK_CAPABILITY_PROFILE_SCHEMA),
+      group_id: Type.Optional(GROUP_ID_SCHEMA),
+      group_label: Type.Optional(GROUP_LABEL_SCHEMA),
+      notify: Type.Optional(
+        Type.Boolean({
+          description:
+            "Automatic completion delivery. ON by default: during an active agent loop, finished work is surfaced before a later model step; when idle, a completion push may wake the session. Pass false to opt out and pull the result explicitly with task_poll/task_wait.",
+        }),
+      ),
+    },
+    { additionalProperties: false },
+  );
+}
+
+/**
+ * Module-load snapshot of the derived schema (the built-in agent set in the
+ * common case). Kept for compatibility; the tool itself registers and
+ * validates with {@link buildStartTaskParameters}.
+ */
+export const START_TASK_PARAMETERS = buildStartTaskParameters();
 
 export const TASK_POLL_PARAMETERS = Type.Object(
   {
@@ -276,11 +333,16 @@ export const TASK_CANCEL_PARAMETERS = Type.Object(
   { additionalProperties: false },
 );
 
-export const START_TASK_DESCRIPTION = [
+/**
+ * Build the `start_task` description from the LIVE derived agent set, so a
+ * registered custom subagent is listed as a background worker choice.
+ */
+export function buildStartTaskDescription(): string {
+  return [
   "Start a bounded subagent worker in the background and return an opaque task_id immediately, so you can keep working while it runs.",
   "",
   "Use start_task only for independent work that can proceed while you do other things (long analysis, broad search, a self-contained implementation unit).",
-  "Set agent to choose the background worker: Task (default), finder, or librarian. Use params for the selected tool's normal input shape. Oracle cannot run in the background; it is always blocking.",
+  `Set agent to choose the background worker: ${agentListWithDefault(listMmrBackgroundAgents())}. Use params for the selected tool's normal input shape. Oracle cannot run in the background; it is always blocking.`,
   START_TASK_SELECTION_GUIDANCE,
   "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session.",
   "Use task_poll/task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
@@ -291,7 +353,15 @@ export const START_TASK_DESCRIPTION = [
   "By default a background task notifies you once it finishes; pass notify:false to opt out and make task_poll/task_wait the only retrieval path.",
   "",
   "Background tasks are in-memory and session-scoped: they are lost if the Pi process exits, and they cannot spawn further background tasks.",
-].join("\n");
+  ].join("\n");
+}
+
+/**
+ * Module-load snapshot of the derived description (the built-in agent set in
+ * the common case). Kept for compatibility; the tool itself registers with
+ * {@link buildStartTaskDescription}.
+ */
+export const START_TASK_DESCRIPTION = buildStartTaskDescription();
 
 export const ASYNC_TASK_GUIDELINES: readonly string[] = [
   START_TASK_SELECTION_GUIDANCE,

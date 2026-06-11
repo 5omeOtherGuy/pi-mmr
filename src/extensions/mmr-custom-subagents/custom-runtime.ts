@@ -37,6 +37,7 @@ import {
 } from "./custom-config.js";
 import fs, { constants as fsConstants } from "node:fs";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "../mmr-subagents/progress-rendering.js";
+import { registerMmrBackgroundAgent } from "../mmr-subagents/background-agents.js";
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcomeForProfile,
@@ -601,6 +602,22 @@ export function registerMmrCustomSubagentDefinition(
   const tool = createMmrCustomSubagentTool(pi, definition, deps);
   registerMmrOwnedTool(definition.toolName);
   pi.registerTool(tool);
+  // Custom subagents are backgroundable (the profile defaults the flag to
+  // true): registering a background-agent descriptor is what lets start_task
+  // offer and dispatch this worker with no per-agent branch anywhere.
+  registerMmrBackgroundAgent({
+    agent: definition.toolName,
+    profileName: definition.toolName,
+    toolName: definition.toolName,
+    paramsHint: "{task}",
+    promptParamKey: "task",
+    start: {
+      kind: "tool",
+      parametersSchema: CUSTOM_SUBAGENT_PARAMETERS_SCHEMA,
+      workerTools: effectiveCustomSubagentToolPatterns(definition),
+      createTool: () => tool,
+    },
+  });
   return tool;
 }
 

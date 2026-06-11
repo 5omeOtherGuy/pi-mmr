@@ -21,6 +21,13 @@ import {
   type AsyncTaskAgentName,
   type AsyncTaskToolDetails,
 } from "./async-task-tool-schemas.js";
+import {
+  getMmrBackgroundAgent,
+  listMmrBackgroundAgents,
+  normalizeMmrBackgroundAgentName,
+  type MmrBackgroundAgentDescriptor,
+} from "../mmr-subagents/background-agents.js";
+import { getMmrSubagentProfile } from "../mmr-core/subagent-profiles.js";
 
 export function escapeXmlAttr(value: string): string {
   return value
@@ -138,26 +145,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function normalizeAgent(raw: unknown): AsyncTaskAgentName | undefined {
-  if (raw === undefined) return "Task";
-  if (typeof raw !== "string") return undefined;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "task" || normalized === "task-subagent") return "Task";
-  if (normalized === "finder") return "finder";
-  if (normalized === "librarian") return "librarian";
-  return undefined;
-}
-
 function firstParamString(params: unknown, key: string): string | undefined {
   if (!isRecord(params)) return undefined;
   const value = params[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function summarizeInput(agent: AsyncTaskAgentName, params: unknown): string {
-  const value = agent === "Task"
-    ? firstParamString(params, "prompt")
-    : firstParamString(params, "query");
+function summarizeInput(descriptor: MmrBackgroundAgentDescriptor, params: unknown): string {
+  const value = firstParamString(params, descriptor.promptParamKey);
   if (value) return value;
   try {
     return JSON.stringify(params);
@@ -166,11 +161,11 @@ function summarizeInput(agent: AsyncTaskAgentName, params: unknown): string {
   }
 }
 
-function shortDescription(agent: AsyncTaskAgentName, params: unknown, explicit: unknown): string {
+function shortDescription(descriptor: MmrBackgroundAgentDescriptor, params: unknown, explicit: unknown): string {
   if (typeof explicit === "string" && explicit.trim().length > 0) return explicit.trim();
-  const summary = summarizeInput(agent, params).replace(/\s+/g, " ").trim();
+  const summary = summarizeInput(descriptor, params).replace(/\s+/g, " ").trim();
   const clipped = summary.length > 80 ? `${summary.slice(0, 77)}…` : summary;
-  return `${agent}: ${clipped || "background run"}`;
+  return `${descriptor.agent}: ${clipped || "background run"}`;
 }
 
 export function inferToolRunStatus(result: AgentToolResult<unknown>, signal: AbortSignal): MmrAsyncTaskStatus {
@@ -372,20 +367,25 @@ export interface ParsedFleetPlan {
  * {@link parseFleet} (each fleet member) so both paths normalize identically.
  */
 function normalizeMember(raw: Record<string, unknown>): ParsedMember | { error: string } {
-  const agent = normalizeAgent(raw.agent);
-  if (!agent) {
-    return { error: "agent must be one of: Task, finder, librarian. Oracle is always blocking and cannot run in the background." };
+  const agent = normalizeMmrBackgroundAgentName(raw.agent);
+  const descriptor = agent !== undefined ? getMmrBackgroundAgent(agent) : undefined;
+  if (!agent || !descriptor) {
+    const names = listMmrBackgroundAgents().map((entry) => entry.agent).join(", ");
+    return { error: `agent must be one of: ${names}. Oracle is always blocking and cannot run in the background.` };
   }
   let params: unknown = raw.params;
   if (params === undefined) {
-    if (agent === "Task") {
+    if (descriptor.start.kind === "task") {
+      // The Task agent folds the top-level prompt/description shortcuts even
+      // when prompt is absent; its own pre-spawn validation reports the
+      // missing prompt with the Task tool's message.
       params = { prompt: raw.prompt, description: raw.description };
     } else if (typeof raw.prompt === "string") {
-      params = { query: raw.prompt };
+      params = { [descriptor.promptParamKey]: raw.prompt };
     } else {
       return { error: `params is required when agent is ${agent}.` };
     }
-  } else if (agent === "Task" && isRecord(params) && params.description === undefined && raw.description !== undefined) {
+  } else if (descriptor.start.kind === "task" && isRecord(params) && params.description === undefined && raw.description !== undefined) {
     params = { ...params, description: raw.description };
   }
   if (!isRecord(params)) {
@@ -393,14 +393,18 @@ function normalizeMember(raw: Record<string, unknown>): ParsedMember | { error: 
   }
   const capabilityProfile = typeof raw.capabilityProfile === "string" ? raw.capabilityProfile : undefined;
   if (capabilityProfile !== undefined) {
-    if (agent !== "Task") return { error: "capabilityProfile is only supported for the Task agent." };
+    // Profile-declared rule (acceptsCapabilityProfile), not an agent-name
+    // check; Task is the only profile that declares it today.
+    if (getMmrSubagentProfile(descriptor.profileName)?.acceptsCapabilityProfile !== true) {
+      return { error: "capabilityProfile is only supported for the Task agent." };
+    }
     params = { ...params, capabilityProfile };
   }
   return {
     agent,
     params,
-    description: shortDescription(agent, params, raw.description),
-    promptSummary: summarizeInput(agent, params),
+    description: shortDescription(descriptor, params, raw.description),
+    promptSummary: summarizeInput(descriptor, params),
     ...(capabilityProfile !== undefined ? { capabilityProfile } : {}),
   };
 }

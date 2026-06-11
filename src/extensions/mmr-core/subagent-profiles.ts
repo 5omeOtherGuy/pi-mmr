@@ -132,6 +132,23 @@ export interface MmrSubagentProfile {
    */
   readonly partialOutputPolicy?: MmrSubagentPartialOutputPolicy;
   /**
+   * Whether this worker may run as a background task (`start_task`).
+   * Defaults to `true` when omitted, so registered profiles — including
+   * runtime-registered custom Markdown subagents — are backgroundable
+   * unless they opt out. `oracle` (always blocking by contract) and
+   * `history-reader` (an internal extraction worker, not a public
+   * background agent) declare `false`.
+   */
+  readonly backgroundable?: boolean;
+  /**
+   * Whether the worker's parameters accept the narrowing
+   * `capabilityProfile` field (`read-only` / `read-write`). Defaults to
+   * `false`; only `task-subagent` declares `true`. The background
+   * surface derives its Task-only capabilityProfile rule from this flag
+   * instead of hardcoding the agent name.
+   */
+  readonly acceptsCapabilityProfile?: boolean;
+  /**
    * Prompt-assembly route. `standalone` uses the registered prompt
    * builder for `promptBuilder`; `mode-derived` builds on
    * `assembleActiveSurface(baseMode)` and then appends a worker role
@@ -247,6 +264,9 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
     thinkingLevel: "minimal",
     tools: [],
     maxTurns: 1,
+    // Internal extraction worker driven by the mmr-history read tools; it is
+    // not a public background agent.
+    backgroundable: false,
     promptRoute: "standalone",
     promptBuilder: "history-reader",
     allowMcp: false,
@@ -283,6 +303,9 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
       "read_session",
       "find_session",
     ],
+    // Oracle is always blocking: the advisory result is consumed inline and
+    // the worker can never run as a background task.
+    backgroundable: false,
     promptRoute: "standalone",
     promptBuilder: "oracle",
     allowMcp: false,
@@ -392,6 +415,9 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
     // still counts as success; every other profile keeps the
     // fail-on-nonzero default.
     partialOutputPolicy: "prefer-usable-output",
+    // Task is the only worker whose parameters accept the narrowing
+    // capabilityProfile field.
+    acceptsCapabilityProfile: true,
     promptRoute: "mode-derived",
     baseMode: "from-parent",
     promptBuilder: "task-subagent",

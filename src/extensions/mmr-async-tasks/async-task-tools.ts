@@ -8,26 +8,17 @@ import { registerMmrOwnedTool } from "../mmr-core/owned-tools.js";
 import { getMmrSubagentProfile } from "../mmr-core/subagent-profiles.js";
 import { getMmrSessionIdentitySnapshot } from "../mmr-core/runtime.js";
 import {
-  TASK_SUBAGENT_PROFILE,
   buildSpawnErrorWorkerResult,
   buildTaskFinalResult,
   prepareTaskRun,
   type TaskToolDeps,
 } from "../mmr-subagents/task.js";
+import type { FinderToolDeps } from "../mmr-subagents/finder.js";
+import type { LibrarianToolDeps } from "../mmr-subagents/librarian.js";
 import {
-  createFinderTool,
-  FINDER_PARAMETERS_SCHEMA,
-  FINDER_TOOL_NAME,
-  FINDER_WORKER_TOOLS,
-  type FinderToolDeps,
-} from "../mmr-subagents/finder.js";
-import {
-  createLibrarianTool,
-  LIBRARIAN_PARAMETERS_SCHEMA,
-  LIBRARIAN_TOOL_NAME,
-  LIBRARIAN_WORKER_TOOLS,
-  type LibrarianToolDeps,
-} from "../mmr-subagents/librarian.js";
+  getMmrBackgroundAgent,
+  type MmrBackgroundAgentDescriptor,
+} from "../mmr-subagents/background-agents.js";
 import {
   ASYNC_TASK_COMPLETION_CUSTOM_TYPE,
   type AsyncTaskCompletionDetails,
@@ -51,8 +42,8 @@ import {
   ASYNC_TASK_TOOL_NAMES,
   MMR_SUBAGENTS_ASYNC_PUSH_ENV,
   PULL_NOTICE_MAX_ITEMS,
-  START_TASK_DESCRIPTION,
-  START_TASK_PARAMETERS,
+  buildStartTaskDescription,
+  buildStartTaskParameters,
   START_TASK_TOOL_NAME,
   TASK_CANCEL_PARAMETERS,
   TASK_CANCEL_TOOL_NAME,
@@ -260,26 +251,28 @@ function buildGroupCompletionNotifier(
   };
 }
 
-function createSelectedTool(agent: Exclude<AsyncTaskAgentName, "Task">, deps: AsyncTaskToolDeps): ToolDefinition {
-  const base = baseToolDeps(deps);
-  if (agent === "finder") return createFinderTool({ ...base, ...(deps.finderDeps ?? {}) } as FinderToolDeps);
-  return createLibrarianTool({ ...base, ...(deps.librarianDeps ?? {}) } as LibrarianToolDeps);
-}
-
-function workerToolsForAgent(agent: AsyncTaskAgentName, taskTools: readonly string[] = []): readonly string[] {
-  if (agent === "Task") return taskTools;
-  if (agent === "finder") return FINDER_WORKER_TOOLS;
-  return LIBRARIAN_WORKER_TOOLS;
+/**
+ * Tool-specific seams for one background agent, selected by the descriptor's
+ * declared deps key (`finderDeps`/`librarianDeps`/`taskDeps`) instead of an
+ * agent-name branch.
+ */
+function descriptorDeps(deps: AsyncTaskToolDeps, depsKey: string | undefined): Record<string, unknown> {
+  if (!depsKey) return {};
+  const value = (deps as unknown as Record<string, unknown>)[depsKey];
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 /**
- * Spreadable `partialOutputPolicy` start-arg for background Task runs,
- * read from the `task-subagent` profile so the registry classifies raw
- * Task worker results under the same profile-declared nonzero-exit
- * policy as the blocking `Task` tool.
+ * Spreadable `partialOutputPolicy` start-arg for a background run, read from
+ * the agent's backing profile so the registry classifies raw worker results
+ * under the same profile-declared nonzero-exit policy as the blocking tool.
+ * Profiles without a declared policy (everything but task-subagent) spread
+ * nothing.
  */
-function taskPartialOutputPolicyArg(): Pick<StartAsyncTaskArgs, "partialOutputPolicy"> {
-  const policy = getMmrSubagentProfile(TASK_SUBAGENT_PROFILE)?.partialOutputPolicy;
+function agentPartialOutputPolicyArg(
+  descriptor: MmrBackgroundAgentDescriptor,
+): Pick<StartAsyncTaskArgs, "partialOutputPolicy"> {
+  const policy = getMmrSubagentProfile(descriptor.profileName)?.partialOutputPolicy;
   return policy !== undefined ? { partialOutputPolicy: policy } : {};
 }
 
@@ -314,20 +307,26 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
     ctx: ExtensionContext,
   ): FleetMemberBuild | { error: string } => {
     const m = member;
-    if (m.agent === "Task") {
-      const taskPrep = prepareTaskRun(m.params, ctx, { ...baseToolDeps(deps), ...(deps.taskDeps ?? {}) } as TaskToolDeps);
+    const descriptor = getMmrBackgroundAgent(m.agent);
+    if (!descriptor) return { error: `unknown background agent "${m.agent}".` };
+    if (descriptor.start.kind === "task") {
+      const taskPrep = prepareTaskRun(
+        m.params,
+        ctx,
+        { ...baseToolDeps(deps), ...descriptorDeps(deps, descriptor.start.depsKey) } as TaskToolDeps,
+      );
       if (!taskPrep.ok) return { error: taskPrep.result.details?.errorMessage ?? "invalid Task parameters" };
       const { params, cwd, detailsContext, runnerOptionsBase, runner } = taskPrep.prepared;
       return {
         startArgs: {
-          agent: "Task",
+          agent: descriptor.agent,
           description: params.description,
           prompt: params.prompt,
           cwd,
           workerTools: detailsContext.workerTools,
-          // Raw worker results from the Task runner classify under the
-          // task-subagent profile's nonzero-exit policy.
-          ...taskPartialOutputPolicyArg(),
+          // Raw worker results from the runner classify under the backing
+          // profile's nonzero-exit policy.
+          ...agentPartialOutputPolicyArg(descriptor),
           ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
           ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
           ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
@@ -341,29 +340,28 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
         },
         row: {
           taskId: "",
-          agent: "Task",
+          agent: descriptor.agent,
           description: params.description,
           ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
           ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
         },
       };
     }
-    const agent = m.agent;
-    const schema = agent === "finder" ? FINDER_PARAMETERS_SCHEMA : LIBRARIAN_PARAMETERS_SCHEMA;
-    const toolName = agent === "finder" ? FINDER_TOOL_NAME : LIBRARIAN_TOOL_NAME;
-    const v = validateAsyncToolParams(toolName, schema, m.params);
+    const start = descriptor.start;
+    const v = validateAsyncToolParams(descriptor.toolName, start.parametersSchema, m.params);
     if (!v.ok) return { error: v.message };
-    const tool = createSelectedTool(agent, deps);
+    const tool = start.createTool({ ...baseToolDeps(deps), ...descriptorDeps(deps, start.depsKey) });
     const cwd = resolveWorkerCwd(ctx);
     return {
       startArgs: {
-        agent,
+        agent: descriptor.agent,
         description: m.description,
         prompt: m.promptSummary,
         cwd,
-        workerTools: workerToolsForAgent(agent),
+        workerTools: start.workerTools,
+        ...agentPartialOutputPolicyArg(descriptor),
         run: async ({ signal, onProgress }) => {
-          const result = await tool.execute(`${memberToolCallId}:${agent}`, m.params, signal, (update) => onProgress(update), ctx);
+          const result = await tool.execute(`${memberToolCallId}:${descriptor.agent}`, m.params, signal, (update) => onProgress(update), ctx);
           const status = inferToolRunStatus(result, signal);
           return {
             toolResult: result,
@@ -373,7 +371,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
           };
         },
       },
-      row: { taskId: "", agent, description: m.description },
+      row: { taskId: "", agent: descriptor.agent, description: m.description },
     };
   };
 
@@ -390,7 +388,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
   ): Promise<AgentToolResult<AsyncTaskToolDetails>> => {
     const sessionKey = resolveSessionKey(ctx, deps);
     const onSettle = () => refreshAsyncTaskWidget(ctx, registry, sessionKey);
-    const validated = validateAsyncToolParams(START_TASK_TOOL_NAME, START_TASK_PARAMETERS, rawParams);
+    const validated = validateAsyncToolParams(START_TASK_TOOL_NAME, buildStartTaskParameters(), rawParams);
     if (!validated.ok) return validationResult(validated.message);
     const plan = parseFleet(rawParams);
     if ("error" in plan) return validationResult(plan.error);
@@ -499,10 +497,13 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
   return {
     name: START_TASK_TOOL_NAME,
     label: START_TASK_TOOL_NAME,
-    description: START_TASK_DESCRIPTION,
+    // Description and schema are derived from the live background-agent set
+    // at registration; execute() re-derives the schema so an agent registered
+    // after this tool (activation order is not guaranteed) still validates.
+    description: buildStartTaskDescription(),
     promptSnippet: "Start a bounded subagent worker in the background and return an opaque task_id",
     promptGuidelines: [...ASYNC_TASK_GUIDELINES],
-    parameters: START_TASK_PARAMETERS,
+    parameters: buildStartTaskParameters(),
     renderShell: "self" as const,
     renderCall(args, theme, context) {
       return renderMmrBackgroundTaskCall(START_TASK_TOOL_NAME, args, theme, context);
@@ -523,16 +524,22 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       // enum, group_id pattern).
       const parsed = parseStartParams(rawParams);
       if ("error" in parsed) return validationResult(parsed.error);
-      const validated = validateAsyncToolParams(START_TASK_TOOL_NAME, START_TASK_PARAMETERS, rawParams);
+      const validated = validateAsyncToolParams(START_TASK_TOOL_NAME, buildStartTaskParameters(), rawParams);
       if (!validated.ok) return validationResult(validated.message);
+      const descriptor = getMmrBackgroundAgent(parsed.agent);
+      if (!descriptor) return validationResult(`unknown background agent "${parsed.agent}".`);
       const sessionKey = resolveSessionKey(ctx, deps);
       const onSettle = () => refreshAsyncTaskWidget(ctx, registry, sessionKey);
       // Validate the Task payload BEFORE any registry side effect (group open)
       // so an invalid Task start cannot mint an orphan group. Reuses the
       // blocking Task validation/model-resolution path; a pre-spawn failure
       // returns the same shaped result and creates no record and no group.
-      const taskPrep = parsed.agent === "Task"
-        ? prepareTaskRun(parsed.params, ctx, { ...baseToolDeps(deps), ...(deps.taskDeps ?? {}) } as TaskToolDeps)
+      const taskPrep = descriptor.start.kind === "task"
+        ? prepareTaskRun(
+            parsed.params,
+            ctx,
+            { ...baseToolDeps(deps), ...descriptorDeps(deps, descriptor.start.depsKey) } as TaskToolDeps,
+          )
         : undefined;
       if (taskPrep && !taskPrep.ok) {
         return {
@@ -545,16 +552,12 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
           },
         };
       }
-      // Pre-validate selected-agent (finder/librarian) params before any
-      // registry side effect too, so an invalid background finder/librarian
-      // start fails closed without creating a task or minting a group — the same
-      // pre-spawn contract as Task. The run thunk still validates at execution
-      // time as defense.
-      if (parsed.agent === "finder") {
-        const v = validateAsyncToolParams(FINDER_TOOL_NAME, FINDER_PARAMETERS_SCHEMA, parsed.params);
-        if (!v.ok) return validationResult(v.message);
-      } else if (parsed.agent === "librarian") {
-        const v = validateAsyncToolParams(LIBRARIAN_TOOL_NAME, LIBRARIAN_PARAMETERS_SCHEMA, parsed.params);
+      // Pre-validate generic-agent params before any registry side effect too,
+      // so an invalid background start fails closed without creating a task or
+      // minting a group — the same pre-spawn contract as Task. The run thunk
+      // still validates at execution time as defense.
+      if (descriptor.start.kind === "tool") {
+        const v = validateAsyncToolParams(descriptor.toolName, descriptor.start.parametersSchema, parsed.params);
         if (!v.ok) return validationResult(v.message);
       }
       // Two-layer gate: the session ceiling must permit push AND the caller
@@ -593,9 +596,9 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
       const groupId = groupSnapshot?.groupId;
       const taskNotify = groupId === undefined ? notify : undefined;
 
-      const started = parsed.agent === "Task"
+      const started = descriptor.start.kind === "task"
         ? (() => {
-            // Invariant: taskPrep is the ok variant here — agent === "Task"
+            // Invariant: taskPrep is the ok variant here — the task strategy
             // implies it was computed and any failure already returned above.
             if (!taskPrep || !taskPrep.ok) throw new Error("unreachable: Task prep validated before group open");
             const { params, cwd, detailsContext, runnerOptionsBase, runner } = taskPrep.prepared;
@@ -603,13 +606,13 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
               started: registry.startTask({
                 sessionKey,
                 originToolCallId: toolCallId,
-                agent: "Task",
+                agent: descriptor.agent,
                 description: params.description,
                 prompt: params.prompt,
                 cwd,
-                // Raw worker results from the Task runner classify under the
-                // task-subagent profile's nonzero-exit policy.
-                ...taskPartialOutputPolicyArg(),
+                // Raw worker results from the runner classify under the backing
+                // profile's nonzero-exit policy.
+                ...agentPartialOutputPolicyArg(descriptor),
                 ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
                 ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
                 workerTools: detailsContext.workerTools,
@@ -633,22 +636,25 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
             } as const;
           })()
         : (() => {
-            const agent = parsed.agent;
-            const tool = createSelectedTool(agent, deps);
+            const start = descriptor.start;
+            // Invariant: the task strategy was handled above.
+            if (start.kind !== "tool") throw new Error("unreachable: tool strategy checked before group open");
+            const tool = start.createTool({ ...baseToolDeps(deps), ...descriptorDeps(deps, start.depsKey) });
             const cwd = resolveWorkerCwd(ctx);
             return {
               started: registry.startTask({
                 sessionKey,
                 originToolCallId: toolCallId,
-                agent,
+                agent: descriptor.agent,
                 description: parsed.description,
                 prompt: parsed.promptSummary,
                 cwd,
-                workerTools: workerToolsForAgent(agent),
+                workerTools: start.workerTools,
+                ...agentPartialOutputPolicyArg(descriptor),
                 ...(groupId !== undefined ? { groupId } : {}),
                 run: async ({ signal, onProgress }) => {
                   const result = await tool.execute(
-                    `${toolCallId}:${agent}`,
+                    `${toolCallId}:${descriptor.agent}`,
                     parsed.params,
                     signal,
                     (update) => onProgress(update),
