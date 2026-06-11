@@ -45,7 +45,6 @@ import {
   resolveMmrWorkerModelContextWindowFromCtx,
 } from "./worker-model-metadata.js";
 import {
-  DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcomeForProfile,
   type MmrSpawnedSubagentWorkerDetailsBase,
   type MmrWorkerOutcomeStatus,
@@ -432,7 +431,7 @@ export interface FinderToolDeps {
   loadSubagentModelPreferences?: (cwd: string) =>
     | Pick<LoadedMmrCoreSettings["settings"], "subagentModelPreferences">
     | undefined;
-  /** Override the worker output byte cap. Defaults to {@link DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT}. */
+  /** Override the worker output byte cap. */
   outputByteLimit?: number;
   /** Override prompt text while still flowing through the subagent surface API. Tests inject deterministic text. */
   buildSystemPrompt?: (cwd: string) => string;
