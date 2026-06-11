@@ -27,22 +27,18 @@ import {
   type MmrGithubToolInfoLike,
 } from "../mmr-github/tool-ownership.js";
 import { buildLibrarianWorkerSystemPrompt as buildLibrarianWorkerSystemPromptFromPrompts } from "./prompts.js";
-import { readMmrWorkerSessionId } from "./fallback.js";
+import { resolveEffectiveRunner } from "./worker-fallback-run.js";
 import {
-  resolveEffectiveRunner,
-  runMmrWorkerWithSharedFallback,
-} from "./worker-fallback-run.js";
-import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
+  createWorkerTool,
+  type MmrWorkerToolRunContext,
+} from "./worker-tool-factory.js";
 import { LIBRARIAN_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
-import { computeMmrChildExtensionScope } from "./child-extension-scope.js";
-import { buildWorkerToolManifest, resolveWorkerCwd, type ToolHostLike } from "./worker-host.js";
+import { buildWorkerToolManifest, type ToolHostLike } from "./worker-host.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
-  DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcomeForProfile,
   emptyMmrWorkerUsageStats,
   type MmrSpawnedSubagentWorkerDetailsBase,
-  type MmrSubagentRunOptions,
   type MmrSubagentRunner,
   type MmrWorkerOutcomeStatus,
   type MmrWorkerProgressSnapshot,
@@ -53,7 +49,6 @@ import {
 import {
   buildSpawnedFinalDetailsBase,
   buildSpawnedProgressDetailsBase,
-  progressTextOrPlaceholder,
 } from "./worker-result-shaping.js";
 
 export const LIBRARIAN_TOOL_NAME = "librarian";
@@ -261,10 +256,6 @@ function toolInfosFromAllTools(pi: ToolHostLike | undefined): readonly MmrGithub
   }
 }
 
-function toolNamesFromAllTools(pi: ToolHostLike | undefined): readonly string[] | undefined {
-  return toolInfosFromAllTools(pi)?.map((tool) => tool.name);
-}
-
 /**
  * The librarian's GitHub provider tools are registered globally by
  * `mmr-github` but are intentionally not part of any user-facing mode's
@@ -450,10 +441,6 @@ function makeFailureResult(args: {
   return { content: [{ type: "text", text: args.content }], details };
 }
 
-function progressContent(snapshot: MmrWorkerProgressSnapshot): string {
-  return progressTextOrPlaceholder(snapshot, LIBRARIAN_PROGRESS_PLACEHOLDER);
-}
-
 function buildProgressDetails(
   snapshot: MmrWorkerProgressSnapshot,
   ctx: Omit<LibrarianDetailsContext, "status">,
@@ -544,48 +531,40 @@ function isContextWindowError(err: unknown): boolean {
 
 export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinition {
   const effectiveRunner = resolveEffectiveRunner(deps, "createLibrarianTool");
-  const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
   const resolveInvocation = deps.resolveInvocation ?? defaultResolveLibrarianInvocation;
-  return {
-    name: LIBRARIAN_TOOL_NAME,
-    label: LIBRARIAN_TOOL_NAME,
-    description: LIBRARIAN_DESCRIPTION,
-    promptSnippet: LIBRARIAN_PROMPT_SNIPPET,
-    promptGuidelines: [...LIBRARIAN_PROMPT_GUIDELINES],
-    parameters: librarianParameters,
-    renderShell: "self" as const,
-    renderCall(args, theme, context) {
-      return renderMmrSubagentCall(LIBRARIAN_TOOL_NAME, args, theme, context);
-    },
-    renderResult(result, options, theme, context) {
-      return renderMmrSubagentResult(LIBRARIAN_TOOL_NAME, result, options, theme, context);
-    },
-    async execute(
-      _toolCallId,
-      rawParams,
-      signal,
-      onUpdate,
-      ctx,
-    ): Promise<AgentToolResult<LibrarianDetails>> {
-      const cwd = resolveWorkerCwd(ctx);
-      let params: LibrarianParams;
-      try {
-        params = coerceLibrarianParams(rawParams);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return makeFailureResult({
+  const detailsCtxOf = (
+    runCtx: MmrWorkerToolRunContext<LibrarianParams>,
+  ): Omit<LibrarianDetailsContext, "status"> => ({
+    query: runCtx.params.query,
+    ...(runCtx.params.context !== undefined ? { context: runCtx.params.context } : {}),
+    cwd: runCtx.cwd,
+    workerTools: runCtx.workerTools,
+    ...(runCtx.resolvedModel !== undefined ? { resolvedModel: runCtx.resolvedModel } : {}),
+    ...(runCtx.contextWindow !== undefined ? { contextWindow: runCtx.contextWindow } : {}),
+  });
+  return createWorkerTool<LibrarianParams, LibrarianDetails>(
+    {
+      toolName: LIBRARIAN_TOOL_NAME,
+      profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
+      description: LIBRARIAN_DESCRIPTION,
+      promptSnippet: LIBRARIAN_PROMPT_SNIPPET,
+      promptGuidelines: LIBRARIAN_PROMPT_GUIDELINES,
+      parameters: librarianParameters,
+      progressPlaceholder: LIBRARIAN_PROGRESS_PLACEHOLDER,
+      coerceParams: coerceLibrarianParams,
+      paramsFailure: (message, raw, cwd) =>
+        makeFailureResult({
           status: "validation-error",
-          query: typeof (rawParams as { query?: unknown })?.query === "string"
-            ? (rawParams as { query: string }).query.trim()
+          query: typeof (raw as { query?: unknown })?.query === "string"
+            ? (raw as { query: string }).query.trim()
             : "",
           cwd,
           workerTools: LIBRARIAN_WORKER_TOOLS,
           content: `librarian: invalid parameters: ${message}`,
           errorMessage: message,
-        });
-      }
-
-      if (!isLibrarianGithubToolPrerequisiteRegistered(deps.pi)) {
+        }),
+      preSpawnGate: (params, cwd) => {
+        if (isLibrarianGithubToolPrerequisiteRegistered(deps.pi)) return undefined;
         return makeFailureResult({
           status: "provider-gated",
           query: params.query,
@@ -595,15 +574,17 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
           content: LIBRARIAN_GATING_REASON,
           errorMessage: LIBRARIAN_GATING_REASON,
         });
-      }
-
-      const registeredTools = toolNamesFromAllTools(deps.pi);
-      const settingsOverride = resolveLibrarianModelPreferencesOverride(cwd, deps);
-      const invocationInput: ResolveLibrarianInvocationInput = { ctx };
-      if (registeredTools !== undefined) invocationInput.registeredTools = registeredTools;
-      if (settingsOverride !== undefined) invocationInput.modelPreferencesOverride = settingsOverride;
-      const invocation = resolveInvocation(invocationInput);
-      if (!invocation.ok) {
+      },
+      resolveInvocation: (input) => {
+        const invocationInput: ResolveLibrarianInvocationInput = { ctx: input.ctx };
+        if (input.registeredTools !== undefined) invocationInput.registeredTools = input.registeredTools;
+        if (input.modelPreferencesOverride !== undefined) {
+          invocationInput.modelPreferencesOverride = input.modelPreferencesOverride;
+        }
+        return resolveInvocation(invocationInput);
+      },
+      resolutionFailure: "fail-closed",
+      resolutionFailureResult: (invocation, params, cwd) => {
         const prefix = invocation.code === "model.no-route"
           ? "librarian: could not resolve a model route"
           : "librarian: could not prepare the web research worker";
@@ -617,125 +598,61 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
           errorMessage: invocation.message,
           subagentActivationError: invocation.message,
         });
-      }
-
-      const detailsCtx: Omit<LibrarianDetailsContext, "status"> = {
-        query: params.query,
-        ...(params.context !== undefined ? { context: params.context } : {}),
-        cwd,
-        workerTools: invocation.workerTools,
-        resolvedModel: invocation.modelArg,
-        contextWindow: readMmrModelContextWindow(invocation.selected.registeredModel),
-      };
-      const workerTools = invocation.workerTools;
-      const childExtensionScope = computeMmrChildExtensionScope({
-        profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
-        host: deps.pi,
-      });
-      const runnerOptions: MmrSubagentRunOptions = {
-        profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
-        prompt: buildLibrarianUserPrompt(params),
-        cwd,
-        model: invocation.modelArg,
-        tools: workerTools,
-        systemPrompt: assembleLibrarianSystemPrompt(
+      },
+      mirrorWorkerTools: true,
+      detailsWorkerTools: "invocation",
+      workerToolsConstant: LIBRARIAN_WORKER_TOOLS,
+      progressModelBinding: "initial",
+      buildUserPrompt: (params) => buildLibrarianUserPrompt(params),
+      assembleSystemPrompt: (cwd, workerTools) =>
+        assembleLibrarianSystemPrompt(
           cwd,
           deps,
-          buildWorkerToolManifest(deps.pi, workerTools),
-          workerTools,
+          buildWorkerToolManifest(deps.pi, workerTools ?? []),
+          workerTools ?? [],
         ),
-        ...(childExtensionScope ? { childExtensionScope } : {}),
-        systemPromptDelivery: "replace",
-        signal,
-        outputByteLimit,
-        onProgress: onUpdate
-          ? (snapshot) => {
-              onUpdate({
-                content: [{ type: "text", text: progressContent(snapshot) }],
-                details: buildProgressDetails(snapshot, detailsCtx),
-              });
-            }
-          : undefined,
-      };
-
-      // Session-scoped model fallback (issue #9). Under an applied override
-      // the closure re-resolves the route (so parent spawn and child
-      // activation agree) and forwards the override to the child via the
-      // runner env channel.
-      const runWorkerOnce = async (
-        runArgs: { override?: readonly MmrModelPreference[] },
-      ): Promise<{ result: MmrWorkerResult; route: string | undefined }> => {
-        let options = runnerOptions;
-        let route = invocation.modelArg;
-        if (runArgs.override) {
-          const overrideInput: ResolveLibrarianInvocationInput = { ctx };
-          if (registeredTools !== undefined) overrideInput.registeredTools = registeredTools;
-          overrideInput.modelPreferencesOverride = runArgs.override;
-          const overrideInvocation = resolveInvocation(overrideInput);
-          if (overrideInvocation.ok) {
-            route = overrideInvocation.modelArg;
-            options = {
-              ...runnerOptions,
-              model: overrideInvocation.modelArg,
-              tools: overrideInvocation.workerTools,
-              modelPreferencesOverride: runArgs.override,
-            };
-          }
-          // If the override does not resolve (rare — the chosen candidate
-          // was authenticated), fall through to the original route WITHOUT
-          // forwarding the override env, so parent --model and child
-          // activation still agree rather than guaranteeing a mismatch.
-        }
-        const runResult = await effectiveRunner.run(options);
-        return { result: runResult, route };
-      };
-
-      let result: MmrWorkerResult;
-      try {
-        const outcome = await runMmrWorkerWithSharedFallback({
-          ctx,
-          sessionId: readMmrWorkerSessionId(ctx),
-          toolName: LIBRARIAN_TOOL_NAME,
-          profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
-          candidatePreferences: requireLibrarianProfile().modelPreferences,
-          run: runWorkerOnce,
-        });
-        result = outcome.result;
-        if (outcome.route !== undefined) detailsCtx.resolvedModel = outcome.route;
-      } catch (err) {
+      resolveContextWindow: (_ctx, _model, invocation) =>
+        readMmrModelContextWindow(invocation?.selected.registeredModel),
+      extraRunnerOptions: () => ({ systemPromptDelivery: "replace" }),
+      candidatePreferences: () => requireLibrarianProfile().modelPreferences,
+      buildProgressDetails: (snapshot, runCtx) => buildProgressDetails(snapshot, detailsCtxOf(runCtx)),
+      buildFinalDetails: (result, runCtx) => buildDetails(result, detailsCtxOf(runCtx)),
+      buildFinalContent: (result) => buildFinalContent(result),
+      mapRunError: (err, runCtx) => {
         const message = err instanceof Error ? err.message : String(err);
         if (isContextWindowError(err)) {
           return makeFailureResult({
             status: "context-window-exhausted",
-            query: params.query,
-            ...(params.context !== undefined ? { context: params.context } : {}),
-            cwd,
-            workerTools,
+            query: runCtx.params.query,
+            ...(runCtx.params.context !== undefined ? { context: runCtx.params.context } : {}),
+            cwd: runCtx.cwd,
+            workerTools: runCtx.workerTools,
             content: "librarian: context window limit reached before the worker could return a result.",
             errorMessage: message,
-            resolvedModel: invocation.modelArg,
-            contextWindow: detailsCtx.contextWindow,
+            ...(runCtx.invocation !== undefined ? { resolvedModel: runCtx.invocation.modelArg } : {}),
+            ...(runCtx.contextWindow !== undefined ? { contextWindow: runCtx.contextWindow } : {}),
           });
         }
         return makeFailureResult({
           status: "spawn-error",
-          query: params.query,
-          ...(params.context !== undefined ? { context: params.context } : {}),
-          cwd,
-          workerTools,
+          query: runCtx.params.query,
+          ...(runCtx.params.context !== undefined ? { context: runCtx.params.context } : {}),
+          cwd: runCtx.cwd,
+          workerTools: runCtx.workerTools,
           content: `librarian: worker failed to spawn: ${message}`,
           errorMessage: message,
           spawnError: message,
-          resolvedModel: invocation.modelArg,
-          contextWindow: detailsCtx.contextWindow,
+          ...(runCtx.invocation !== undefined ? { resolvedModel: runCtx.invocation.modelArg } : {}),
+          ...(runCtx.contextWindow !== undefined ? { contextWindow: runCtx.contextWindow } : {}),
         });
-      }
-      return {
-        content: [{ type: "text", text: buildFinalContent(result) }],
-        details: buildDetails(result, detailsCtx),
-      };
+      },
     },
-  } satisfies ToolDefinition;
+    deps,
+    {
+      effectiveRunner,
+      resolveModelPreferencesOverride: (cwd) => resolveLibrarianModelPreferencesOverride(cwd, deps),
+    },
+  );
 }
 
 export function registerLibrarianTool(pi: ExtensionAPI, deps: LibrarianToolDeps = {}): ToolDefinition {

@@ -379,3 +379,10 @@ export function buildTaskRunnerThrowResult(
       : {}),
   });
 }
+
+// Internal factory seams: the Task worker-tool spec consumes the
+// details/content builders directly (the AgentToolResult wrappers above
+// remain the stable public surface).
+export const buildTaskProgressDetails = buildProgressDetails;
+export const buildTaskDetails = buildDetails;
+export const buildTaskFinalContent = buildFinalContent;

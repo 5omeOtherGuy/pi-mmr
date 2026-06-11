@@ -72,6 +72,8 @@ export function runMmrWorkerWithSharedFallback(params: {
   sessionId?: string;
   toolName: string;
   profileName: string;
+  /** Parent mode component of the fallback scope key (mode-derived profiles such as task-subagent). */
+  parentMode?: string;
   candidatePreferences: readonly MmrModelPreference[];
   run: (runArgs: MmrWorkerFallbackRunArgs) => Promise<MmrWorkerFallbackRunOutput>;
 }): Promise<MmrWorkerFallbackOutcome> {
@@ -81,6 +83,7 @@ export function runMmrWorkerWithSharedFallback(params: {
     registry: params.ctx.modelRegistry as unknown as MmrWorkerFallbackRegistry,
     toolName: params.toolName,
     profileName: params.profileName,
+    ...(params.parentMode !== undefined ? { parentMode: params.parentMode } : {}),
     candidatePreferences: params.candidatePreferences,
     classifyOutcome: (result) => classifyMmrWorkerOutcomeForProfile(result, getMmrSubagentProfile(params.profileName)),
     run: params.run,

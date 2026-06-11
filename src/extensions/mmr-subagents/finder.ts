@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
-  AgentToolResult,
   ExtensionAPI,
   ToolDefinition,
   ToolResultEvent,
@@ -21,19 +20,21 @@ import {
   expandMmrModelPreferencesToStrings,
   getMmrSubagentProfile,
 } from "../mmr-core/subagent-profiles.js";
-import { selectMmrModelRoute } from "../mmr-core/model-resolver.js";
+import {
+  resolveMmrSubagentInvocation,
+  type MmrSubagentInvocation,
+} from "../mmr-core/subagent-resolver.js";
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildFinderWorkerSystemPrompt as buildFinderWorkerSystemPromptFromPrompts } from "./prompts.js";
-import { readMmrWorkerSessionId } from "./fallback.js";
+import { resolveEffectiveRunner } from "./worker-fallback-run.js";
 import {
-  resolveEffectiveRunner,
-  runMmrWorkerWithSharedFallback,
-} from "./worker-fallback-run.js";
-import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
+  createWorkerTool,
+  resolveWorkerModelPreferencesOverride,
+  type MmrWorkerToolResolveInput,
+} from "./worker-tool-factory.js";
 import { FINDER_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
-import { computeMmrChildExtensionScope } from "./child-extension-scope.js";
-import { resolveWorkerCwd, type ToolHostLike } from "./worker-host.js";
+import { type ToolHostLike } from "./worker-host.js";
 import {
   resolveCtxMmrModelRegistry,
   resolveMmrWorkerModelContextWindowFromCtx,
@@ -43,7 +44,6 @@ import {
   classifyMmrWorkerOutcomeForProfile,
   type MmrSpawnedSubagentWorkerDetailsBase,
   type MmrWorkerOutcomeStatus,
-  type MmrSubagentRunOptions,
   type MmrSubagentRunner,
   type MmrWorkerProgressSnapshot,
   type MmrWorkerResult,
@@ -54,7 +54,6 @@ import {
 import {
   buildSpawnedFinalDetailsBase,
   buildSpawnedProgressDetailsBase,
-  progressTextOrPlaceholder,
 } from "./worker-result-shaping.js";
 
 export const FINDER_TOOL_NAME = "finder";
@@ -448,53 +447,6 @@ export interface FinderToolDeps {
 }
 
 /**
- * Resolve the ordered worker-model preference list used by the `finder`
- * parent on every execute, as `MmrModelPreference[]` fed straight into the
- * shared `selectMmrModelRoute` registry resolver — the same path the child
- * Pi process uses at activation, so parent and child can never disagree on
- * the route. Precedence (top wins):
- *  1. `deps.modelPreferences` — explicit programmatic override.
- *  2. `subagentModelPreferences.finder` from settings — user-driven
- *     `/mmr-config` override.
- *  3. the `finder` profile's `modelPreferences` — defaults.
- *
- * Settings are re-read on every invocation (matching the child Pi
- * process's activation path) so a `/mmr-config` update takes effect on
- * the next call without a process restart. Settings read errors do
- * not block the spawn; they fall through to the profile defaults.
- */
-function resolveFinderModelPreferences(
-  cwd: string,
-  deps: FinderToolDeps,
-): readonly MmrModelPreference[] {
-  if (deps.modelPreferences && deps.modelPreferences.length > 0) {
-    return deps.modelPreferences;
-  }
-  let settingsBlock: readonly MmrModelPreference[] | undefined;
-  if (deps.subagentModelPreferencesOverride !== undefined) {
-    settingsBlock = deps.subagentModelPreferencesOverride;
-  } else {
-    try {
-      const loaded = deps.loadSubagentModelPreferences
-        ? deps.loadSubagentModelPreferences(cwd)
-        : loadMmrCoreSettings(cwd).settings;
-      settingsBlock = loaded?.subagentModelPreferences?.[FINDER_SUBAGENT_PROFILE];
-    } catch {
-      // Settings read errors must not block finder spawn; fall through
-      // to profile defaults below.
-    }
-  }
-  if (settingsBlock && settingsBlock.length > 0) {
-    return settingsBlock;
-  }
-  return requireFinderProfile().modelPreferences;
-}
-
-function progressContent(snapshot: MmrWorkerProgressSnapshot): string {
-  return progressTextOrPlaceholder(snapshot, FINDER_PROGRESS_PLACEHOLDER);
-}
-
-/**
  * Stub `FinderDetails` used while the worker is still running. The runner
  * has not surfaced an exit code, stderr, args, etc. yet, so this snapshot
  * fills the typed fields with safe placeholders and the live values it
@@ -622,102 +574,102 @@ function assembleFinderSystemPrompt(
   }
 }
 
+/**
+ * Default parent-side finder invocation resolution: the shared
+ * `resolveMmrSubagentInvocation` against `ctx.modelRegistry`. Returns a
+ * `model.no-route` failure when the context exposes no registry; the
+ * finder spec runs in degrade mode, so that failure means "spawn with
+ * no explicit --model and let the child resolve the route" rather than
+ * a pre-spawn error.
+ */
+function resolveFinderInvocation(
+  input: MmrWorkerToolResolveInput,
+): MmrSubagentInvocation {
+  const profile = requireFinderProfile();
+  const registry = resolveCtxMmrModelRegistry(input.ctx);
+  if (!registry) {
+    return {
+      ok: false,
+      profile,
+      code: "model.no-route",
+      message: "finder could not resolve a model registry from the extension context; expected ctx.modelRegistry to expose getAll/find.",
+      tools: profile.tools,
+      promptRoute: profile.promptRoute,
+      candidates: [],
+      diagnostics: [],
+      workerTools: [],
+      toolResolution: {
+        intendedTools: [...profile.tools],
+        deniedTools: profile.denyTools ?? [],
+        omittedTools: [],
+      },
+    };
+  }
+  return resolveMmrSubagentInvocation({
+    profile,
+    registry,
+    ...(input.registeredTools !== undefined ? { registeredTools: input.registeredTools } : {}),
+    ...(input.modelPreferencesOverride !== undefined
+      ? { modelPreferencesOverride: input.modelPreferencesOverride }
+      : {}),
+  });
+}
+
 export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
   const effectiveRunner = resolveEffectiveRunner(deps, "createFinderTool");
-  const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
-  return {
-    name: FINDER_TOOL_NAME,
-    label: FINDER_TOOL_NAME,
-    description: FINDER_DESCRIPTION,
-    promptSnippet: FINDER_PROMPT_SNIPPET,
-    promptGuidelines: [...FINDER_PROMPT_GUIDELINES],
-    parameters: finderParameters,
-    renderShell: "self" as const,
-    renderCall(args, theme, context) {
-      return renderMmrSubagentCall(FINDER_TOOL_NAME, args, theme, context);
+  return createWorkerTool<FinderParams, FinderDetails>(
+    {
+      toolName: FINDER_TOOL_NAME,
+      profileName: FINDER_SUBAGENT_PROFILE,
+      description: FINDER_DESCRIPTION,
+      promptSnippet: FINDER_PROMPT_SNIPPET,
+      promptGuidelines: FINDER_PROMPT_GUIDELINES,
+      parameters: finderParameters,
+      progressPlaceholder: FINDER_PROGRESS_PLACEHOLDER,
+      // Invalid params propagate as a thrown error to the Pi tool host
+      // (the long-standing finder contract), so no paramsFailure here.
+      coerceParams: coerceFinderParams,
+      resolveInvocation: resolveFinderInvocation,
+      resolutionFailure: "degrade",
+      // The child Pi process computes its own workerTools via
+      // `resolveMmrSubagentInvocation` against its registered-tool
+      // inventory. Skipping explicit --tools keeps parent and child
+      // agreement even if the child's `read`/`grep`/`find` registry
+      // diverges from the parent's, preventing a spurious tools.mismatch
+      // failure at child activation time.
+      mirrorWorkerTools: false,
+      detailsWorkerTools: "profile-constant",
+      workerToolsConstant: FINDER_WORKER_TOOLS,
+      progressModelBinding: "per-attempt",
+      buildUserPrompt: (params) => params.query,
+      assembleSystemPrompt: (cwd) => assembleFinderSystemPrompt(cwd, deps.buildSystemPrompt),
+      resolveContextWindow: (ctx, model) => resolveMmrWorkerModelContextWindowFromCtx(ctx, model),
+      candidatePreferences: () => requireFinderProfile().modelPreferences,
+      buildProgressDetails: (snapshot, runCtx) =>
+        buildProgressDetails(snapshot, runCtx.resolvedModel, runCtx.cwd, runCtx.contextWindow),
+      buildFinalDetails: (result, runCtx) =>
+        buildDetails(result, runCtx.resolvedModel, runCtx.cwd, runCtx.contextWindow),
+      buildFinalContent: (result, runCtx) => buildFinalContent(result, runCtx.cwd),
     },
-    renderResult(result, options, theme, context) {
-      return renderMmrSubagentResult(FINDER_TOOL_NAME, result, options, theme, context);
-    },
-    async execute(
-      _toolCallId,
-      rawParams,
-      signal,
-      onUpdate,
-      ctx,
-    ): Promise<AgentToolResult<FinderDetails>> {
-      const params = coerceFinderParams(rawParams);
-      const cwd = resolveWorkerCwd(ctx);
-      const profile = requireFinderProfile();
-      const registry = resolveCtxMmrModelRegistry(ctx);
-      const basePreferences = resolveFinderModelPreferences(cwd, deps);
-      const childExtensionScope = computeMmrChildExtensionScope({
-        profileName: FINDER_SUBAGENT_PROFILE,
-        host: deps.pi,
-      });
-
-      // Session-scoped model fallback (issue #9). The closure owns normal
-      // model preference resolution; under an override it selects from the override and
-      // forwards it to the child via the runner.
-      const runWorkerOnce = async (
-        runArgs: { override?: readonly MmrModelPreference[] },
-      ): Promise<{ result: Awaited<ReturnType<typeof effectiveRunner.run>>; route: string | undefined }> => {
-        const preferences = runArgs.override ?? basePreferences;
-        const route = registry
-          ? selectMmrModelRoute({
-              modelPreferences: preferences,
-              modeThinkingLevel: profile.thinkingLevel,
-              registry,
-            }).selected
-          : undefined;
-        const model = route ? `${route.provider}/${route.model}` : undefined;
-        const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
-        const runnerOptions: MmrSubagentRunOptions = {
+    deps,
+    {
+      effectiveRunner,
+      resolveModelPreferencesOverride: (cwd) =>
+        resolveWorkerModelPreferencesOverride({
           profileName: FINDER_SUBAGENT_PROFILE,
-          prompt: params.query,
           cwd,
-        // Child Pi process computes its own workerTools via
-        // `resolveMmrSubagentInvocation` against its registered-tool
-        // inventory. Skipping explicit --tools keeps parent and child
-        // agreement even if the child's `read`/`grep`/`find` registry
-        // diverges from the parent's, preventing a spurious tools.mismatch
-        // failure at child activation time.
-          systemPrompt: assembleFinderSystemPrompt(cwd, deps.buildSystemPrompt),
-          signal,
-          outputByteLimit,
-          onProgress: onUpdate
-            ? (snapshot) => {
-                onUpdate({
-                  content: [{ type: "text", text: progressContent(snapshot) }],
-                  details: buildProgressDetails(snapshot, model, cwd, contextWindow),
-                });
-              }
-            : undefined,
-        };
-        if (model) runnerOptions.model = model;
-        if (childExtensionScope) runnerOptions.childExtensionScope = childExtensionScope;
-        if (runArgs.override) runnerOptions.modelPreferencesOverride = runArgs.override;
-        const result = await effectiveRunner.run(runnerOptions);
-        return { result, route: model };
-      };
-
-      const outcome = await runMmrWorkerWithSharedFallback({
-        ctx,
-        sessionId: readMmrWorkerSessionId(ctx),
-        toolName: FINDER_TOOL_NAME,
-        profileName: FINDER_SUBAGENT_PROFILE,
-        candidatePreferences: profile.modelPreferences,
-        run: runWorkerOnce,
-      });
-
-      const model = outcome.route;
-      const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
-      return {
-        content: [{ type: "text", text: buildFinalContent(outcome.result, cwd) }],
-        details: buildDetails(outcome.result, model, cwd, contextWindow),
-      };
+          ...(deps.modelPreferences !== undefined ? { explicit: deps.modelPreferences } : {}),
+          ...(deps.subagentModelPreferencesOverride !== undefined
+            ? { settingsOverride: deps.subagentModelPreferencesOverride }
+            : {}),
+          loadSettings: (loadCwd) =>
+            (deps.loadSubagentModelPreferences
+              ? deps.loadSubagentModelPreferences(loadCwd)
+              : loadMmrCoreSettings(loadCwd).settings
+            )?.subagentModelPreferences,
+        }),
     },
-  } satisfies ToolDefinition;
+  );
 }
 
 /**

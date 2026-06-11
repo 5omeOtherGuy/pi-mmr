@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
-  AgentToolResult,
   ExtensionAPI,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -17,26 +16,27 @@ import {
   getMmrSubagentProfile,
   type MmrSubagentProfile,
 } from "../mmr-core/subagent-profiles.js";
-import { selectMmrModelRoute } from "../mmr-core/model-resolver.js";
+import {
+  resolveMmrSubagentInvocation,
+  type MmrSubagentInvocation,
+} from "../mmr-core/subagent-resolver.js";
 import { loadMmrCoreSettings, type LoadedMmrCoreSettings } from "../mmr-core/settings.js";
 import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildOracleWorkerSystemPrompt as buildOracleWorkerSystemPromptFromPrompts } from "./prompts.js";
-import { readMmrWorkerSessionId } from "./fallback.js";
+import { resolveEffectiveRunner } from "./worker-fallback-run.js";
 import {
-  resolveEffectiveRunner,
-  runMmrWorkerWithSharedFallback,
-} from "./worker-fallback-run.js";
+  createWorkerTool,
+  resolveWorkerModelPreferencesOverride,
+  type MmrWorkerToolResolveInput,
+} from "./worker-tool-factory.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
 import { ORACLE_ALWAYS_BLOCKING_GUIDANCE } from "./tool-guidance.js";
-import { computeMmrChildExtensionScope } from "./child-extension-scope.js";
-import { resolveWorkerCwd, type ToolHostLike } from "./worker-host.js";
+import { type ToolHostLike } from "./worker-host.js";
 import {
   resolveCtxMmrModelRegistry,
   resolveMmrWorkerModelContextWindowFromCtx,
 } from "./worker-model-metadata.js";
 import {
-  DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
-  type MmrSubagentRunOptions,
   type MmrSubagentRunner,
   type MmrWorkerRunnerDeps,
   runMmrSubagentWorker,
@@ -48,13 +48,13 @@ import {
   oracleParameters,
   pathInsideCwd,
   type InternalAttachment,
+  type OracleParams,
 } from "./oracle-prompt.js";
 import {
   ORACLE_PROGRESS_PLACEHOLDER,
   buildDetails,
   buildFinalContent,
   buildProgressDetails,
-  progressContent,
   type OracleDetails,
 } from "./oracle-result.js";
 
@@ -120,7 +120,7 @@ export const ORACLE_WORKER_TOOLS: readonly string[] = Object.freeze([
  * compatibility and is no longer wired into any tool config field. The
  * advisor parent resolves its provider/model through the shared
  * `selectMmrModelRoute` registry resolver using the profile's
- * `modelPreferences` (see `resolveAdvisorModelPreferences`), so this
+ * `modelPreferences` (via the shared worker-tool factory), so this
  * frozen list has no internal runtime consumer beyond its own test and
  * the package-root re-export. The dual canonical/bare-id forms let loose
  * matching ({@link selectOracleWorkerModel}) succeed regardless of which
@@ -345,48 +345,6 @@ export interface OracleToolDeps {
 /** Alias for the advisor tool dependency seam. */
 export type MmrAdvisorToolDeps = OracleToolDeps;
 
-/**
- * Resolve the ordered worker-model preference list used by an advisor
- * parent on every execute. Precedence (top wins):
- *  1. `deps.modelPreferences` — explicit programmatic override.
- *  2. `subagentModelPreferences.<profile>` from settings — user-driven
- *     `/mmr-config` override.
- *  3. The profile's `modelPreferences` defaults.
- *
- * Returns `MmrModelPreference[]` fed straight into the shared
- * `selectMmrModelRoute` registry resolver — the same path the child Pi
- * process uses at activation, so parent and child can never disagree on
- * the route. Settings are re-read on every invocation so a `/mmr-config`
- * update takes effect on the next call without a process restart.
- */
-function resolveAdvisorModelPreferences(
-  profileName: string,
-  cwd: string,
-  deps: OracleToolDeps,
-): readonly MmrModelPreference[] {
-  if (deps.modelPreferences && deps.modelPreferences.length > 0) {
-    return deps.modelPreferences;
-  }
-  let settingsBlock: readonly MmrModelPreference[] | undefined;
-  if (deps.subagentModelPreferencesOverride !== undefined) {
-    settingsBlock = deps.subagentModelPreferencesOverride;
-  } else {
-    try {
-      const loaded = deps.loadSubagentModelPreferences
-        ? deps.loadSubagentModelPreferences(cwd)
-        : loadMmrCoreSettings(cwd).settings;
-      settingsBlock = loaded?.subagentModelPreferences?.[profileName];
-    } catch {
-      // Settings read errors must not block advisor spawn; fall through
-      // to profile defaults below.
-    }
-  }
-  if (settingsBlock && settingsBlock.length > 0) {
-    return settingsBlock;
-  }
-  return requireMmrAdvisorProfile(profileName).modelPreferences;
-}
-
 function assembleAdvisorSystemPrompt(
   profile: MmrSubagentProfile,
   cwd: string,
@@ -448,6 +406,48 @@ export interface MmrAdvisorToolConfig {
 }
 
 /**
+ * Default parent-side advisor invocation resolution: the shared
+ * `resolveMmrSubagentInvocation` against `ctx.modelRegistry`. Returns a
+ * `model.no-route` failure when the context exposes no registry; the
+ * advisor spec runs in degrade mode, so that failure means "spawn with
+ * no explicit --model and let the child resolve the route" rather than
+ * a pre-spawn error.
+ */
+function resolveAdvisorInvocation(
+  profileName: string,
+  input: MmrWorkerToolResolveInput,
+): MmrSubagentInvocation {
+  const profile = requireMmrAdvisorProfile(profileName);
+  const registry = resolveCtxMmrModelRegistry(input.ctx);
+  if (!registry) {
+    return {
+      ok: false,
+      profile,
+      code: "model.no-route",
+      message: `${profileName} could not resolve a model registry from the extension context; expected ctx.modelRegistry to expose getAll/find.`,
+      tools: profile.tools,
+      promptRoute: profile.promptRoute,
+      candidates: [],
+      diagnostics: [],
+      workerTools: [],
+      toolResolution: {
+        intendedTools: [...profile.tools],
+        deniedTools: profile.denyTools ?? [],
+        omittedTools: [],
+      },
+    };
+  }
+  return resolveMmrSubagentInvocation({
+    profile,
+    registry,
+    ...(input.registeredTools !== undefined ? { registeredTools: input.registeredTools } : {}),
+    ...(input.modelPreferencesOverride !== undefined
+      ? { modelPreferencesOverride: input.modelPreferencesOverride }
+      : {}),
+  });
+}
+
+/**
  * Build an attachment-aware advisory subagent tool from a static config
  * plus runtime dependency seams. Shared core for the oracle.
  */
@@ -456,111 +456,67 @@ export function createMmrAdvisorTool(
   deps: OracleToolDeps = {},
 ): ToolDefinition {
   const effectiveRunner = resolveEffectiveRunner(deps, `createMmrAdvisorTool(${config.toolName})`);
-  const outputByteLimit = deps.outputByteLimit ?? DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT;
   const perFileByteLimit = deps.perFileByteLimit ?? config.defaultPerFileByteLimit;
-  return {
-    name: config.toolName,
-    label: config.toolName,
-    description: config.description,
-    promptSnippet: config.promptSnippet,
-    promptGuidelines: [...config.promptGuidelines],
-    parameters: oracleParameters,
-    renderShell: "self" as const,
-    renderCall(args, theme, context) {
-      return config.renderCall(args, theme, context) as ReturnType<NonNullable<ToolDefinition["renderCall"]>>;
+  return createWorkerTool<OracleParams, OracleDetails, InternalAttachment[]>(
+    {
+      toolName: config.toolName,
+      profileName: config.profileName,
+      description: config.description,
+      promptSnippet: config.promptSnippet,
+      promptGuidelines: config.promptGuidelines,
+      parameters: oracleParameters,
+      renderCall: (args, theme, context) => config.renderCall(args, theme, context),
+      renderResult: (result, options, theme, context) => config.renderResult(result, options, theme, context),
+      progressPlaceholder: config.progressPlaceholder,
+      // Invalid params propagate as a thrown error to the Pi tool host
+      // (the long-standing advisor contract), so no paramsFailure here.
+      coerceParams: (raw) => coerceAdvisorParams(config.toolName, raw),
+      computeRunData: (params, cwd) =>
+        (params.files ?? []).map((entry) => resolveOracleAttachment(entry, cwd, perFileByteLimit)),
+      resolveInvocation: (input) => resolveAdvisorInvocation(config.profileName, input),
+      resolutionFailure: "degrade",
+      // The worker tool set is resolved by the child Pi process against
+      // its own registered-tool inventory (see
+      // `resolveMmrSubagentInvocation` in mmr-core). Parent must not pass
+      // explicit --tools here because the profile lists tools whose
+      // owning extension may be unloaded in the child environment (e.g.
+      // mmr-web's web_search / read_web_page, mmr-history's read_session
+      // / find_session). The child computes the deny-aware, registered
+      // intersection itself and applies it via pi.setActiveTools.
+      mirrorWorkerTools: false,
+      detailsWorkerTools: "profile-constant",
+      workerToolsConstant: config.workerTools,
+      progressModelBinding: "per-attempt",
+      buildUserPrompt: (params, attachments) => buildOracleUserPrompt(params, attachments),
+      assembleSystemPrompt: (cwd) =>
+        assembleAdvisorSystemPrompt(requireMmrAdvisorProfile(config.profileName), cwd, deps.buildSystemPrompt),
+      resolveContextWindow: (ctx, model) => resolveMmrWorkerModelContextWindowFromCtx(ctx, model),
+      candidatePreferences: () => requireMmrAdvisorProfile(config.profileName).modelPreferences,
+      buildProgressDetails: (snapshot, runCtx) =>
+        buildProgressDetails(config, snapshot, runCtx.resolvedModel, runCtx.cwd, runCtx.runData, runCtx.contextWindow),
+      buildFinalDetails: (result, runCtx) =>
+        buildDetails(config, result, runCtx.resolvedModel, runCtx.cwd, runCtx.runData, runCtx.contextWindow),
+      buildFinalContent: (result) => buildFinalContent(config.outputLabel, result, config.profileName),
     },
-    renderResult(result, options, theme, context) {
-      return config.renderResult(result, options, theme, context) as ReturnType<NonNullable<ToolDefinition["renderResult"]>>;
-    },
-    async execute(
-      _toolCallId,
-      rawParams,
-      signal,
-      onUpdate,
-      ctx,
-    ): Promise<AgentToolResult<OracleDetails>> {
-      const params = coerceAdvisorParams(config.toolName, rawParams);
-      const cwd = resolveWorkerCwd(ctx);
-      const attachments: InternalAttachment[] = (params.files ?? []).map((entry) =>
-        resolveOracleAttachment(entry, cwd, perFileByteLimit),
-      );
-      const userPrompt = buildOracleUserPrompt(params, attachments);
-      const basePreferences = resolveAdvisorModelPreferences(
-        config.profileName,
-        cwd,
-        deps,
-      );
-      const profile = requireMmrAdvisorProfile(config.profileName);
-      const registry = resolveCtxMmrModelRegistry(ctx);
-      const childExtensionScope = computeMmrChildExtensionScope({
-        profileName: config.profileName,
-        host: deps.pi,
-      });
-
-      // Run the worker with session-scoped model fallback (issue #9). The
-      // closure owns normal model preference resolution; when a fallback override is
-      // supplied it selects from the override and forwards it to the child.
-      const runWorkerOnce = async (
-        runArgs: { override?: readonly MmrModelPreference[] },
-      ): Promise<{ result: Awaited<ReturnType<typeof effectiveRunner.run>>; route: string | undefined }> => {
-        const preferences = runArgs.override ?? basePreferences;
-        const route = registry
-          ? selectMmrModelRoute({
-              modelPreferences: preferences,
-              modeThinkingLevel: profile.thinkingLevel,
-              registry,
-            }).selected
-          : undefined;
-        const model = route ? `${route.provider}/${route.model}` : undefined;
-        const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
-        const runnerOptions: MmrSubagentRunOptions = {
+    deps,
+    {
+      effectiveRunner,
+      resolveModelPreferencesOverride: (cwd) =>
+        resolveWorkerModelPreferencesOverride({
           profileName: config.profileName,
-          prompt: userPrompt,
           cwd,
-        // Worker tool set is resolved by the child Pi process against its
-        // own registered-tool inventory (see `resolveMmrSubagentInvocation`
-        // in mmr-core). Parent must not pass explicit --tools here because
-        // the profile lists tools whose owning extension may be unloaded
-        // in the child environment (e.g. mmr-web's web_search /
-        // read_web_page, mmr-history's read_session / find_session). The
-        // child computes the deny-aware, registered intersection itself and
-        // applies it via pi.setActiveTools.
-          systemPrompt: assembleAdvisorSystemPrompt(profile, cwd, deps.buildSystemPrompt),
-          signal,
-          outputByteLimit,
-          onProgress: onUpdate
-            ? (snapshot) => {
-                onUpdate({
-                  content: [{ type: "text", text: progressContent(snapshot, config.progressPlaceholder) }],
-                  details: buildProgressDetails(config, snapshot, model, cwd, attachments, contextWindow),
-                });
-              }
-            : undefined,
-        };
-        if (model) runnerOptions.model = model;
-        if (childExtensionScope) runnerOptions.childExtensionScope = childExtensionScope;
-        if (runArgs.override) runnerOptions.modelPreferencesOverride = runArgs.override;
-        const result = await effectiveRunner.run(runnerOptions);
-        return { result, route: model };
-      };
-
-      const outcome = await runMmrWorkerWithSharedFallback({
-        ctx,
-        sessionId: readMmrWorkerSessionId(ctx),
-        toolName: config.toolName,
-        profileName: config.profileName,
-        candidatePreferences: profile.modelPreferences,
-        run: runWorkerOnce,
-      });
-
-      const model = outcome.route;
-      const contextWindow = resolveMmrWorkerModelContextWindowFromCtx(ctx, model);
-      return {
-        content: [{ type: "text", text: buildFinalContent(config.outputLabel, outcome.result, config.profileName) }],
-        details: buildDetails(config, outcome.result, model, cwd, attachments, contextWindow),
-      };
+          ...(deps.modelPreferences !== undefined ? { explicit: deps.modelPreferences } : {}),
+          ...(deps.subagentModelPreferencesOverride !== undefined
+            ? { settingsOverride: deps.subagentModelPreferencesOverride }
+            : {}),
+          loadSettings: (loadCwd) =>
+            (deps.loadSubagentModelPreferences
+              ? deps.loadSubagentModelPreferences(loadCwd)
+              : loadMmrCoreSettings(loadCwd).settings
+            )?.subagentModelPreferences,
+        }),
     },
-  } satisfies ToolDefinition;
+  );
 }
 
 /** Static config for the oracle advisor tool. */
