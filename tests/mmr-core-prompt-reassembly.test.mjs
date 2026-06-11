@@ -55,13 +55,14 @@ function createState(mode) {
 
 const PROMPTED_MODES = ["smart", "smartGPT", "rush", "large", "deep"];
 
-// Unique posture heading per mode. `smart` and `smartGPT` share the SMART
-// posture, so its heading is not a unique discriminator between those two; the
-// cross-mode test pairs deep -> smart, whose posture headings are distinct.
-const SMART_POSTURE_HEADING = "## Smart mode";
+// Distinctive per-mode body markers. The smart family renders no posture
+// section, so smart is identified by its family-only "Investigate before
+// acting" heading; the cross-mode test pairs deep -> smart, whose body
+// sections are distinct.
+const SMART_INVESTIGATE_HEADING = "## Investigate before acting";
 const DEEP_POSTURE_HEADING = "## Deep mode";
 const SMART_CLOSING_LINE =
-  "Answer in fewer than 4 lines of prose unless the user asks for more detail or a complete report needs the space.";
+  "You MUST answer concisely with fewer than 4 lines of text (not including tool use or code generation), unless the user asks for more detail.";
 const AUTONOMY_HEADING = "## Autonomy and persistence";
 const CAREFUL_ACTIONS_HEADING = "## Executing actions with care";
 const TOOL_USE_HEADING = "## Tool use";
@@ -193,9 +194,9 @@ describe("assembleActiveSurface() prompt-tail drift hardening", () => {
 
     const sp = smartFromDeep.systemPrompt;
     assert.equal(
-      sp.split(SMART_POSTURE_HEADING).length - 1,
+      sp.split(SMART_INVESTIGATE_HEADING).length - 1,
       1,
-      "smart posture heading must appear exactly once after cross-mode re-assembly",
+      "smart-family investigate heading must appear exactly once after cross-mode re-assembly",
     );
     assert.equal(
       sp.split(SMART_CLOSING_LINE).length - 1,

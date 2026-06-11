@@ -236,6 +236,10 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-workers`: `start_task` is deprecated and now a thin compatibility alias for the worker tools' `background` parameter; its description and results carry a deprecation notice. It will be removed in a future release.
 
+- `mmr-core`: smart/smartGPT mode posture no longer repeats the spec-refinement and correction-handling rules already stated on the mode intro line, and the rush mode posture now states that rush runs with no extended reasoning (matching its thinking policy). Deep and large mode prompts are unchanged. Mode-prompt and effective-surface fixtures updated.
+
+- **mmr-core**: smart, smartGPT, and large now share the authoritative pair-programming prompt verbatim (no posture section, 4-line response cap); deep returns to the authoritative autonomous-agent framing with a restored Engineering judgment section, outcome-first autonomy, plan right-sizing, and an outcome-first response shape. Rush is unchanged.
+
 - BREAKING — blocking worker execution is now register + await settle + project: the worker-tool factory prepares a registry-ready run and returns the registry-materialized projection inline, so projection is the single result path; the runner receives the registry-owned abort signal, with the tool-call signal adapted to task cancellation.
 
 - BREAKING — the background-agent descriptor's `start.kind: "task" | "tool"` duality is replaced by one `prepareRun` seam; finder/librarian/Task plug in their factory run-preparers and custom Markdown subagents use a tool-execute adapter.

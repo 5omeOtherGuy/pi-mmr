@@ -26,14 +26,19 @@ const EXPECTED_SEQUENCE = [
   "preserved-tail",
 ];
 
-const EXPECTED_LARGE_SEQUENCE = [
+// Deep reorders the body to the authoritative deep-template sequence and is
+// the only mode that renders the deep-only engineering-judgment fragment.
+const EXPECTED_DEEP_SEQUENCE = [
   "identity",
   "autonomy",
-  "discovery-discipline",
   "pragmatism",
+  "discovery-discipline",
+  "engineering-judgment",
   "verification",
   "careful-actions",
   "mode-posture",
+  "collaboration",
+  "response-style",
   "tool-lead-in",
   "active-tools",
   "active-guidelines",
@@ -42,8 +47,6 @@ const EXPECTED_LARGE_SEQUENCE = [
   "shared-tool-guidance",
   "diagrams",
   "file-links",
-  "collaboration",
-  "response-style",
   "preserved-tail",
 ];
 
@@ -98,15 +101,19 @@ describe("mmr-core prompt registry", () => {
       assert.equal(recipe.basePromptId, "pi-native-default-v1");
       const expectedFragments = mode === "rush"
         ? EXPECTED_RUSH_SEQUENCE
-        : mode === "large"
-          ? EXPECTED_LARGE_SEQUENCE
+        : mode === "deep"
+          ? EXPECTED_DEEP_SEQUENCE
           : MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE;
       assert.deepEqual(recipe.fragments, expectedFragments, `${mode}: expected fragment sequence`);
       assert.equal(recipe.tag, mode);
       assert.equal(typeof recipe.intro, "string");
       assert.ok(recipe.intro.length > 20, `${mode}: intro must be substantive`);
       assert.equal(typeof recipe.postureSections, "string");
-      assert.ok(recipe.postureSections.length > 100, `${mode}: postureSections must be substantive`);
+      if (mode === "rush" || mode === "deep") {
+        assert.ok(recipe.postureSections.length > 100, `${mode}: postureSections must be substantive`);
+      } else {
+        assert.equal(recipe.postureSections, "", `${mode}: smart-family modes render no posture section`);
+      }
       assert.equal(typeof recipe.closingLine, "string");
       assert.ok(recipe.closingLine.length > 10, `${mode}: closingLine must be substantive`);
     }
@@ -130,7 +137,7 @@ describe("mmr-core prompt registry", () => {
   });
 
   it("lets mode recipes specialize the shared fragment sequence", () => {
-    const { MMR_MODE_PROMPT_RECIPES, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE, MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE } = registry;
+    const { MMR_MODE_PROMPT_RECIPES, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE, MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE, MMR_DEEP_PROMPT_FRAGMENT_SEQUENCE } = registry;
     assert.equal(MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE.includes("diagrams"), false, "rush sequence must omit diagrams");
     assert.deepEqual(
       MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE,
@@ -138,8 +145,13 @@ describe("mmr-core prompt registry", () => {
       "rush must keep every default fragment except diagrams",
     );
     assert.deepEqual(MMR_MODE_PROMPT_RECIPES.rush.fragments, MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE);
-    assert.deepEqual(MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE, EXPECTED_LARGE_SEQUENCE);
-    assert.deepEqual(MMR_MODE_PROMPT_RECIPES.large.fragments, MMR_LARGE_PROMPT_FRAGMENT_SEQUENCE);
+    assert.deepEqual(MMR_DEEP_PROMPT_FRAGMENT_SEQUENCE, EXPECTED_DEEP_SEQUENCE);
+    assert.deepEqual(MMR_MODE_PROMPT_RECIPES.deep.fragments, MMR_DEEP_PROMPT_FRAGMENT_SEQUENCE);
+    assert.equal(
+      MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE.includes("engineering-judgment"),
+      false,
+      "engineering-judgment is deep-only",
+    );
     for (const mode of ["smart", "smartGPT", "large", "deep"]) {
       assert.equal(
         MMR_MODE_PROMPT_RECIPES[mode].fragments.includes("diagrams"),

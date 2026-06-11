@@ -132,10 +132,15 @@ describe("Phase D: assembleActiveSurface() public API", () => {
       // BASE_PROMPT carries Pi built-ins, so the optional builtin-tool-guidance
       // fragment is rendered. The rendered block kinds must therefore equal the
       // active recipe's fragment list exactly — this is what makes per-mode
-      // fragment selection (e.g. rush dropping diagrams) observable.
+      // fragment selection (e.g. rush dropping diagrams) observable. Smart-family
+      // recipes declare mode-posture but render no block for their empty posture.
+      const recipe = MMR_MODE_PROMPT_RECIPES[mode];
+      const expectedKinds = recipe.fragments.filter(
+        (fragmentId) => fragmentId !== "mode-posture" || recipe.postureSections !== "",
+      );
       assert.deepEqual(
         kinds,
-        [...MMR_MODE_PROMPT_RECIPES[mode].fragments],
+        expectedKinds,
         `mode ${mode}: rendered block kinds must equal the recipe fragment list`,
       );
     });
@@ -184,22 +189,20 @@ describe("Phase D: assembleActiveSurface() public API", () => {
       const collaborationIdx = kinds.indexOf("collaboration");
       const responseStyleIdx = kinds.indexOf("response-style");
       assert.ok(autonomyIdx < carefulActionsIdx, `mode ${mode}: task/risk posture must stay in order`);
-      assert.ok(carefulActionsIdx < modePostureIdx, `mode ${mode}: shared posture must precede mode posture`);
-      if (mode === "large") {
-        assert.ok(modePostureIdx < toolLeadInIdx, `mode ${mode}: posture must precede tool guidance`);
-        assert.ok(toolLeadInIdx < piDocsIdx, `mode ${mode}: Pi tool/docs blocks must stay in order`);
-        assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool execution policy`);
-        assert.ok(sharedToolIdx < fileLinksIdx, `mode ${mode}: tool execution policy must precede style guidance`);
-        assert.ok(fileLinksIdx < collaborationIdx, `mode ${mode}: style guidance must stay in order`);
-        assert.ok(collaborationIdx < responseStyleIdx, `mode ${mode}: style guidance must precede response style`);
-      } else {
+      // Only rush and deep render a mode posture; the smart family's empty
+      // posture is skipped by the renderer.
+      if (mode === "rush" || mode === "deep") {
+        assert.ok(carefulActionsIdx < modePostureIdx, `mode ${mode}: shared posture must precede mode posture`);
         assert.ok(modePostureIdx < collaborationIdx, `mode ${mode}: mode posture must precede collaboration style`);
-        assert.ok(collaborationIdx < responseStyleIdx, `mode ${mode}: collaboration style must precede response style`);
-        assert.ok(responseStyleIdx < toolLeadInIdx, `mode ${mode}: response style must precede tool guidance`);
-        assert.ok(toolLeadInIdx < piDocsIdx, `mode ${mode}: Pi tool/docs blocks must stay in order`);
-        assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool execution policy`);
-        assert.ok(sharedToolIdx < fileLinksIdx, `mode ${mode}: tool execution policy must precede remaining style guidance`);
+      } else {
+        assert.equal(modePostureIdx, -1, `mode ${mode}: smart-family modes render no mode-posture block`);
+        assert.ok(carefulActionsIdx < collaborationIdx, `mode ${mode}: shared posture must precede collaboration style`);
       }
+      assert.ok(collaborationIdx < responseStyleIdx, `mode ${mode}: collaboration style must precede response style`);
+      assert.ok(responseStyleIdx < toolLeadInIdx, `mode ${mode}: response style must precede tool guidance`);
+      assert.ok(toolLeadInIdx < piDocsIdx, `mode ${mode}: Pi tool/docs blocks must stay in order`);
+      assert.ok(piDocsIdx < sharedToolIdx, `mode ${mode}: Pi docs must precede shared tool execution policy`);
+      assert.ok(sharedToolIdx < fileLinksIdx, `mode ${mode}: tool execution policy must precede remaining style guidance`);
       assert.match(result.blocks[sharedToolIdx].text, /## Tool execution policy/);
       assert.match(result.blocks[autonomyIdx].text, /## Autonomy and persistence/);
       assert.match(result.blocks[collaborationIdx].text, /## Working with the user/);

@@ -79,21 +79,6 @@ const EXPECTED_NON_LARGE_BLOCK_ORDER = [
   "Current working directory:",
 ];
 
-const EXPECTED_LARGE_BLOCK_ORDER = [
-  '<mmr_mode name="',
-  "## Autonomy and persistence",
-  "## Executing actions with care",
-  "## Tool use",
-  "Available tools:",
-  "Guidelines:",
-  "Pi documentation (",
-  "## Tool execution policy",
-  "## Response style",
-  "# Project Context",
-  "<available_skills>",
-  "Current date:",
-  "Current working directory:",
-];
 
 describe("Phase B baseline: buildMmrPromptLayer block ordering", () => {
   let buildMmrPromptLayer;
@@ -110,7 +95,7 @@ describe("Phase B baseline: buildMmrPromptLayer block ordering", () => {
         baseSystemPrompt: BASE_PROMPT,
       });
 
-      const expectedBlockOrder = mode === "large" ? EXPECTED_LARGE_BLOCK_ORDER : EXPECTED_NON_LARGE_BLOCK_ORDER;
+      const expectedBlockOrder = EXPECTED_NON_LARGE_BLOCK_ORDER;
       let cursor = 0;
       for (const marker of expectedBlockOrder) {
         const idx = rendered.indexOf(marker, cursor);
