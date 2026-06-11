@@ -41,6 +41,10 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-workers`: `finder`, `librarian`, and `Task` accept `background`, `group`, and `notify` — a `background: true` call returns an opaque task id immediately, and parallel calls sharing a `group` key land in one worker group. Oracle remains blocking-only.
 
+- Blocking worker runs now register in the session task registry: they appear in `task_poll`'s board (marked `blocking`) and the pinned worker widget, and `task_cancel` can stop them.
+
+- Registry contract additions: `waitForSettle` (unbounded settle await), `StartAsyncTaskArgs.runMode`, `externalSignal` (tool-call signal adapter), and `projectResult` (per-run raw-result projection materialized at settle).
+
 ### Fixed
 
 - `mmr-session-fallback`: treat `minimalcc-pi` retryable HTTP-200 silent stream stalls (`upstream_capacity_signal=silent_200_stream; retryable=true`) on the `claude-subscription` route as Anthropic overload/capacity failures, so locked-mode sessions can use the existing interactive fallback flow instead of repeatedly dead-ending on the same degraded upstream route. The retry message now says `upstream capacity` for overload-class fallbacks instead of labeling every fallback as a rate limit. Covered by classifier and extension tests.
@@ -235,6 +239,16 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 - `mmr-core`: smart/smartGPT mode posture no longer repeats the spec-refinement and correction-handling rules already stated on the mode intro line, and the rush mode posture now states that rush runs with no extended reasoning (matching its thinking policy). Deep and large mode prompts are unchanged. Mode-prompt and effective-surface fixtures updated.
 
 - **mmr-core**: smart, smartGPT, and large now share the authoritative pair-programming prompt verbatim (no posture section, 4-line response cap); deep returns to the authoritative autonomous-agent framing with a restored Engineering judgment section, outcome-first autonomy, plan right-sizing, and an outcome-first response shape. Rush is unchanged.
+
+- BREAKING — blocking worker execution is now register + await settle + project: the worker-tool factory prepares a registry-ready run and returns the registry-materialized projection inline, so projection is the single result path; the runner receives the registry-owned abort signal, with the tool-call signal adapted to task cancellation.
+
+- BREAKING — the background-agent descriptor's `start.kind: "task" | "tool"` duality is replaced by one `prepareRun` seam; finder/librarian/Task plug in their factory run-preparers and custom Markdown subagents use a tool-execute adapter.
+
+- Background task status now follows the same profile-policy classifier as `terminalOutcome` on every surface: nonzero exit with usable output under the Task profile's `prefer-usable-output` policy counts as succeeded; a clean exit with no usable output counts as failed.
+
+- Pre-spawn failures of background starts (librarian's GitHub-tools gate, invalid worker params) now fail the start inline instead of creating a failed task record.
+
+- Blocking tools' result `details` carry renderer-only `sessionKey`/`taskId` board references; model-visible `content` is unchanged.
 
 ### Added
 
@@ -603,6 +617,7 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 - `mmr-subagents` / `mmr-core`: remove the hidden `cthulu` advisor easter egg and its R'lyehian rendering entirely. Deletes the `cthulu` Pi tool, its standalone subagent profile/prompt builder, the `cthulu` entries from the `mmr-subagents` tool provider/feature capabilities and the `mmr-core` tool-ownership registry, and the `cthulu` name from the `smart`, `smartGPT`, `rush`, `large`, and `deep` locked-mode tool allowlists. The `## The Sunken Rite` roleplay gate and `## Lingering style` blocks are dropped from every locked-mode prompt, and the `MMR_CTHULU_SUMMON_GATE` / `MMR_CTHULU_RITE_ANCHORS` exports and all `CTHULU_*` / `createCthuluTool` / `registerCthuluTool` / `buildCthuluWorkerSystemPrompt` package-root exports are removed. Prompt-assembly re-entrancy is preserved by replacing the gate-as-sentinel idempotency check with an exact structural match of the previously-injected MMR tail (shared tool guidance + shared coding guidance + mode posture + response style) across all known mode templates, so re-assembling an already-rewritten prompt still strips the prior MMR tail instead of duplicating it (including the cross-mode `deep`→`smart` Task base case). Regenerated `mmr-core-prompts`, `mmr-effective-surface`, and `mmr-subagent-surface` fixtures; removed `tests/mmr-subagents-cthulu.test.mjs` and `tests/mmr-subagents-rlyehian.test.mjs`; updated `tests/mmr-subagents-extension.test.mjs`, `tests/mmr-subagents-provider.test.mjs`, `tests/mmr-subagents-progress-rendering.test.mjs`, and `tests/mmr-tool-execution-mode.test.mjs`.
 - `mmr-subagents`: remove the inert, `@deprecated` `defaultModelPreferences` member from the public `MmrAdvisorToolConfig` type and from `ORACLE_TOOL_CONFIG`. It was never read by `createMmrAdvisorTool` (model preferences resolve solely through the `oracle` subagent profile via `resolveAdvisorModelPreferences`), so its presence falsely implied it influenced routing. This is a subtractive change to a public type, but the member was optional and already documented as unused, so only a hypothetical external consumer that *set* it (a no-op) sees a type change. `ORACLE_DEFAULT_MODEL_PREFERENCES` stays exported as a profile-derived legacy convenience constant. Covered by a new `ORACLE_TOOL_CONFIG` regression assertion in `tests/mmr-subagents-oracle.test.mjs`.
 - BREAKING — `createMmrSubagentsExtension`/`createMmrAsyncTasksExtension` (and their overrides types) are replaced by `createMmrWorkersExtension`/`MmrWorkersFactoryOverrides`.
+- BREAKING — `prepareTaskRun`, `PreparedTaskRun`, `PrepareTaskRunResult`, and `buildTaskRunnerThrowResult` are removed; the background surface prepares Task runs through the worker-tool factory exactly like the blocking tool.
 
 ### Added
 
@@ -674,6 +689,7 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 - Rewrite the root `README.md` intro and lead framing to present `pi-mmr` as a configurable, reversible Pi coding harness — one command swaps the whole profile (model, thinking policy, tools, prompt) — instead of the prior "locked coding profiles" lead. Reframe the "Why pi-mmr" bullets around control, inspectability, provider-neutral routing, and running on your own provider stack; add an `Alt+R` thinking-toggle control, surface thinking policy in the `mmr-core` feature row, and add a "Delegate work to workers" section plus a tool-table row that elevate the background task fleet (`start_task`/`task_poll`/`task_wait`/`task_cancel`) and custom Markdown subagents. Documentation-only: no behavior, API, settings, or tool surface changed.
 - Refreshed `REPOMAP.md` and `INDEX.md` to reflect the current modular extension layout — all twelve source directories (the ten registered extensions plus the deprecated `mmr-toolbox` shim and the developer-only `mmr-debug`), with refreshed per-extension file inventories and entry points — and added per-extension READMEs for `mmr-patch`, `mmr-tasks`, `mmr-async-tasks`, and `mmr-custom-subagents`.
 - Retargeted tool ownership in `README.md` and `docs/` (`README.md`, `quick-reference.md`, `reference-architecture.md`, `public-api.md`, `data-storage-conventions.md`) so `apply_patch`/`task_list` are attributed to `mmr-patch`/`mmr-tasks` and the background-fleet tools to `mmr-async-tasks`, documented the `mmr-async-tasks` and `mmr-custom-subagents` public API, and corrected the persisted todo-state entry type to `mmr-tasks.todo-state`. Documentation-only: no behavior, API, settings, or tool surface changed.
+- The mmr-workers README documents the "every run is a task" execution model: blocking-run board visibility, cap exemption, no dedup or watchdog for blocking runs, and the signal adapter.
 
 ## 0.2.0 — 2026-06-05
 

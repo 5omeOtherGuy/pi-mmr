@@ -98,6 +98,7 @@ export type {
   MmrAsyncTaskRegistry,
   MmrAsyncTaskRegistryDeps,
   MmrAsyncTaskRun,
+  MmrAsyncTaskRunMode,
   MmrAsyncTaskRunResult,
   MmrAsyncTaskSettleCallback,
   MmrAsyncTaskSnapshot,
@@ -269,22 +270,36 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   startTask(args: StartAsyncTaskArgs): StartAsyncTaskResult {
     this.prune(args.sessionKey);
     const map = this.sessionMap(args.sessionKey);
+    const runMode = args.runMode ?? "background";
+    const blocking = runMode === "blocking";
 
-    // Idempotency: a retried tool call with the same id returns the same
-    // task rather than spawning a duplicate worker.
+    // Idempotency: a retried background tool call with the same id returns
+    // the same task rather than spawning a duplicate worker. Blocking runs
+    // are never deduplicated — every blocking execute must run fresh, and a
+    // reused tool-call id across different blocking tools must not replay an
+    // unrelated record.
     const indexKey = this.toolCallIndexKey(args.sessionKey, args.originToolCallId);
-    const existingId = this.taskIdByToolCallId.get(indexKey);
-    if (existingId) {
-      const existing = map.get(existingId);
-      if (existing) {
-        return { ok: true, deduplicated: true, snapshot: this.snapshot(existing) };
+    if (!blocking) {
+      const existingId = this.taskIdByToolCallId.get(indexKey);
+      if (existingId) {
+        const existing = map.get(existingId);
+        if (existing) {
+          return { ok: true, deduplicated: true, snapshot: this.snapshot(existing) };
+        }
+        this.taskIdByToolCallId.delete(indexKey);
       }
-      this.taskIdByToolCallId.delete(indexKey);
     }
 
-    const runningCount = [...map.values()].filter((r) => !isTerminalStatus(r.status)).length;
-    if (runningCount >= this.maxRunningPerSession) {
-      return { ok: false, reason: "concurrency-cap", runningCount, cap: this.maxRunningPerSession };
+    // The concurrency cap bounds background fan-out only. Blocking runs are
+    // exempt in both directions: a blocking start is never rejected, and an
+    // in-flight blocking run does not shrink the background capacity.
+    if (!blocking) {
+      const runningCount = [...map.values()].filter(
+        (r) => !isTerminalStatus(r.status) && r.runMode !== "blocking",
+      ).length;
+      if (runningCount >= this.maxRunningPerSession) {
+        return { ok: false, reason: "concurrency-cap", runningCount, cap: this.maxRunningPerSession };
+      }
     }
 
     const group = args.groupId !== undefined
@@ -297,6 +312,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       taskId: this.idFactory(),
       sessionKey: args.sessionKey,
       originToolCallId: args.originToolCallId,
+      runMode,
       agent: args.agent ?? "Task",
       description: args.description,
       prompt: args.prompt,
@@ -315,10 +331,14 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       // A manual/ready task has no runtime budget until it actually launches
       // ({@link launchTask} stamps the real deadline); otherwise the prune
       // backstop could expire a declared-but-unlaunched fleet member by wall
-      // time. An immediate task starts its budget now.
-      maxRuntimeAtMs: manual ? Number.POSITIVE_INFINITY : now + this.maxRuntimeMs,
+      // time. An immediate task starts its budget now. Blocking runs have no
+      // wall-clock budget at all: their lifetime is owned by the tool call
+      // (external signal), and a watchdog cancellation would be a
+      // model-visible behavior change for long blocking workers.
+      maxRuntimeAtMs: manual || blocking ? Number.POSITIVE_INFINITY : now + this.maxRuntimeMs,
       expiredByWatchdog: false,
       controller,
+      ...(args.projectResult !== undefined ? { projectResult: args.projectResult } : {}),
       runGeneration: 0,
       runnerSettled: false,
       deliveryOptIn: args.deliveryOptIn,
@@ -331,7 +351,21 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       group.taskIds.add(record.taskId);
       group.updatedAtMs = now;
     }
-    this.taskIdByToolCallId.set(indexKey, record.taskId);
+    if (!blocking) this.taskIdByToolCallId.set(indexKey, record.taskId);
+
+    // Signal adapter: an external (tool-call) abort requests cancellation of
+    // the registered task; the registry controller stays the only signal the
+    // run thunk sees, so task abort never depends on a live tool call.
+    if (args.externalSignal) {
+      const external = args.externalSignal;
+      const onAbort = (): void => this.requestExternalCancel(record);
+      if (external.aborted) {
+        onAbort();
+      } else {
+        external.addEventListener("abort", onAbort, { once: true });
+        record.externalAbortCleanup = () => external.removeEventListener("abort", onAbort);
+      }
+    }
 
     // Manual launch holds the run thunk until launchTask fires it; an immediate
     // start runs right away. Either way the watchdog clock starts only when the
@@ -366,11 +400,44 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       }
       this.finalizeResult(record, generation, result);
     })();
-    if (Number.isFinite(this.maxRuntimeMs) && this.maxRuntimeMs > 0) {
+    if (record.runMode !== "blocking" && Number.isFinite(this.maxRuntimeMs) && this.maxRuntimeMs > 0) {
       const timer = setTimeout(() => this.expireByWatchdog(record, generation), this.maxRuntimeMs);
       if (typeof timer.unref === "function") timer.unref();
       record.watchdogTimer = timer;
     }
+  }
+
+  /**
+   * External-signal abort (the adapter installed by {@link startTask}):
+   * request cancellation exactly like `cancelTask`'s non-terminal branch,
+   * without the bounded settle wait — the caller that owns the external
+   * signal is also the one awaiting settle.
+   */
+  private requestExternalCancel(record: MmrAsyncTaskRecord): void {
+    if (isTerminalStatus(record.status)) return;
+    if (record.status === "ready") {
+      // Never launched: drop the held run thunk and finalize synchronously.
+      const now = this.nowMs();
+      record.cancelRequestedAtMs = now;
+      record.cancelReason = "tool call aborted";
+      record.status = "cancelled";
+      record.terminalFreshness = "healthy";
+      record.terminalOutcome = undefined;
+      record.completedAtMs = now;
+      record.updatedAtMs = now;
+      record.pendingRun = undefined;
+      if (record.finalObservedAtMs === undefined) record.finalObservedAtMs = now;
+      this.settle(record);
+      return;
+    }
+    if (record.cancelRequestedAtMs === undefined) {
+      const now = this.nowMs();
+      record.cancelRequestedAtMs = now;
+      record.cancelReason = "tool call aborted";
+      record.status = "cancelling";
+      record.updatedAtMs = now;
+    }
+    if (!record.controller.signal.aborted) record.controller.abort();
   }
 
   launchTask(sessionKey: string, taskId: string): MmrAsyncTaskInternalSnapshot | undefined {
@@ -450,14 +517,31 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       record.terminalFreshness = "healthy";
       record.terminalOutcome = "failed";
       record.errorMessage = result.spawnError ?? result.subagentActivationError ?? result.errorMessage;
-    } else if (result.exitCode === 0) {
+    } else if (record.terminalOutcome !== "failed") {
+      // Status follows the SAME profile-policy classification that produced
+      // terminalOutcome (one classifier across every surface): a nonzero exit
+      // with usable output under prefer-usable-output is a success, and a
+      // clean exit with no usable output (empty-output) is a failure —
+      // matching what the worker's own result shaping reports.
       record.status = "succeeded";
       record.terminalFreshness = "healthy";
     } else {
       record.status = "failed";
       record.terminalFreshness = "healthy";
-      record.terminalOutcome = "failed";
       if (result.errorMessage) record.errorMessage = result.errorMessage;
+    }
+
+    // Projection is the ONE result path: materialize the final tool result
+    // from the raw worker result here (best-effort), so the blocking
+    // register-and-await path, task_poll's terminal projection, and
+    // task_cancel all read the same shaped result.
+    if (record.projectResult) {
+      try {
+        record.finalToolResult = record.projectResult(result);
+      } catch {
+        // A projection failure must not affect task state; consumers fall
+        // back to the raw finalResult.
+      }
     }
 
     this.settle(record);
@@ -579,6 +663,14 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
    */
   private settle(record: MmrAsyncTaskRecord): void {
     this.clearWatchdog(record);
+    if (record.externalAbortCleanup) {
+      try {
+        record.externalAbortCleanup();
+      } catch {
+        // listener removal is best-effort
+      }
+      record.externalAbortCleanup = undefined;
+    }
     // Capture observation intent BEFORE draining waiters: an active waiter at
     // settle time means a blocked task_wait is about to consume this terminal
     // result, so any delivery would only duplicate a result in hand.
@@ -864,7 +956,11 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
   getRunningCapacity(sessionKey: string): { runningCount: number; cap: number } {
     this.prune(sessionKey);
     const map = this.sessions.get(sessionKey);
-    const runningCount = map ? [...map.values()].filter((r) => !isTerminalStatus(r.status)).length : 0;
+    // Blocking runs are cap-exempt (see startTask), so they do not consume
+    // background capacity here either.
+    const runningCount = map
+      ? [...map.values()].filter((r) => !isTerminalStatus(r.status) && r.runMode !== "blocking").length
+      : 0;
     return { runningCount, cap: this.maxRunningPerSession };
   }
 
@@ -906,7 +1002,7 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
 
   private async waitForRecord(
     record: MmrAsyncTaskRecord,
-    timeoutMs: number,
+    timeoutMs: number | undefined,
     observe: boolean,
   ): Promise<boolean> {
     if (isTerminalStatus(record.status)) {
@@ -918,8 +1014,13 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
     const settled = await new Promise<boolean>((resolve) => {
       waiter = () => resolve(true);
       record.waiters.add(waiter);
-      timer = setTimeout(() => resolve(false), timeoutMs);
-      if (typeof timer.unref === "function") timer.unref();
+      // An undefined timeout waits indefinitely (the blocking
+      // register-and-await path); settle/shutdown always drain waiters, so
+      // an unbounded wait can only outlive the record's run, never leak.
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+        if (typeof timer.unref === "function") timer.unref();
+      }
     });
     if (timer) clearTimeout(timer);
     if (waiter) record.waiters.delete(waiter);
@@ -927,6 +1028,13 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
       record.finalObservedAtMs = this.nowMs();
     }
     return settled;
+  }
+
+  async waitForSettle(sessionKey: string, taskId: string): Promise<MmrAsyncTaskInternalSnapshot | undefined> {
+    const record = this.sessions.get(sessionKey)?.get(taskId);
+    if (!record) return undefined;
+    await this.waitForRecord(record, undefined, true);
+    return this.snapshot(record);
   }
 
   async waitForTask(args: {
@@ -1130,6 +1238,14 @@ class AsyncTaskRegistry implements MmrAsyncTaskRegistry {
         // push after the session has ended.
         record.runGeneration += 1;
         this.clearWatchdog(record);
+        if (record.externalAbortCleanup) {
+          try {
+            record.externalAbortCleanup();
+          } catch {
+            // listener removal is best-effort
+          }
+          record.externalAbortCleanup = undefined;
+        }
         record.deliveryOptIn = false;
         record.notify = undefined;
         record.pushOutcome = undefined;
@@ -1215,6 +1331,7 @@ const REQUIRED_REGISTRY_METHODS = [
   "dropEmptyGroup",
   "listTasks",
   "waitForTask",
+  "waitForSettle",
   "waitForGroup",
   "cancelTask",
   "cancelGroup",

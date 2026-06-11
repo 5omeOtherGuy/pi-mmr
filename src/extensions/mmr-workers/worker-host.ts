@@ -14,6 +14,7 @@
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../mmr-core/internal/json.js";
+import { getMmrSessionIdentitySnapshot } from "../mmr-core/runtime.js";
 import type { MmrActiveToolManifestEntry } from "../mmr-core/types.js";
 
 /**
@@ -24,6 +25,38 @@ export function resolveWorkerCwd(ctx: ExtensionContext | undefined): string {
   const candidate = (ctx as { cwd?: unknown } | undefined)?.cwd;
   if (typeof candidate === "string" && candidate.length > 0) return candidate;
   return process.cwd();
+}
+
+/**
+ * Resolve the async-task registry partition key for a worker run. ONE
+ * resolution shared by the blocking worker tools (the factory's
+ * register-and-await path) and the background task tools, so a blocking run
+ * and a background run started from the same session always land in the same
+ * registry partition.
+ *
+ * Precedence: explicit override (deterministic tests) → the session id from
+ * THIS call's context (so concurrent sessions in one process never share a
+ * partition) → the global identity snapshot → cwd partitioning.
+ */
+export function resolveMmrWorkerSessionKey(
+  ctx: ExtensionContext | undefined,
+  override?: string,
+): string {
+  if (override) return override;
+  try {
+    const ctxId = (ctx as { sessionManager?: { getSessionId?: () => unknown } } | undefined)
+      ?.sessionManager?.getSessionId?.();
+    if (typeof ctxId === "string" && ctxId.length > 0) return `sid:${ctxId}`;
+  } catch {
+    // best-effort
+  }
+  try {
+    const id = getMmrSessionIdentitySnapshot()?.sessionId;
+    if (id) return `sid:${id}`;
+  } catch {
+    // identity is best-effort; fall back to cwd partitioning
+  }
+  return `cwd:${resolveWorkerCwd(ctx)}`;
 }
 
 /** Minimal structural view of the Pi host needed to inspect tool state. */

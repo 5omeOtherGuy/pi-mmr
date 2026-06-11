@@ -216,6 +216,15 @@ export interface MmrSpawnedSubagentWorkerDetailsBase
   spawnError?: string;
   /** Ordered assistant/tool trail rendered in the parent TUI when the row is expanded. */
   trail: readonly MmrWorkerTrailItem[];
+  /**
+   * Renderer-only: async-task registry partition key for this run's board
+   * record. Every worker run registers (blocking and background), so the
+   * renderer can resolve the live registry snapshot; replayed transcripts
+   * fall back to the frozen details. Never part of model-consumed `content`.
+   */
+  sessionKey?: string;
+  /** Renderer-only: this run's board task id; see {@link MmrSpawnedSubagentWorkerDetailsBase.sessionKey}. */
+  taskId?: string;
 }
 
 export interface MmrWorkerResult extends MmrWorkerProgressSnapshot {

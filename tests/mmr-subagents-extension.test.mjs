@@ -125,7 +125,10 @@ describe("mmr-subagents package wiring", () => {
     assert.equal(typeof root.toPublicAsyncTaskSnapshot, "function");
     assert.equal(root.MMR_SUBAGENTS_ASYNC_PUSH_ENV, "MMR_SUBAGENTS_ASYNC_PUSH");
     assert.equal(typeof root.DEFAULT_ASYNC_TASK_MAX_PUSHES_PER_SESSION, "number");
-    assert.equal(typeof root.prepareTaskRun, "function");
+    // prepareTaskRun was retired in the "everything is a task" convergence:
+    // the background surface prepares Task runs through the worker-tool
+    // factory exactly like the blocking tool.
+    assert.equal(root.prepareTaskRun, undefined, "prepareTaskRun must no longer be exported");
     assert.equal(root.START_TASK_TOOL_NAME, "start_task");
     // Finder, oracle, Task, and librarian ship in this slice; their public surfaces
     // must be reachable from the package root so consumers can build the tools with

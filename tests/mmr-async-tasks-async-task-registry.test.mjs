@@ -1020,6 +1020,7 @@ describe("async-task-registry Phase 0 characterization gaps", () => {
     };
     assert.deepEqual(snap, {
       taskId: "t", status: "succeeded", freshness: "terminal", terminalFreshness: "healthy",
+      runMode: "background",
       agent: "finder", description: "do a thing", prompt: "prompt body", cwd: "/repo",
       resolvedModel: "prov/model", contextWindow: 200_000, workerTools: ["read", "bash"],
       createdAtMs: 1000, startedAtMs: 1000, updatedAtMs: 2000, lastProgressAtMs: 1500,
@@ -1029,6 +1030,7 @@ describe("async-task-registry Phase 0 characterization gaps", () => {
     });
     assert.deepEqual(board, {
       taskId: "t", status: "succeeded", freshness: "terminal", terminalFreshness: "healthy",
+      runMode: "background",
       agent: "finder", description: "do a thing", createdAtMs: 1000, startedAtMs: 1000,
       updatedAtMs: 2000, completedAtMs: 2000, runtimeMs: 1000, lastProgressAgeMs: 1500,
       resolvedModel: "openai/gpt-5.5", contextWindow: 200_000,

@@ -37,7 +37,7 @@ import {
 } from "./custom-config.js";
 import fs, { constants as fsConstants } from "node:fs";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "../mmr-workers/progress-rendering.js";
-import { registerMmrBackgroundAgent } from "../mmr-workers/background-agents.js";
+import { prepareRunFromToolExecute, registerMmrBackgroundAgent } from "../mmr-workers/background-agents.js";
 import {
   DEFAULT_MMR_WORKER_OUTPUT_BYTE_LIMIT,
   classifyMmrWorkerOutcomeForProfile,
@@ -612,10 +612,16 @@ export function registerMmrCustomSubagentDefinition(
     paramsHint: "{task}",
     promptParamKey: "task",
     start: {
-      kind: "tool",
       parametersSchema: CUSTOM_SUBAGENT_PARAMETERS_SCHEMA,
       workerTools: effectiveCustomSubagentToolPatterns(definition),
-      createTool: () => tool,
+      // Custom subagent tools are not built on the worker-tool factory, so
+      // their background runs adapt the blocking execute() instead of a
+      // factory run preparer.
+      prepareRun: prepareRunFromToolExecute({
+        tool,
+        agent: definition.toolName,
+        workerTools: effectiveCustomSubagentToolPatterns(definition),
+      }),
     },
   });
   return tool;

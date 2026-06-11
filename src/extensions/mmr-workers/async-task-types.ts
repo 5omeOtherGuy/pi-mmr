@@ -122,11 +122,47 @@ export type MmrAsyncTaskSettleCallback = (
   snapshot: MmrAsyncTaskInternalSnapshot,
 ) => void | Promise<void>;
 
+/**
+ * How a registered run is consumed.
+ *
+ * - `"background"` (default) — the start_task / `background: true` surface:
+ *   counted against the per-session concurrency cap, deduplicated by
+ *   `originToolCallId` (idempotent retries), and bounded by the max-runtime
+ *   watchdog.
+ * - `"blocking"` — a blocking worker tool call that registers its run and
+ *   awaits settle inline. Blocking runs are visible on the board but are
+ *   cap-exempt (they were never capped), never deduplicated by tool-call id
+ *   (each execute must run fresh), and have no max-runtime watchdog (the
+ *   tool-call signal owns their lifetime via {@link StartAsyncTaskArgs.externalSignal}).
+ */
+export type MmrAsyncTaskRunMode = "background" | "blocking";
+
 /** Arguments accepted by {@link MmrAsyncTaskRegistry.startTask}. */
 export interface StartAsyncTaskArgs {
   sessionKey: string;
   /** Originating Pi tool-call id; used for at-most-once idempotency. */
   originToolCallId: string;
+  /** Consumption mode; see {@link MmrAsyncTaskRunMode}. Default `"background"`. */
+  runMode?: MmrAsyncTaskRunMode;
+  /**
+   * Signal adapter decoupling task abort from the tool-call signal: when the
+   * external signal aborts while the task is non-terminal, the registry
+   * requests cancellation (status `cancelling` + worker abort) exactly as
+   * `cancelTask` would. The registry's own `AbortController` remains the only
+   * signal handed to the run thunk, so a background task's cancellation never
+   * depends on a live tool call, while a blocking call's abort still cancels
+   * its registered task.
+   */
+  externalSignal?: AbortSignal;
+  /**
+   * Per-run projection from the raw terminal {@link MmrWorkerResult} to the
+   * final tool result. When the run thunk settles with a raw worker result,
+   * the registry materializes `finalToolResult` through this (best-effort)
+   * so every consumer — the blocking register-and-await path, task_poll's
+   * terminal projection, and task_cancel — reads ONE projected result.
+   * Ignored for run thunks that already return a tool-run result.
+   */
+  projectResult?: (result: MmrWorkerResult) => AgentToolResult<unknown>;
   /** User-facing worker kind launched by start_task (Task, finder, librarian). */
   agent?: string;
   description: string;
@@ -197,6 +233,8 @@ export interface MmrAsyncTaskInternalSnapshot {
   status: MmrAsyncTaskStatus;
   freshness: MmrAsyncTaskFreshness;
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
+  /** Consumption mode the run registered under; see {@link MmrAsyncTaskRunMode}. */
+  runMode: MmrAsyncTaskRunMode;
   agent: string;
   description: string;
   prompt: string;
@@ -237,6 +275,8 @@ export interface MmrAsyncTaskSnapshot {
   status: MmrAsyncTaskStatus;
   freshness: MmrAsyncTaskFreshness;
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
+  /** Consumption mode the run registered under; see {@link MmrAsyncTaskRunMode}. */
+  runMode: MmrAsyncTaskRunMode;
   agent: string;
   description: string;
   createdAtMs: number;
@@ -265,6 +305,8 @@ export interface MmrAsyncTaskBoardEntry {
   status: MmrAsyncTaskStatus;
   freshness: MmrAsyncTaskFreshness;
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
+  /** Consumption mode the run registered under; see {@link MmrAsyncTaskRunMode}. */
+  runMode: MmrAsyncTaskRunMode;
   agent: string;
   description: string;
   createdAtMs: number;
@@ -454,6 +496,14 @@ export interface MmrAsyncTaskRegistry {
     taskId: string;
     timeoutMs?: number;
   }): Promise<WaitForAsyncTaskResult>;
+  /**
+   * Await a task's terminal state with NO timeout (unlike `waitForTask`,
+   * which is bounded by `MAX_TASK_WAIT_TIMEOUT_MS`). The blocking
+   * register-and-await path uses this: the call consumes the result inline,
+   * so the settled task is marked observed. Resolves immediately for an
+   * already-terminal task and `undefined` for an unknown id.
+   */
+  waitForSettle(sessionKey: string, taskId: string): Promise<MmrAsyncTaskInternalSnapshot | undefined>;
   waitForGroup(args: {
     sessionKey: string;
     groupId: string;

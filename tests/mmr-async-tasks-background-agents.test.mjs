@@ -35,6 +35,7 @@ function probeProfile(overrides = {}) {
 
 async function probeDescriptor(tool) {
   const { Type } = await import("typebox");
+  const agents = await importSource(AGENTS_MODULE);
   return {
     agent: "sa__probe",
     profileName: "sa__probe",
@@ -42,10 +43,9 @@ async function probeDescriptor(tool) {
     paramsHint: "{task}",
     promptParamKey: "task",
     start: {
-      kind: "tool",
       parametersSchema: Type.Object({ task: Type.String() }, { additionalProperties: false }),
       workerTools: ["read"],
-      createTool: () => tool,
+      prepareRun: agents.prepareRunFromToolExecute({ tool, agent: "sa__probe", workerTools: ["read"] }),
     },
   };
 }

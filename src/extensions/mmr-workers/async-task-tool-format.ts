@@ -28,6 +28,11 @@ import {
   normalizeMmrBackgroundAgentName,
   type MmrBackgroundAgentDescriptor,
 } from "./background-agents.js";
+
+// Status/error inference for tool-delegating runs moved next to the
+// tool-execute adapter that needs it; re-exported here so existing callers
+// keep one stable import path.
+export { inferToolErrorMessage, inferToolRunStatus } from "./background-agents.js";
 import { getMmrSubagentProfile } from "../mmr-core/subagent-profiles.js";
 
 export function escapeXmlAttr(value: string): string {
@@ -165,32 +170,6 @@ function shortDescription(descriptor: MmrBackgroundAgentDescriptor, params: unkn
   const summary = summarizeInput(descriptor, params).replace(/\s+/g, " ").trim();
   const clipped = summary.length > 80 ? `${summary.slice(0, 77)}…` : summary;
   return `${descriptor.agent}: ${clipped || "background run"}`;
-}
-
-export function inferToolRunStatus(result: AgentToolResult<unknown>, signal: AbortSignal): MmrAsyncTaskStatus {
-  const details = isRecord(result.details) ? result.details : {};
-  const status = details.status;
-  if (signal.aborted || status === "aborted" || details.aborted === true) return "cancelled";
-  if (status === "success") return "succeeded";
-  if (typeof status === "string") {
-    if (
-      status === "no-agent-start"
-      || status === "empty-output"
-      || status.includes("error")
-      || status.includes("gated")
-      || status.includes("exhausted")
-    ) return "failed";
-  }
-  if (typeof details.exitCode === "number" && details.exitCode !== 0) return "failed";
-  if (typeof details.spawnError === "string" || typeof details.subagentActivationError === "string") return "failed";
-  return "succeeded";
-}
-
-export function inferToolErrorMessage(result: AgentToolResult<unknown>): string | undefined {
-  const details = isRecord(result.details) ? result.details : {};
-  return typeof details.errorMessage === "string" && details.errorMessage.length > 0
-    ? details.errorMessage
-    : undefined;
 }
 
 export function extractTrailFromToolResult(result: AgentToolResult<unknown> | undefined): readonly MmrWorkerTrailItem[] | undefined {
@@ -374,18 +353,24 @@ export function normalizeMember(raw: Record<string, unknown>): ParsedMember | { 
   }
   let params: unknown = raw.params;
   if (params === undefined) {
-    if (descriptor.start.kind === "task") {
-      // The Task agent folds the top-level prompt/description shortcuts even
-      // when prompt is absent; its own pre-spawn validation reports the
-      // missing prompt with the Task tool's message.
-      params = { prompt: raw.prompt, description: raw.description };
+    if (descriptor.descriptionParamKey !== undefined) {
+      // Agents with a description param (Task) fold the top-level
+      // prompt/description shortcuts even when prompt is absent; their own
+      // pre-spawn validation reports the missing prompt with the tool's
+      // message.
+      params = { [descriptor.promptParamKey]: raw.prompt, [descriptor.descriptionParamKey]: raw.description };
     } else if (typeof raw.prompt === "string") {
       params = { [descriptor.promptParamKey]: raw.prompt };
     } else {
       return { error: `params is required when agent is ${agent}.` };
     }
-  } else if (descriptor.start.kind === "task" && isRecord(params) && params.description === undefined && raw.description !== undefined) {
-    params = { ...params, description: raw.description };
+  } else if (
+    descriptor.descriptionParamKey !== undefined
+    && isRecord(params)
+    && params[descriptor.descriptionParamKey] === undefined
+    && raw.description !== undefined
+  ) {
+    params = { ...params, [descriptor.descriptionParamKey]: raw.description };
   }
   if (!isRecord(params)) {
     return { error: "params must be an object." };
@@ -497,7 +482,10 @@ export function renderBoard(board: MmrAsyncTaskBoard): string {
     for (const e of entries) {
       const fresh = e.freshness !== "healthy" && e.freshness !== "terminal" ? ` [${e.freshness}]` : "";
       const delivery = isTerminal(e.status) ? `, delivery: ${e.completionPush}` : "";
-      lines.push(`  - ${e.taskId} (${e.status}${fresh}, ${e.agent}${delivery}) "${e.description}"`);
+      // Mark blocking rows so the model knows their results arrive (or
+      // arrived) inline with the originating tool call — not via task_poll.
+      const blocking = e.runMode === "blocking" ? ", blocking" : "";
+      lines.push(`  - ${e.taskId} (${e.status}${fresh}, ${e.agent}${blocking}${delivery}) "${e.description}"`);
     }
   };
   section("Active", board.active);
