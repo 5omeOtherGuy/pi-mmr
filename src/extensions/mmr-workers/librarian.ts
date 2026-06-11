@@ -30,8 +30,12 @@ import {
 import { buildLibrarianWorkerSystemPrompt as buildLibrarianWorkerSystemPromptFromPrompts } from "./prompts.js";
 import { resolveEffectiveRunner } from "./worker-fallback-run.js";
 import {
+  clipMmrWorkerDescription,
+  createWorkerRunPreparer,
   createWorkerTool,
+  type MmrWorkerRunPreparer,
   type MmrWorkerToolRunContext,
+  type MmrWorkerToolSpec,
 } from "./worker-tool-factory.js";
 import { LIBRARIAN_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import { buildWorkerToolManifest, type ToolHostLike } from "./worker-host.js";
@@ -531,7 +535,15 @@ function isContextWindowError(err: unknown): boolean {
     || (err instanceof Error && err.name === "MmrLibrarianContextWindowError");
 }
 
-export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinition {
+/**
+ * One spec + factory-options pair shared by the blocking tool definition and
+ * the background run preparer, so both surfaces are generated from the same
+ * declarative source.
+ */
+function librarianToolBlueprint(deps: LibrarianToolDeps): {
+  spec: MmrWorkerToolSpec<LibrarianParams, LibrarianDetails>;
+  factoryOptions: Parameters<typeof createWorkerTool<LibrarianParams, LibrarianDetails>>[2];
+} {
   const effectiveRunner = resolveEffectiveRunner(deps, "createLibrarianTool");
   const resolveInvocation = deps.resolveInvocation ?? defaultResolveLibrarianInvocation;
   const detailsCtxOf = (
@@ -544,8 +556,8 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
     ...(runCtx.resolvedModel !== undefined ? { resolvedModel: runCtx.resolvedModel } : {}),
     ...(runCtx.contextWindow !== undefined ? { contextWindow: runCtx.contextWindow } : {}),
   });
-  return createWorkerTool<LibrarianParams, LibrarianDetails>(
-    {
+  return {
+    spec: {
       toolName: LIBRARIAN_TOOL_NAME,
       profileName: LIBRARIAN_SUBAGENT_PROFILE_NAME,
       description: LIBRARIAN_DESCRIPTION,
@@ -649,13 +661,27 @@ export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinitio
           ...(runCtx.contextWindow !== undefined ? { contextWindow: runCtx.contextWindow } : {}),
         });
       },
+      describeRun: (params) => ({
+        description: `librarian: ${clipMmrWorkerDescription(params.query)}`,
+        displayPrompt: params.query,
+      }),
     },
-    deps,
-    {
+    factoryOptions: {
       effectiveRunner,
       resolveModelPreferencesOverride: (cwd) => resolveLibrarianModelPreferencesOverride(cwd, deps),
     },
-  );
+  };
+}
+
+export function createLibrarianTool(deps: LibrarianToolDeps = {}): ToolDefinition {
+  const { spec, factoryOptions } = librarianToolBlueprint(deps);
+  return createWorkerTool(spec, deps, factoryOptions);
+}
+
+/** Background-surface seam: prepare a registry-ready librarian run from raw params. */
+export function createLibrarianRunPreparer(deps: LibrarianToolDeps = {}): MmrWorkerRunPreparer<LibrarianDetails> {
+  const { spec, factoryOptions } = librarianToolBlueprint(deps);
+  return createWorkerRunPreparer(spec, deps, factoryOptions);
 }
 
 export function registerLibrarianTool(pi: ExtensionAPI, deps: LibrarianToolDeps = {}): ToolDefinition {

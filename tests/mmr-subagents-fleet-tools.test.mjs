@@ -78,7 +78,15 @@ function makeClassifiedRunner(failForPrompt) {
     runner: {
       run(options) {
         calls.push(options);
-        return Promise.resolve(makeWorkerResult({ exitCode: failForPrompt(options.prompt) ? 1 : 0 }));
+        // A genuine failure: nonzero exit AND no usable output. Task's
+        // prefer-usable-output policy (§9.4) classifies a nonzero exit WITH
+        // usable output as success, and the registry status follows the same
+        // classifier on every surface.
+        return Promise.resolve(
+          failForPrompt(options.prompt)
+            ? makeWorkerResult({ exitCode: 1, finalOutput: "", truncatedFinalOutput: "" })
+            : makeWorkerResult(),
+        );
       },
     },
     calls,

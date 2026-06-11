@@ -25,6 +25,7 @@ import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildOracleWorkerSystemPrompt as buildOracleWorkerSystemPromptFromPrompts } from "./prompts.js";
 import { resolveEffectiveRunner } from "./worker-fallback-run.js";
 import {
+  clipMmrWorkerDescription,
   createWorkerTool,
   resolveWorkerModelPreferencesOverride,
   type MmrWorkerToolResolveInput,
@@ -497,6 +498,10 @@ export function createMmrAdvisorTool(
       buildFinalDetails: (result, runCtx) =>
         buildDetails(config, result, runCtx.resolvedModel, runCtx.cwd, runCtx.runData, runCtx.contextWindow),
       buildFinalContent: (result) => buildFinalContent(config.outputLabel, result, config.profileName),
+      describeRun: (params) => ({
+        description: `${config.toolName}: ${clipMmrWorkerDescription(params.task)}`,
+        displayPrompt: params.task,
+      }),
     },
     deps,
     {

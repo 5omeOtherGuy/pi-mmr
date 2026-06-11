@@ -68,6 +68,7 @@ export function snapshotOf(
     status: record.status,
     freshness: freshnessOf(record, now, cfg),
     ...(record.terminalFreshness !== undefined ? { terminalFreshness: record.terminalFreshness } : {}),
+    runMode: record.runMode,
     agent: record.agent,
     description: record.description,
     prompt: record.prompt,
@@ -110,6 +111,7 @@ export function boardEntryOf(
     status: record.status,
     freshness: freshnessOf(record, now, cfg),
     ...(record.terminalFreshness !== undefined ? { terminalFreshness: record.terminalFreshness } : {}),
+    runMode: record.runMode,
     agent: record.agent,
     description: record.description,
     createdAtMs: record.createdAtMs,
@@ -233,6 +235,7 @@ export function toPublicAsyncTaskSnapshot(
     ...(snapshot.terminalFreshness !== undefined
       ? { terminalFreshness: snapshot.terminalFreshness }
       : {}),
+    runMode: snapshot.runMode,
     agent: snapshot.agent,
     description: snapshot.description,
     createdAtMs: snapshot.createdAtMs,

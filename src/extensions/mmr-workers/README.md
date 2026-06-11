@@ -208,6 +208,10 @@ export MMR_SUBAGENTS_ASYNC_PUSH=false   # disable automatic completion notices/i
 
 A session-scoped registry (`createMmrAsyncTaskRegistry`/`getMmrAsyncTaskRegistry`) owns task state, status transitions, and freshness. Tasks move through running and terminal states; terminal records are retained for a bounded TTL (`ASYNC_TASK_TERMINAL_TTL_MS`, `ASYNC_TASK_OBSERVED_TERMINAL_TTL_MS`) so a late `task_poll` still sees the outcome. Long-running and stalled workers are bounded by `ASYNC_TASK_MAX_RUNTIME_MS` and `ASYNC_TASK_STALLED_AFTER_MS`; cancellation is finalized after `ASYNC_TASK_CANCEL_DEAD_AFTER_MS`.
 
+#### Every run is a task
+
+EVERY worker run registers in the registry — blocking calls included. A blocking `finder`/`oracle`/`librarian`/`Task` call registers its run (`runMode: "blocking"`), awaits settle, and returns the projected result inline, so projection through the registry is the only result path and blocking runs are visible on the `task_poll` board and the pinned widget like background runs. Blocking runs differ from background runs in three deliberate ways: they are exempt from the running-task ceiling (in both directions — they are never rejected and never shrink background capacity), they are never deduplicated by tool-call id, and they carry no max-runtime watchdog (the tool-call `AbortSignal` is adapted to task cancellation by the registry, which also means `task_cancel` can stop a blocking run). Oracle registers like every other worker but remains blocking-only as a tool.
+
 #### At-most-once completion delivery
 
 When automatic delivery is enabled, each finished task is announced to the model **at most once** across two paths:

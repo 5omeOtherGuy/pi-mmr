@@ -15,7 +15,6 @@ import {
   buildSpawnedProgressDetailsBase,
   progressTextOrPlaceholder,
 } from "./worker-result-shaping.js";
-import type { PreparedTaskRun } from "./task.js";
 
 /**
  * Pure result/outcome shaping for the Task tool: the Task status classifier
@@ -319,16 +318,12 @@ export function buildTaskFinalResult(
 }
 
 /**
- * Map a runner `run()` throw (spawn failure) to a `spawn-error`
- * `AgentToolResult` (spec §9.4 rule 2).
- */
-/**
  * Build a synthetic {@link MmrWorkerResult} for a runner `run()` throw
- * (spawn failure). Used by the async `start_task` path so a background
- * worker that fails to spawn finalizes into the SAME `spawn-error`
- * {@link TaskStatus} and final shaping as the blocking `Task` tool,
- * rather than a generic registry error. The `spawnError` discriminator
- * drives `classifyTaskOutcome` deterministically.
+ * (spawn failure). Used by the worker-tool factory's prepared runs so a
+ * worker that fails to spawn settles in the registry with the SAME
+ * `spawn-error` status and final shaping on every surface, rather than a
+ * generic registry error. The `spawnError` discriminator drives the
+ * outcome classifiers deterministically.
  */
 export function buildSpawnErrorWorkerResult(
   err: unknown,
@@ -355,29 +350,6 @@ export function buildSpawnErrorWorkerResult(
     errorMessage: message,
     spawnError: message,
   };
-}
-
-/** Map a runner run() throw (spawn failure) to a spawn-error AgentToolResult. */
-export function buildTaskRunnerThrowResult(
-  err: unknown,
-  prepared: PreparedTaskRun,
-): AgentToolResult<TaskDetails> {
-  const message = err instanceof Error ? err.message : String(err);
-  return makeFailureResult({
-    status: "spawn-error",
-    prompt: prepared.params.prompt,
-    description: prepared.params.description,
-    cwd: prepared.cwd,
-    workerTools: prepared.detailsContext.workerTools,
-    content: `Task: worker failed to spawn: ${message}`,
-    errorMessage: message,
-    ...(prepared.detailsContext.resolvedModel !== undefined
-      ? { resolvedModel: prepared.detailsContext.resolvedModel }
-      : {}),
-    ...(prepared.detailsContext.contextWindow !== undefined
-      ? { contextWindow: prepared.detailsContext.contextWindow }
-      : {}),
-  });
 }
 
 // Internal factory seams: the Task worker-tool spec consumes the

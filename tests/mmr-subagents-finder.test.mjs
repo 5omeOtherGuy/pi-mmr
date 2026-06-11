@@ -384,7 +384,12 @@ describe("finder execute() seam", () => {
     // result.details for parent-side observability.
     assert.equal(options.tools, undefined);
     assert.equal(options.systemPrompt, "SP for /abs/project");
-    assert.equal(options.signal, controller.signal);
+    // Every run registers in the async-task registry, which owns the worker
+    // AbortController; the runner receives the registry signal (adapted from
+    // the tool-call signal), never the tool-call signal itself.
+    assert.ok(options.signal instanceof AbortSignal, "runner must receive the registry-owned task signal");
+    assert.notEqual(options.signal, controller.signal);
+    assert.equal(options.signal.aborted, false);
     assert.equal(options.model, "openai-codex/gpt-5.4-mini");
     assert.equal(options.profileName, "finder", "finder must call runMmrSubagentWorker with profileName='finder'");
     assert.equal("subagentProfile" in options, false, "runner contract uses profileName; the retired subagentProfile field must not leak into options");

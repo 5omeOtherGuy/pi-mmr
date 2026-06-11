@@ -147,22 +147,6 @@ describe("mmr-subagents task-result", () => {
     assert.equal(buildSpawnErrorWorkerResult("string failure", { prompt: "p", cwd: "/repo" }).spawnError, "string failure");
   });
 
-  it("maps a runner throw to a complete spawn-error tool result", async () => {
-    const { buildTaskRunnerThrowResult } = await importSource(RESULT_MODULE);
-
-    const prepared = {
-      params: { prompt: "do the thing", description: "a bounded task" },
-      cwd: "/repo",
-      detailsContext: { ...DETAILS_CTX, resolvedModel: "provider/model-x" },
-    };
-    const result = buildTaskRunnerThrowResult(new Error("spawn EACCES"), prepared);
-    assert.match(result.content[0].text, /^Task: worker failed to spawn: spawn EACCES$/);
-    assert.equal(result.details.status, "spawn-error");
-    assert.equal(result.details.errorMessage, "spawn EACCES");
-    assert.equal(result.details.prompt, "do the thing");
-    assert.equal(result.details.model, "provider/model-x");
-  });
-
   it("keeps the moved surface resolving through the task entry file", async () => {
     const resultModule = await importSource(RESULT_MODULE);
     const task = await importSource(TASK_MODULE);
@@ -173,7 +157,6 @@ describe("mmr-subagents task-result", () => {
       "buildSpawnErrorWorkerResult",
       "buildTaskFinalResult",
       "buildTaskProgressResult",
-      "buildTaskRunnerThrowResult",
       "classifyTaskOutcome",
       "hasUsableTaskFinalText",
     ]) {

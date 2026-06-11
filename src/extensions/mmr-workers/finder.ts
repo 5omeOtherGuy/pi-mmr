@@ -30,9 +30,13 @@ import type { MmrModelPreference } from "../mmr-core/types.js";
 import { buildFinderWorkerSystemPrompt as buildFinderWorkerSystemPromptFromPrompts } from "./prompts.js";
 import { resolveEffectiveRunner } from "./worker-fallback-run.js";
 import {
+  clipMmrWorkerDescription,
+  createWorkerRunPreparer,
   createWorkerTool,
   resolveWorkerModelPreferencesOverride,
+  type MmrWorkerRunPreparer,
   type MmrWorkerToolResolveInput,
+  type MmrWorkerToolSpec,
 } from "./worker-tool-factory.js";
 import { FINDER_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
 import { type ToolHostLike } from "./worker-host.js";
@@ -617,10 +621,18 @@ function resolveFinderInvocation(
   });
 }
 
-export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
+/**
+ * One spec + factory-options pair shared by the blocking tool definition and
+ * the background run preparer, so both surfaces are generated from the same
+ * declarative source.
+ */
+function finderToolBlueprint(deps: FinderToolDeps): {
+  spec: MmrWorkerToolSpec<FinderParams, FinderDetails>;
+  factoryOptions: Parameters<typeof createWorkerTool<FinderParams, FinderDetails>>[2];
+} {
   const effectiveRunner = resolveEffectiveRunner(deps, "createFinderTool");
-  return createWorkerTool<FinderParams, FinderDetails>(
-    {
+  return {
+    spec: {
       toolName: FINDER_TOOL_NAME,
       profileName: FINDER_SUBAGENT_PROFILE,
       description: FINDER_DESCRIPTION,
@@ -653,9 +665,12 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
       buildFinalDetails: (result, runCtx) =>
         buildDetails(result, runCtx.resolvedModel, runCtx.cwd, runCtx.contextWindow),
       buildFinalContent: (result, runCtx) => buildFinalContent(result, runCtx.cwd),
+      describeRun: (params) => ({
+        description: `finder: ${clipMmrWorkerDescription(params.query)}`,
+        displayPrompt: params.query,
+      }),
     },
-    deps,
-    {
+    factoryOptions: {
       effectiveRunner,
       resolveModelPreferencesOverride: (cwd) =>
         resolveWorkerModelPreferencesOverride({
@@ -672,7 +687,18 @@ export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
             )?.subagentModelPreferences,
         }),
     },
-  );
+  };
+}
+
+export function createFinderTool(deps: FinderToolDeps = {}): ToolDefinition {
+  const { spec, factoryOptions } = finderToolBlueprint(deps);
+  return createWorkerTool(spec, deps, factoryOptions);
+}
+
+/** Background-surface seam: prepare a registry-ready finder run from raw params. */
+export function createFinderRunPreparer(deps: FinderToolDeps = {}): MmrWorkerRunPreparer<FinderDetails> {
+  const { spec, factoryOptions } = finderToolBlueprint(deps);
+  return createWorkerRunPreparer(spec, deps, factoryOptions);
 }
 
 /**

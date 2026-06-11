@@ -12,11 +12,13 @@ import type {
   MmrAsyncTaskGroupSettleCallback,
   MmrAsyncTaskNotifier,
   MmrAsyncTaskRun,
+  MmrAsyncTaskRunMode,
   MmrAsyncTaskRunResult,
   MmrAsyncTaskSettleCallback,
   MmrAsyncTaskStatus,
   MmrAsyncTaskTerminalFreshness,
   MmrAsyncTaskToolRunResult,
+  StartAsyncTaskArgs,
 } from "./async-task-registry.js";
 
 /**
@@ -105,6 +107,8 @@ export interface MmrAsyncTaskRecord {
   taskId: string;
   sessionKey: string;
   originToolCallId: string;
+  /** Consumption mode the run registered under; see {@link MmrAsyncTaskRunMode}. */
+  runMode: MmrAsyncTaskRunMode;
   agent: string;
   description: string;
   prompt: string;
@@ -132,6 +136,14 @@ export interface MmrAsyncTaskRecord {
   terminalFreshness?: MmrAsyncTaskTerminalFreshness;
   expiredByWatchdog: boolean;
   controller: AbortController;
+  /**
+   * Removes the abort listener installed on {@link StartAsyncTaskArgs.externalSignal}.
+   * Called once at settle so a long-lived external signal cannot leak
+   * listeners or cancel a record that already finished.
+   */
+  externalAbortCleanup?: () => void;
+  /** Per-run raw-result projection; see {@link StartAsyncTaskArgs.projectResult}. */
+  projectResult?: StartAsyncTaskArgs["projectResult"];
   /**
    * Declared by the fleet form and launched on a deferred tick. Stays `true`
    * through `ready`→`running`→terminal so both surfaces always reveal the row

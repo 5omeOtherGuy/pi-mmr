@@ -288,7 +288,12 @@ describe("librarian execute() runner dispatch", () => {
     assert.equal(options.model, "claude-subscription/claude-opus-4-6");
     assert.equal(options.systemPrompt, "LIBRARIAN SYSTEM PROMPT");
     assert.equal(options.systemPromptDelivery, "replace");
-    assert.equal(options.signal, controller.signal);
+    // Every run registers in the async-task registry, which owns the worker
+    // AbortController; the runner receives the registry signal (adapted from
+    // the tool-call signal), never the tool-call signal itself.
+    assert.ok(options.signal instanceof AbortSignal, "runner must receive the registry-owned task signal");
+    assert.notEqual(options.signal, controller.signal);
+    assert.equal(options.signal.aborted, false);
     assert.equal(typeof options.outputByteLimit, "number");
     assert.equal(result.details.status, "success");
     assert.equal(result.details.query, "Explain acme/repo routing.");

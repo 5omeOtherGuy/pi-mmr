@@ -5,18 +5,19 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { registerMmrOwnedTool } from "../mmr-core/owned-tools.js";
-import { getMmrSubagentProfile } from "../mmr-core/subagent-profiles.js";
-import { getMmrSessionIdentitySnapshot } from "../mmr-core/runtime.js";
 import {
-  buildSpawnErrorWorkerResult,
   buildTaskFinalResult,
-  prepareTaskRun,
   type TaskToolDeps,
 } from "./task.js";
 import type { FinderToolDeps } from "./finder.js";
 import type { LibrarianToolDeps } from "./librarian.js";
+import type {
+  MmrPreparedWorkerRun,
+  MmrPreparedWorkerRunResult,
+} from "./worker-tool-factory.js";
 import {
   getMmrBackgroundAgent,
+  inferToolErrorMessage,
   type MmrBackgroundAgentDescriptor,
 } from "./background-agents.js";
 import {
@@ -33,7 +34,6 @@ import {
   type MmrAsyncTaskGroupSnapshot,
   type MmrAsyncTaskRegistry,
   type MmrAsyncTaskInternalSnapshot,
-  type MmrAsyncTaskRun,
   type StartAsyncTaskArgs,
 } from "./async-task-registry.js";
 
@@ -70,8 +70,6 @@ import {
   formatAsyncTaskDeliveryNoticeSafely,
   groupNotFoundResult,
   groupResult,
-  inferToolErrorMessage,
-  inferToolRunStatus,
   invalidAsyncControlResult,
   nonNormalOutcomeText,
   normalizeMember,
@@ -85,7 +83,7 @@ import {
   summarizeTrail,
   validationResult,
 } from "./async-task-tool-format.js";
-import { resolveWorkerCwd } from "./worker-host.js";
+import { resolveMmrWorkerSessionKey } from "./worker-host.js";
 
 export {
   ASYNC_TASK_AGENT_NAMES,
@@ -160,24 +158,9 @@ function backgroundCardExtras(registry: MmrAsyncTaskRegistry): BackgroundCardExt
 }
 
 function resolveSessionKey(ctx: ExtensionContext | undefined, deps: AsyncTaskToolDeps): string {
-  if (deps.sessionKey) return deps.sessionKey;
-  // Prefer the session id from THIS call's context so concurrent sessions in
-  // one process never share a partition; fall back to the global identity
-  // snapshot, then to cwd.
-  try {
-    const ctxId = (ctx as { sessionManager?: { getSessionId?: () => unknown } } | undefined)
-      ?.sessionManager?.getSessionId?.();
-    if (typeof ctxId === "string" && ctxId.length > 0) return `sid:${ctxId}`;
-  } catch {
-    // best-effort
-  }
-  try {
-    const id = getMmrSessionIdentitySnapshot()?.sessionId;
-    if (id) return `sid:${id}`;
-  } catch {
-    // identity is best-effort; fall back to cwd partitioning
-  }
-  return `cwd:${resolveWorkerCwd(ctx)}`;
+  // ONE sessionKey resolution shared with the blocking worker tools (the
+  // factory's register-and-await path) via worker-host.
+  return resolveMmrWorkerSessionKey(ctx, deps.sessionKey);
 }
 
 function baseToolDeps(deps: AsyncTaskToolDeps): Record<string, unknown> {
@@ -269,32 +252,86 @@ function descriptorDeps(deps: AsyncTaskToolDeps, depsKey: string | undefined): R
 }
 
 /**
- * Spreadable `partialOutputPolicy` start-arg for a background run, read from
- * the agent's backing profile so the registry classifies raw worker results
- * under the same profile-declared nonzero-exit policy as the blocking tool.
- * Profiles without a declared policy (everything but task-subagent) spread
- * nothing.
+ * Validate and prepare one background run for a descriptor: optional schema
+ * pre-validation, then the descriptor's `prepareRun` (the SAME preparation
+ * path the blocking worker tool uses). Returns either a registry-ready
+ * prepared run or a fully shaped pre-spawn failure result — no registry side
+ * effect happens either way.
  */
-function agentPartialOutputPolicyArg(
+function prepareDescriptorRun(args: {
+  descriptor: MmrBackgroundAgentDescriptor;
+  deps: AsyncTaskToolDeps;
+  params: unknown;
+  ctx: ExtensionContext;
+  toolCallId: string;
+  resultTool: string;
+  agent: AsyncTaskAgentName;
+}): { prepared: MmrPreparedWorkerRun } | { failure: AgentToolResult<AsyncTaskToolDetails> } {
+  const { descriptor } = args;
+  if (descriptor.start.parametersSchema) {
+    const v = validateAsyncToolParams(descriptor.toolName, descriptor.start.parametersSchema, args.params);
+    if (!v.ok) return { failure: validationResult(v.message, args.resultTool) };
+  }
+  const mergedDeps = { ...baseToolDeps(args.deps), ...descriptorDeps(args.deps, descriptor.start.depsKey) };
+  let prep: MmrPreparedWorkerRunResult;
+  try {
+    prep = descriptor.start.prepareRun(mergedDeps, args.params, args.ctx, { toolCallId: args.toolCallId });
+  } catch (err) {
+    // Preparers without a structured params failure throw on invalid params
+    // (the blocking finder/oracle contract); the background surface maps the
+    // throw to its validation result.
+    const message = err instanceof Error ? err.message : String(err);
+    return { failure: validationResult(message, args.resultTool) };
+  }
+  if (!prep.ok) {
+    // Pre-spawn failure (validation, gate, or resolution): surface the
+    // prepared failure's content under the background result shape. No
+    // record and no group were created.
+    return {
+      failure: {
+        content: prep.result.content,
+        details: {
+          worker: "mmr-subagents.async-task",
+          tool: args.resultTool,
+          agent: args.agent,
+          errorMessage: inferToolErrorMessage(prep.result),
+        },
+      },
+    };
+  }
+  return { prepared: prep.prepared };
+}
+
+/**
+ * Registry start-args derived from a prepared run. Agents whose params own
+ * the run identity (a `descriptionParamKey`, i.e. Task) label the record
+ * from the prepared description/prompt; the rest keep the normalized
+ * member's summaries (which honor an explicit start_task `description`).
+ */
+function preparedStartArgs(
   descriptor: MmrBackgroundAgentDescriptor,
-): Pick<StartAsyncTaskArgs, "partialOutputPolicy"> {
-  const policy = getMmrSubagentProfile(descriptor.profileName)?.partialOutputPolicy;
-  return policy !== undefined ? { partialOutputPolicy: policy } : {};
+  prepared: MmrPreparedWorkerRun,
+  member: ParsedMember,
+): Omit<StartAsyncTaskArgs, "sessionKey" | "originToolCallId" | "deliveryOptIn"> {
+  const paramsOwnIdentity = descriptor.descriptionParamKey !== undefined;
+  return {
+    agent: descriptor.agent,
+    description: paramsOwnIdentity ? prepared.description : member.description,
+    prompt: paramsOwnIdentity ? prepared.displayPrompt : member.promptSummary,
+    cwd: prepared.cwd,
+    workerTools: prepared.workerTools,
+    ...(prepared.partialOutputPolicy !== undefined ? { partialOutputPolicy: prepared.partialOutputPolicy } : {}),
+    ...(prepared.resolvedModel !== undefined ? { resolvedModel: prepared.resolvedModel } : {}),
+    ...(prepared.contextWindow !== undefined ? { contextWindow: prepared.contextWindow } : {}),
+    ...(prepared.capabilityProfile !== undefined ? { capabilityProfile: prepared.capabilityProfile } : {}),
+    ...(prepared.projectResult !== undefined ? { projectResult: prepared.projectResult } : {}),
+    run: prepared.run,
+  };
 }
 
 interface FleetMemberBuild {
-  startArgs: {
-    agent: AsyncTaskAgentName;
-    description: string;
-    prompt: string;
-    cwd: string;
-    workerTools: readonly string[];
-    resolvedModel?: string;
-    contextWindow?: number;
-    capabilityProfile?: string;
-    partialOutputPolicy?: StartAsyncTaskArgs["partialOutputPolicy"];
-    run: MmrAsyncTaskRun;
-  };
+  startArgs: Omit<StartAsyncTaskArgs, "sessionKey" | "originToolCallId" | "deliveryOptIn">;
+  prepared: MmrPreparedWorkerRun;
   row: AsyncTaskFleetRow;
 }
 
@@ -355,32 +392,22 @@ async function executeBackgroundStart(options: BackgroundStartOptions): Promise<
   const { registry, deps, ctx, toolCallId, descriptor, member, wantsNotify, resultTool } = options;
   const sessionKey = resolveSessionKey(ctx, deps);
   const onSettle = () => refreshAsyncTaskWidget(ctx, registry, sessionKey);
-  // Validate the worker payload BEFORE any registry side effect (group open)
-  // so an invalid start cannot mint an orphan group. The Task strategy reuses
-  // the blocking Task validation/model-resolution path; a pre-spawn failure
-  // returns the same shaped result and creates no record and no group.
-  const taskPrep = descriptor.start.kind === "task"
-    ? prepareTaskRun(
-        member.params,
-        ctx,
-        { ...baseToolDeps(deps), ...descriptorDeps(deps, descriptor.start.depsKey) } as TaskToolDeps,
-      )
-    : undefined;
-  if (taskPrep && !taskPrep.ok) {
-    return {
-      content: taskPrep.result.content,
-      details: {
-        worker: "mmr-subagents.async-task",
-        tool: resultTool,
-        agent: member.agent,
-        errorMessage: taskPrep.result.details?.errorMessage,
-      },
-    };
-  }
-  if (descriptor.start.kind === "tool") {
-    const v = validateAsyncToolParams(descriptor.toolName, descriptor.start.parametersSchema, member.params);
-    if (!v.ok) return validationResult(v.message, resultTool);
-  }
+  // Validate + prepare the worker run BEFORE any registry side effect (group
+  // open) so an invalid start cannot mint an orphan group. Every agent goes
+  // through ONE preparation seam — the same path the blocking tool uses — so
+  // a pre-spawn failure (validation, gate, resolution) returns the prepared
+  // failure shape and creates no record and no group.
+  const prep = prepareDescriptorRun({
+    descriptor,
+    deps,
+    params: member.params,
+    ctx,
+    toolCallId,
+    resultTool,
+    agent: member.agent,
+  });
+  if ("failure" in prep) return prep.failure;
+  const prepared = prep.prepared;
   // Two-layer gate: the session ceiling must permit push AND the caller
   // must not opt this task out. The registry adds at-most-once + a
   // per-session budget on top. Delivery is `followUp` + `triggerTurn`, so a
@@ -452,106 +479,43 @@ async function executeBackgroundStart(options: BackgroundStartOptions): Promise<
     if (openedGroupKey !== undefined) resolveGroupKeyTable(registry).delete(openedGroupKey);
   };
 
-  const started = descriptor.start.kind === "task"
-    ? (() => {
-        // Invariant: taskPrep is the ok variant here — the task strategy
-        // implies it was computed and any failure already returned above.
-        if (!taskPrep || !taskPrep.ok) throw new Error("unreachable: Task prep validated before group open");
-        const { params, cwd, detailsContext, runnerOptionsBase, runner } = taskPrep.prepared;
-        return {
-          started: registry.startTask({
-            sessionKey,
-            originToolCallId: toolCallId,
-            agent: descriptor.agent,
-            description: params.description,
-            prompt: params.prompt,
-            cwd,
-            // Raw worker results from the runner classify under the backing
-            // profile's nonzero-exit policy.
-            ...agentPartialOutputPolicyArg(descriptor),
-            ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
-            ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
-            workerTools: detailsContext.workerTools,
-            ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
-            ...(groupId !== undefined ? { groupId } : {}),
-            // The run thunk never throws: a spawn failure is converted into a
-            // synthetic spawn-error worker result so the background task
-            // finalizes with the SAME `spawn-error` status/shaping as blocking
-            // Task (rather than a generic registry error).
-            run: async ({ signal, onProgress }) => {
-              try {
-                return await runner.run({ ...runnerOptionsBase, signal, onProgress });
-              } catch (err) {
-                return buildSpawnErrorWorkerResult(err, { prompt: params.prompt, cwd });
-              }
-            },
-            deliveryOptIn: groupId === undefined ? wantsAutomaticDelivery : false,
-            ...(taskNotify !== undefined ? { notify: taskNotify } : {}),
-            onSettle,
-          }),
-        } as const;
-      })()
-    : (() => {
-        const start = descriptor.start;
-        // Invariant: the task strategy was handled above.
-        if (start.kind !== "tool") throw new Error("unreachable: tool strategy checked before group open");
-        const tool = start.createTool({ ...baseToolDeps(deps), ...descriptorDeps(deps, start.depsKey) });
-        const cwd = resolveWorkerCwd(ctx);
-        return {
-          started: registry.startTask({
-            sessionKey,
-            originToolCallId: toolCallId,
-            agent: descriptor.agent,
-            description: member.description,
-            prompt: member.promptSummary,
-            cwd,
-            workerTools: start.workerTools,
-            ...agentPartialOutputPolicyArg(descriptor),
-            ...(groupId !== undefined ? { groupId } : {}),
-            run: async ({ signal, onProgress }) => {
-              const result = await tool.execute(
-                `${toolCallId}:${descriptor.agent}`,
-                member.params,
-                signal,
-                (update) => onProgress(update),
-                ctx,
-              );
-              const status = inferToolRunStatus(result, signal);
-              return {
-                toolResult: result,
-                status,
-                terminalOutcome: status === "succeeded" ? "success" : status === "failed" ? "failed" : undefined,
-                ...(status === "failed" ? { errorMessage: inferToolErrorMessage(result) } : {}),
-              };
-            },
-            deliveryOptIn: groupId === undefined ? wantsAutomaticDelivery : false,
-            ...(taskNotify !== undefined ? { notify: taskNotify } : {}),
-            onSettle,
-          }),
-        } as const;
-      })();
+  const started = registry.startTask({
+    sessionKey,
+    originToolCallId: toolCallId,
+    ...preparedStartArgs(descriptor, prepared, member),
+    ...(groupId !== undefined ? { groupId } : {}),
+    deliveryOptIn: groupId === undefined ? wantsAutomaticDelivery : false,
+    ...(taskNotify !== undefined ? { notify: taskNotify } : {}),
+    onSettle,
+  });
 
-  if (!started.started.ok) {
+  if (!started.ok) {
     // Roll back a group this call just minted so a cap rejection cannot
     // leave an empty orphan group; dropEmptyGroup is a no-op on a group
     // that already holds tasks or that pre-existed.
     rollbackMintedGroup();
     const message =
-      `${resultTool}: cannot start; ${started.started.runningCount} background task(s) already running ` +
-      `(cap ${started.started.cap}). Wait for one to finish (task_wait) or stop one (task_cancel) first.`;
+      `${resultTool}: cannot start; ${started.runningCount} background task(s) already running ` +
+      `(cap ${started.cap}). Wait for one to finish (task_wait) or stop one (task_cancel) first.`;
     return {
       content: [{ type: "text", text: message }],
       details: { worker: "mmr-subagents.async-task", tool: resultTool, agent: member.agent, errorMessage: message },
     };
   }
-  const snapshot = started.started.snapshot;
+  const snapshot = started.snapshot;
+  // Renderer-only board reference: details produced after this point carry
+  // the partition/task ids so the renderer can resolve live registry state.
+  if (!started.deduplicated) {
+    prepared.sessionKey = sessionKey;
+    prepared.taskId = snapshot.taskId;
+  }
   // Idempotent-retry rollback: a deduplicated start returns the pre-existing
   // task, so a group this call just minted would otherwise linger as an empty
   // orphan — now a labeled one. Drop it when the dedup'd task is not in it.
   // Mirrors the cap-rejection rollback above; dropEmptyGroup is a no-op once
   // a group holds tasks or if it pre-existed.
   if (
-    started.started.deduplicated
+    started.deduplicated
     && groupId !== undefined
     && !groupPreexisted
     && snapshot.groupId !== groupId
@@ -561,7 +525,7 @@ async function executeBackgroundStart(options: BackgroundStartOptions): Promise<
   // Surface the launched agent on the pinned bottom-of-window widget so the
   // transcript card can stay empty (see renderMmrBackgroundTaskResult).
   refreshAsyncTaskWidget(ctx, registry, sessionKey);
-  const dedupNote = started.started.deduplicated ? " (existing task for this call)" : "";
+  const dedupNote = started.deduplicated ? " (existing task for this call)" : "";
   const groupNote = snapshot.groupId ? ` in group ${snapshot.groupId}` : "";
   const groupDeliveryEnabled = groupSnapshot?.completionPush !== "disabled";
   const deliveryHint = snapshot.groupId
@@ -618,72 +582,34 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
     memberToolCallId: string,
     ctx: ExtensionContext,
   ): FleetMemberBuild | { error: string } => {
-    const m = member;
-    const descriptor = getMmrBackgroundAgent(m.agent);
-    if (!descriptor) return { error: `unknown background agent "${m.agent}".` };
-    if (descriptor.start.kind === "task") {
-      const taskPrep = prepareTaskRun(
-        m.params,
-        ctx,
-        { ...baseToolDeps(deps), ...descriptorDeps(deps, descriptor.start.depsKey) } as TaskToolDeps,
-      );
-      if (!taskPrep.ok) return { error: taskPrep.result.details?.errorMessage ?? "invalid Task parameters" };
-      const { params, cwd, detailsContext, runnerOptionsBase, runner } = taskPrep.prepared;
-      return {
-        startArgs: {
-          agent: descriptor.agent,
-          description: params.description,
-          prompt: params.prompt,
-          cwd,
-          workerTools: detailsContext.workerTools,
-          // Raw worker results from the runner classify under the backing
-          // profile's nonzero-exit policy.
-          ...agentPartialOutputPolicyArg(descriptor),
-          ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
-          ...(detailsContext.contextWindow !== undefined ? { contextWindow: detailsContext.contextWindow } : {}),
-          ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
-          run: async ({ signal, onProgress }) => {
-            try {
-              return await runner.run({ ...runnerOptionsBase, signal, onProgress });
-            } catch (err) {
-              return buildSpawnErrorWorkerResult(err, { prompt: params.prompt, cwd });
-            }
-          },
-        },
-        row: {
-          taskId: "",
-          agent: descriptor.agent,
-          description: params.description,
-          ...(detailsContext.resolvedModel !== undefined ? { resolvedModel: detailsContext.resolvedModel } : {}),
-          ...(params.capabilityProfile !== undefined ? { capabilityProfile: params.capabilityProfile } : {}),
-        },
-      };
+    const descriptor = getMmrBackgroundAgent(member.agent);
+    if (!descriptor) return { error: `unknown background agent "${member.agent}".` };
+    if (descriptor.start.parametersSchema) {
+      const v = validateAsyncToolParams(descriptor.toolName, descriptor.start.parametersSchema, member.params);
+      if (!v.ok) return { error: v.message };
     }
-    const start = descriptor.start;
-    const v = validateAsyncToolParams(descriptor.toolName, start.parametersSchema, m.params);
-    if (!v.ok) return { error: v.message };
-    const tool = start.createTool({ ...baseToolDeps(deps), ...descriptorDeps(deps, start.depsKey) });
-    const cwd = resolveWorkerCwd(ctx);
+    const mergedDeps = { ...baseToolDeps(deps), ...descriptorDeps(deps, descriptor.start.depsKey) };
+    let prep: MmrPreparedWorkerRunResult;
+    try {
+      prep = descriptor.start.prepareRun(mergedDeps, member.params, ctx, { toolCallId: memberToolCallId });
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+    if (!prep.ok) {
+      return { error: inferToolErrorMessage(prep.result) ?? `invalid ${descriptor.agent} parameters` };
+    }
+    const prepared = prep.prepared;
+    const startArgs = preparedStartArgs(descriptor, prepared, member);
     return {
-      startArgs: {
+      startArgs,
+      prepared,
+      row: {
+        taskId: "",
         agent: descriptor.agent,
-        description: m.description,
-        prompt: m.promptSummary,
-        cwd,
-        workerTools: start.workerTools,
-        ...agentPartialOutputPolicyArg(descriptor),
-        run: async ({ signal, onProgress }) => {
-          const result = await tool.execute(`${memberToolCallId}:${descriptor.agent}`, m.params, signal, (update) => onProgress(update), ctx);
-          const status = inferToolRunStatus(result, signal);
-          return {
-            toolResult: result,
-            status,
-            terminalOutcome: status === "succeeded" ? "success" : status === "failed" ? "failed" : undefined,
-            ...(status === "failed" ? { errorMessage: inferToolErrorMessage(result) } : {}),
-          };
-        },
+        description: startArgs.description,
+        ...(prepared.resolvedModel !== undefined ? { resolvedModel: prepared.resolvedModel } : {}),
+        ...(prepared.capabilityProfile !== undefined ? { capabilityProfile: prepared.capabilityProfile } : {}),
       },
-      row: { taskId: "", agent: descriptor.agent, description: m.description },
     };
   };
 
@@ -771,6 +697,10 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
           };
         }
         const taskId = started.snapshot.taskId;
+        if (!started.deduplicated) {
+          build.prepared.sessionKey = sessionKey;
+          build.prepared.taskId = taskId;
+        }
         taskIds.push(taskId);
         allTaskIds.push(taskId);
         rows.push({ ...build.row, taskId });
