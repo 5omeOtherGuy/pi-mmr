@@ -8,10 +8,9 @@ import {
   type MmrAsyncTaskStatus,
 } from "./async-task-registry.js";
 import {
-  START_TASK_AGENT_EXAMPLES,
-  START_TASK_GROUP_FANOUT_GUIDANCE,
-  START_TASK_SELECTION_GUIDANCE,
-} from "./tool-guidance.js";
+  ORACLE_ALWAYS_BLOCKING_GUIDANCE,
+  WORKER_BACKGROUND_SELECTION_GUIDANCE,
+} from "../mmr-core/worker-tool-guidance.js";
 import {
   DEFAULT_MMR_BACKGROUND_AGENT,
   listMmrBackgroundAgents,
@@ -341,6 +340,14 @@ export const TASK_CANCEL_PARAMETERS = Type.Object(
 );
 
 /**
+ * Fan-out discipline for the deprecated start_task fleet surface. Kept with
+ * the start_task description (its only consumer); the worker-tool fan-out
+ * policy lives in `mmr-core/worker-tool-guidance.ts`.
+ */
+export const START_TASK_GROUP_FANOUT_GUIDANCE =
+  "To fan out more than one worker at once, declare the whole fleet in a single start_task call with fleet.groups[] (each group lists its members); the runtime mints the group ids and renders every group card up front in a ready state, so you never mint a group and then add siblings across separate calls. Keep setup silent: do not narrate spawns or group transitions (\"minting\", \"adding siblings\", \"opening the next group\"), and go straight to your next action — the live card is the status surface and updates itself as workers run. After the group settles, do not re-emit the card, its rows, or its counts as a fenced block or a prose summary; read only the specific child outputs you need with task_poll({ task_id }).";
+
+/**
  * Build the `start_task` description from the LIVE derived agent set, so a
  * registered custom subagent is listed as a background worker choice.
  */
@@ -351,8 +358,8 @@ export function buildStartTaskDescription(): string {
   "DEPRECATED compatibility alias: prefer calling the worker tool directly with background: true (e.g. finder({query, background: true})). Parallel background calls can share one worker group via their group parameter. start_task remains for one release.",
   "",
   "Use start_task only for independent work that can proceed while you do other things (long analysis, broad search, a self-contained implementation unit).",
-  `Set agent to choose the background worker: ${agentListWithDefault(listMmrBackgroundAgents())}. Use params for the selected tool's normal input shape. Oracle cannot run in the background; it is always blocking.`,
-  START_TASK_SELECTION_GUIDANCE,
+  `Set agent to choose the background worker: ${agentListWithDefault(listMmrBackgroundAgents())}. Use params for the selected tool's normal input shape. ${ORACLE_ALWAYS_BLOCKING_GUIDANCE}`,
+  WORKER_BACKGROUND_SELECTION_GUIDANCE,
   "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session.",
   "Use task_poll/task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
   "To launch several workers at once, pass fleet.groups[] (each group lists its members) in one call: the runtime mints the group ids, renders every group card up front in a ready state, and launches them together. Omit group_id inside fleet, and do not combine fleet with the single-task fields.",
@@ -372,17 +379,25 @@ export function buildStartTaskDescription(): string {
  */
 export const START_TASK_DESCRIPTION = buildStartTaskDescription();
 
-export const ASYNC_TASK_GUIDELINES: readonly string[] = [
-  START_TASK_SELECTION_GUIDANCE,
-  "With notify enabled, completed background work is surfaced automatically: during an active agent loop it appears at the start of a later model step, and when idle it may wake the session. Do not poll only to discover whether a single task completed.",
-  "Use task_poll or task_wait for legitimate fleet orchestration: coordinating multiple parallel workers, checking a group, or collecting child results. A task_wait timeout is not a failure and does not stop the worker.",
-  "Treat a terminal task_poll/task_wait result as consumed. Do not poll the same task again unless you intentionally need to re-read the same result.",
-  "If a task-notification, task-group-notification, or background-tasks-finished notice appears for a task/group whose terminal result is already present in the transcript, treat it as stale; do not call tools or rewrite your answer solely because of it.",
-  "Call task_poll with no task_id to list this session's background tasks and their delivery state during fallback checks or multi-worker orchestration.",
-  "To fan out several workers at once, declare them with start_task({ fleet: { groups: [...] } }) in a single call; the runtime mints the group ids and renders all group cards up front. Use group_id only to add a worker to a group incrementally across separate calls, then wait/poll/cancel with group_id. When the group finishes, retrieve each needed child output once with task_poll({ task_id }) for the ids the group result lists.",
-  START_TASK_GROUP_FANOUT_GUIDANCE,
+/**
+ * Per-tool routing guidelines for Pi's `Guidelines:` block. The shared
+ * background-orchestration policy (selection, fan-out, result delivery)
+ * renders once in the `## Using workers` block
+ * (`mmr-core/worker-tool-guidance.ts`); each tool's full mechanics live in
+ * its schema description.
+ */
+export const START_TASK_PROMPT_GUIDELINES: readonly string[] = [
+  "start_task is a deprecated alias: prefer calling the worker tool directly with background: true (and a shared group key to fan out).",
+];
+
+export const TASK_POLL_PROMPT_GUIDELINES: readonly string[] = [
+  "Use task_poll to check a background task or group, or with no task_id to list this session's background tasks.",
+];
+
+export const TASK_WAIT_PROMPT_GUIDELINES: readonly string[] = [
+  "Use task_wait to wait briefly for a background task or group to settle; a timeout is not a failure and does not stop the worker.",
+];
+
+export const TASK_CANCEL_PROMPT_GUIDELINES: readonly string[] = [
   "Use task_cancel to stop a duplicate, obsolete, or wrongly-scoped background task or group.",
-  "Do not start multiple code-writing background tasks unless their file targets are clearly disjoint.",
-  "Pass start_task({ notify: false }) to opt out of automatic delivery and pull the result explicitly with task_poll/task_wait.",
-  ...START_TASK_AGENT_EXAMPLES,
 ];

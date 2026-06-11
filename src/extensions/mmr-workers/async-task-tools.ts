@@ -39,13 +39,16 @@ import {
 
 import {
   ASYNC_TASK_AGENT_NAMES,
-  ASYNC_TASK_GUIDELINES,
   ASYNC_TASK_TOOL_NAMES,
   MMR_SUBAGENTS_ASYNC_PUSH_ENV,
   PULL_NOTICE_MAX_ITEMS,
   buildStartTaskDescription,
   buildStartTaskParameters,
+  START_TASK_PROMPT_GUIDELINES,
   START_TASK_TOOL_NAME,
+  TASK_CANCEL_PROMPT_GUIDELINES,
+  TASK_POLL_PROMPT_GUIDELINES,
+  TASK_WAIT_PROMPT_GUIDELINES,
   TASK_CANCEL_PARAMETERS,
   TASK_CANCEL_TOOL_NAME,
   TASK_POLL_PARAMETERS,
@@ -744,7 +747,7 @@ export function createStartTaskTool(deps: AsyncTaskToolDeps = {}): ToolDefinitio
     // after this tool (activation order is not guaranteed) still validates.
     description: buildStartTaskDescription(),
     promptSnippet: "Start a bounded subagent worker in the background and return an opaque task_id",
-    promptGuidelines: [...ASYNC_TASK_GUIDELINES],
+    promptGuidelines: [...START_TASK_PROMPT_GUIDELINES],
     parameters: buildStartTaskParameters(),
     renderShell: "self" as const,
     renderCall(args, theme, context) {
@@ -798,7 +801,7 @@ export function createTaskPollTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       "Returns the latest progress for a running task or the final result for a finished one.",
     ].join("\n"),
     promptSnippet: "Poll one background task by task_id, or list all background tasks for this session",
-    promptGuidelines: [...ASYNC_TASK_GUIDELINES],
+    promptGuidelines: [...TASK_POLL_PROMPT_GUIDELINES],
     parameters: TASK_POLL_PARAMETERS,
     renderShell: "self" as const,
     renderCall(args, theme, context) {
@@ -846,7 +849,7 @@ export function createTaskWaitTool(deps: AsyncTaskToolDeps = {}): ToolDefinition
       "A timeout is NOT a failure and does NOT cancel the worker — poll or wait again.",
     ].join("\n"),
     promptSnippet: "Wait briefly for a background task to finish without cancelling it on timeout",
-    promptGuidelines: [...ASYNC_TASK_GUIDELINES],
+    promptGuidelines: [...TASK_WAIT_PROMPT_GUIDELINES],
     parameters: TASK_WAIT_PARAMETERS,
     renderShell: "self" as const,
     renderCall(args, theme, context) {
@@ -898,7 +901,7 @@ export function createTaskCancelTool(deps: AsyncTaskToolDeps = {}): ToolDefiniti
       "Cancelling an already-finished task is a safe no-op that returns its terminal state.",
     ].join("\n"),
     promptSnippet: "Cancel a background task by task_id",
-    promptGuidelines: [...ASYNC_TASK_GUIDELINES],
+    promptGuidelines: [...TASK_CANCEL_PROMPT_GUIDELINES],
     parameters: TASK_CANCEL_PARAMETERS,
     renderShell: "self" as const,
     renderCall(args, theme, context) {

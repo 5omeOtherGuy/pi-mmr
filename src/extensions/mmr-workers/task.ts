@@ -26,7 +26,7 @@ import {
 import { checkMmrToolParams } from "../mmr-core/tool-params.js";
 import type { MmrModelRegistryLike, MmrRegisteredModelLike } from "../mmr-core/model-resolver.js";
 import { loadMmrCoreSettings } from "../mmr-core/settings.js";
-import { TASK_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
+import { TASK_BACKGROUND_GUIDANCE } from "../mmr-core/worker-tool-guidance.js";
 import { buildWorkerToolManifest, type ToolHostLike } from "./worker-host.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
@@ -105,20 +105,20 @@ export const TASK_WORKER_TOOLS: readonly string[] = Object.freeze(
 
 export const TASK_PROMPT_SNIPPET = "Perform a bounded task in a subagent worker";
 
+/**
+ * Single routing guideline for Pi's `Guidelines:` block. The full when/how
+ * guidance lives only in {@link TASK_DESCRIPTION} (the schema the model
+ * already receives); cross-worker policy renders once in the
+ * `## Using workers` block (`mmr-core/worker-tool-guidance.ts`).
+ */
 export const TASK_PROMPT_GUIDELINES: readonly string[] = [
-  "Use Task for bounded worker jobs: implementation units, focused investigation, test repair, UI checking, or review.",
-  "When not to use Task: do not spawn a worker for a single file read, a single exact search, a small edit you can complete directly, or a task whose plan is not yet clear.",
-  "Write outcome-first prompts that include the goal, scope, relevant context, files or evidence to inspect first, constraints and non-goals, validation to run, and the expected return shape.",
-  "Ask for compact results, not transcripts: outcome, files changed or inspected, summary, validation result, concerns or blockers, and next action.",
-  'Task is blocking. For multiple or parallel Task workers, prefer start_task (agent: "Task") so they run in the background while you keep working; reserve back-to-back blocking Task calls for the rare case where you must have every result before the next step, and keep code-writing single-threaded unless write targets are clearly disjoint.',
-  "Use capabilityProfile (read-only or read-write) only to narrow a Task worker's tool surface; omit it to preserve the default Task behavior.",
-  "When the worker finishes, inspect its diff or evidence, run any combined validation, and summarize the user-relevant result yourself.",
+  "Use Task for bounded worker jobs you can hand off whole — implementation units, focused investigation, test repair, UI checking, or review — not for a single file read, one exact search, or a small edit you can complete directly.",
 ] as const;
 
 export const TASK_DESCRIPTION = [
   "Perform a bounded sub-task in a worker process derived from the active MMR subagent framework.",
   "",
-  "Use Task when a scoped implementation, investigation, repair, UI check, or review would produce enough intermediate output that it is better handled outside the parent turn.",
+  "Use Task when a scoped implementation, investigation, repair, UI check, or review can be handed off whole, or when the work would produce a lot of intermediate output that is not needed after the task completes.",
   "",
   TASK_BACKGROUND_GUIDANCE,
   "",
@@ -128,10 +128,12 @@ export const TASK_DESCRIPTION = [
   "- Do not use Task to avoid reviewing or validating the result yourself; the parent remains responsible for integration and the final answer.",
   "",
   "How to use Task:",
+  "- You will not see the worker's individual steps and cannot communicate with it while it runs; it returns a single final report when it finishes.",
   "- Provide an outcome-first prompt with the goal, scope, relevant files or evidence, constraints, validation to run, and expected result shape.",
+  "- Tell the worker whether it is coding, reviewing, verifying, or investigating; avoid asking one worker to do all of those roles unless the task is small.",
   "- Provide a short description for progress display and diagnostics.",
   "- Expect a compact final result, not a transcript. The worker should report outcome, files changed or inspected, summary, validation, and concerns or blockers.",
-  '- For background or fan-out runs, use start_task (agent: "Task"); blocking Task is not the parallel mechanism.',
+  "- For fan-out, issue several Task calls as parallel tool calls with background: true and a shared group key; blocking Task is not the parallel mechanism.",
   "- Optionally set capabilityProfile (read-only or read-write) to narrow the worker's tools; leaving it unset preserves the default Task surface.",
 ].join("\n");
 

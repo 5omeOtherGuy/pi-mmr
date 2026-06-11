@@ -416,6 +416,7 @@ export type MmrPromptBlockKind =
   | "active-tools"
   | "active-guidelines"
   | "builtin-tool-guidance"
+  | "using-workers"
   | "pi-docs"
   | "shared-tool-guidance"
   | "autonomy"

@@ -420,22 +420,31 @@ describe("librarian failure mapping", () => {
 });
 
 describe("librarian blocking-vs-background guidance", () => {
-  it("states librarian is blocking and names start_task(agent librarian) for background", async () => {
+  it("keeps guidelines to a single routing line and states blocking/background in the description", async () => {
     const { createLibrarianTool } = await importSource(LIBRARIAN_MODULE);
     const tool = createLibrarianTool();
-    assert.ok(
-      tool.promptGuidelines.some((g) => /blocking/i.test(g)),
-      "a librarian guideline must state librarian is blocking",
-    );
-    assert.ok(
-      tool.promptGuidelines.some((g) => /start_task/.test(g) && /agent: "librarian"/.test(g)),
-      "a librarian guideline must name start_task with agent librarian for background",
-    );
-    assert.match(tool.description, /blocking/i, "librarian description must state it is blocking");
+    // The Guidelines block carries exactly one routing line; the
+    // blocking-vs-background policy renders once in the `## Using workers`
+    // block and in the schema description, never in per-tool guidelines.
+    assert.equal(tool.promptGuidelines.length, 1);
+    assert.match(tool.promptGuidelines[0], /understanding outside the local workspace/);
+    for (const guideline of tool.promptGuidelines) {
+      assert.doesNotMatch(guideline, /start_task|blocking/i);
+    }
     assert.match(
       tool.description,
-      /start_task with agent: "librarian"/,
-      "librarian description must name the start_task background path",
+      /blocking by default/i,
+      "librarian description must state it is blocking by default",
+    );
+    assert.match(
+      tool.description,
+      /background: true/,
+      "librarian description must name the background: true path",
+    );
+    assert.doesNotMatch(
+      tool.description,
+      /start_task/,
+      "librarian description must not route background runs to the deprecated start_task alias",
     );
   });
 });

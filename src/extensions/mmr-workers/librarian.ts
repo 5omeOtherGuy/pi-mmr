@@ -37,7 +37,7 @@ import {
   type MmrWorkerToolRunContext,
   type MmrWorkerToolSpec,
 } from "./worker-tool-factory.js";
-import { LIBRARIAN_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
+import { LIBRARIAN_BACKGROUND_GUIDANCE } from "../mmr-core/worker-tool-guidance.js";
 import { buildWorkerToolManifest, type ToolHostLike } from "./worker-host.js";
 import { readMmrModelContextWindow } from "./worker-model-metadata.js";
 import {
@@ -78,13 +78,14 @@ export const LIBRARIAN_WORKER_TOOLS: readonly string[] = Object.freeze([
 export const LIBRARIAN_PROMPT_SNIPPET =
   "Research remote repositories and repository history with a read-only librarian worker.";
 
+/**
+ * Single routing guideline for Pi's `Guidelines:` block. The full when/how
+ * guidance lives only in {@link LIBRARIAN_DESCRIPTION}; cross-worker policy
+ * renders once in the `## Using workers` block
+ * (`mmr-core/worker-tool-guidance.ts`).
+ */
 export const LIBRARIAN_PROMPT_GUIDELINES: readonly string[] = [
-  "Use librarian for remote repository research: architecture, external feature implementations, cross-repository pattern comparisons, commit/diff history, and remote file or README inspection.",
-  "Do not use librarian for local workspace reads/searches, code modifications, simple local lookups, or questions unrelated to repository content.",
-  "When calling librarian, name the repository as owner/repo or a full repository URL when possible.",
-  "Ask a precise librarian research question and include intent, branch/revision, known files, commit IDs, or related repositories in `context` when those details matter.",
-  "Return the librarian's full answer to the user-facing response; do not compress away evidence links, caveats, or conclusions.",
-  LIBRARIAN_BACKGROUND_GUIDANCE,
+  "Use librarian when you need understanding outside the local workspace: dependency internals, reference implementations on GitHub, multi-repo architecture, or commit-history context. Don't use it for simple local file reads.",
 ] as const;
 
 export const LIBRARIAN_DESCRIPTION = [

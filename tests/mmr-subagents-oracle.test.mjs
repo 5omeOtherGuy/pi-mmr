@@ -184,12 +184,23 @@ describe("oracle tool definition", () => {
     assert.deepEqual([...tool.promptGuidelines], [...ORACLE_PROMPT_GUIDELINES]);
   });
 
-  it("prompt guidelines surface worked oracle-call JSON examples in the literal system prompt", async () => {
-    const { ORACLE_PROMPT_GUIDELINES } = await importSource(ORACLE_MODULE);
-    // The worked examples cover the same five scenarios documented in the
-    // longform description: architecture review (files), planning (no
-    // files), performance analysis (context only), API design review
-    // (context + files), and debugging a failing test (context + files).
+  it("keeps guidelines to routing lines and surfaces worked JSON examples only in the description", async () => {
+    const { ORACLE_DESCRIPTION, ORACLE_PROMPT_GUIDELINES } = await importSource(ORACLE_MODULE);
+    // Guidelines carry routing only: when to consult, plus the `files`
+    // formatting rule (the dominant oracle call error). Worked examples and
+    // the full WHEN/WHEN-NOT surface live only in the schema description.
+    assert.equal(ORACLE_PROMPT_GUIDELINES.length, 2);
+    assert.match(ORACLE_PROMPT_GUIDELINES[0], /architecture-level guidance/);
+    assert.match(ORACLE_PROMPT_GUIDELINES[0], /advisory/);
+    assert.match(ORACLE_PROMPT_GUIDELINES[1], /JSON array of strings/);
+    for (const guideline of ORACLE_PROMPT_GUIDELINES) {
+      assert.doesNotMatch(guideline, /Example oracle call/);
+    }
+    // The worked examples cover five scenarios: architecture review (files),
+    // planning (no files), performance analysis (context only), API design
+    // review (context + files), and debugging a failing test (context +
+    // files). Each must embed a parseable JSON object with a `task` field so
+    // the model gets a literal, copyable call shape.
     const expectedTaskPhrases = [
       "Review the authentication architecture and suggest improvements",
       "Plan the implementation of real-time collaboration feature",
@@ -197,36 +208,30 @@ describe("oracle tool definition", () => {
       "Review API design",
       "Help debug why tests are failing",
     ];
-    const exampleGuidelines = ORACLE_PROMPT_GUIDELINES.filter((g) =>
-      g.startsWith("Example oracle call"),
-    );
+    const exampleLines = ORACLE_DESCRIPTION.split("\n").filter((line) => line.startsWith("{"));
     assert.equal(
-      exampleGuidelines.length,
+      exampleLines.length,
       expectedTaskPhrases.length,
-      `expected ${expectedTaskPhrases.length} worked-example guidelines, found ${exampleGuidelines.length}`,
+      `expected ${expectedTaskPhrases.length} worked-example JSON lines in the description, found ${exampleLines.length}`,
     );
     for (const phrase of expectedTaskPhrases) {
       assert.ok(
-        exampleGuidelines.some((g) => g.includes(phrase)),
-        `expected a worked-example guideline containing task phrase: "${phrase}"`,
+        exampleLines.some((line) => line.includes(phrase)),
+        `expected a worked-example JSON line containing task phrase: "${phrase}"`,
       );
     }
-    // Each worked-example guideline must contain a parseable JSON object
-    // with a `task` field so the model gets a literal, copyable call shape.
-    for (const guideline of exampleGuidelines) {
-      const match = guideline.match(/`(\{.*\})`/);
-      assert.ok(match, `worked-example guideline must embed a JSON object in backticks: "${guideline}"`);
-      const parsed = JSON.parse(match[1]);
-      assert.equal(typeof parsed.task, "string", `worked example must have a string task: "${guideline}"`);
-      assert.ok(parsed.task.length > 0, `worked example task must be non-empty: "${guideline}"`);
+    for (const line of exampleLines) {
+      const parsed = JSON.parse(line);
+      assert.equal(typeof parsed.task, "string", `worked example must have a string task: "${line}"`);
+      assert.ok(parsed.task.length > 0, `worked example task must be non-empty: "${line}"`);
       if (parsed.files !== undefined) {
-        assert.ok(Array.isArray(parsed.files), `worked example files must be an array: "${guideline}"`);
+        assert.ok(Array.isArray(parsed.files), `worked example files must be an array: "${line}"`);
         for (const entry of parsed.files) {
-          assert.equal(typeof entry, "string", `worked example files entry must be a string: "${guideline}"`);
+          assert.equal(typeof entry, "string", `worked example files entry must be a string: "${line}"`);
         }
       }
       if (parsed.context !== undefined) {
-        assert.equal(typeof parsed.context, "string", `worked example context must be a string: "${guideline}"`);
+        assert.equal(typeof parsed.context, "string", `worked example context must be a string: "${line}"`);
       }
     }
   });
@@ -897,13 +902,15 @@ describe("oracle parent↔child route agreement", () => {
 });
 
 describe("oracle always-blocking guidance", () => {
-  it("states oracle is always blocking and cannot run as a background agent", async () => {
+  it("states oracle is always blocking in the description (the `## Using workers` block covers guidelines)", async () => {
     const { createOracleTool } = await importSource(ORACLE_MODULE);
     const tool = createOracleTool();
-    assert.ok(
-      tool.promptGuidelines.some((g) => /always blocking/i.test(g) && /background/i.test(g)),
-      "an oracle guideline must state it is always blocking and cannot be backgrounded",
-    );
+    // The always-blocking constraint renders once in the `## Using workers`
+    // block when background-capable workers are active; per-tool guidelines
+    // carry routing only.
+    for (const guideline of tool.promptGuidelines) {
+      assert.doesNotMatch(guideline, /blocking/i);
+    }
     assert.match(
       tool.description,
       /always blocking/i,
@@ -911,8 +918,8 @@ describe("oracle always-blocking guidance", () => {
     );
     assert.match(
       tool.description,
-      /cannot run as a background agent/i,
-      "oracle description must state it cannot run as a background agent",
+      /cannot run as a background task/i,
+      "oracle description must state it cannot run as a background task",
     );
   });
 });

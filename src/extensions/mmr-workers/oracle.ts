@@ -31,7 +31,7 @@ import {
   type MmrWorkerToolResolveInput,
 } from "./worker-tool-factory.js";
 import { renderMmrSubagentCall, renderMmrSubagentResult } from "./progress-rendering.js";
-import { ORACLE_ALWAYS_BLOCKING_GUIDANCE } from "./tool-guidance.js";
+import { ORACLE_ALWAYS_BLOCKING_GUIDANCE } from "../mmr-core/worker-tool-guidance.js";
 import { type ToolHostLike } from "./worker-host.js";
 import {
   resolveCtxMmrModelRegistry,
@@ -134,19 +134,17 @@ export const ORACLE_DEFAULT_MODEL_PREFERENCES: readonly string[] = Object.freeze
 export const ORACLE_PROMPT_SNIPPET =
   "Consult the oracle - an AI advisor that can plan, review, debug, and provide expert technical guidance.";
 
+/**
+ * Routing guidelines for Pi's `Guidelines:` block. The full when/how guidance
+ * and call examples live only in {@link ORACLE_DESCRIPTION} (the schema the
+ * model already receives); cross-worker policy renders once in the
+ * `## Using workers` block (`mmr-core/worker-tool-guidance.ts`). The `files`
+ * formatting rule stays here because malformed `files` input is the dominant
+ * oracle call error.
+ */
 export const ORACLE_PROMPT_GUIDELINES: readonly string[] = [
-  "Use oracle for code reviews and architecture feedback, finding difficult bugs that flow across many files, planning complex implementations or refactors, answering complex technical questions that require deep reasoning, or getting an alternative point of view when you are struggling to solve a problem.",
-  "Do not use oracle for simple file reads or keyword searches (use read or grep directly), codebase searches (use finder), web browsing and searching (use read_web_page or web_search), or basic code modifications you can do yourself (do it yourself or use Task).",
-  "Be specific about what you want the oracle to review, plan, or debug; provide relevant context about what you're trying to achieve so the oracle can give better guidance.",
-  "When you know the files involved, list them in the oracle `files` parameter as a JSON array of strings (`[\"path/to/file1.ts\", \"path/to/file2.ts\"]`) even when there is only one file (`[\"path/to/file1.ts\"]`).",
-  "When you invoke the oracle, mention to the user why — use language such as `I'm going to ask the oracle for advice` or `I need to consult with the oracle.`",
-  "Run multiple oracle calls in parallel only when they address distinct concerns (for example architecture review, performance analysis, race-condition investigation); each oracle call is invoked zero-shot, so every call must be self-contained.",
-  ORACLE_ALWAYS_BLOCKING_GUIDANCE,
-  "Example oracle call for an architecture review with attached files: `{\"task\":\"Review the authentication architecture and suggest improvements\",\"files\":[\"src/auth/index.ts\",\"src/auth/jwt.ts\"]}`.",
-  "Example oracle call for planning a feature when no files are needed: `{\"task\":\"Plan the implementation of real-time collaboration feature\"}`.",
-  "Example oracle call for a performance analysis using `context` instead of files: `{\"task\":\"Analyze performance bottlenecks\",\"context\":\"Users report slow response times when processing large datasets\"}`.",
-  "Example oracle call for an API design review using both `context` and `files`: `{\"task\":\"Review API design\",\"context\":\"This is a REST API for user management\",\"files\":[\"src/api/users.ts\"]}`.",
-  "Example oracle call for debugging a failing test with `context` and `files`: `{\"task\":\"Help debug why tests are failing\",\"context\":\"Tests fail with \\\"undefined is not a function\\\" after refactoring the auth module\",\"files\":[\"src/auth/auth.test.ts\"]}`.",
+  "Use oracle when you are stuck or need architecture-level guidance, a review, or a plan — provide specific files and treat its output as advisory.",
+  "Pass oracle `files` as a JSON array of strings (`[\"path/to/file1.ts\", \"path/to/file2.ts\"]`), even when there is only one file.",
 ];
 
 export const ORACLE_DESCRIPTION = [
@@ -179,6 +177,8 @@ export const ORACLE_DESCRIPTION = [
   "Usage guidelines:",
   "- Be specific about what you want the oracle to review, plan, or debug",
   "- Provide relevant context about what you're trying to achieve. If you know that 3 files are involved, list them and they will be attached.",
+  "- Each oracle call is invoked zero-shot and must be self-contained; run multiple oracle calls in parallel only when they address distinct concerns (for example architecture review, performance analysis, race-condition investigation).",
+  "- When you invoke the oracle, mention to the user why — use language such as \"I'm going to ask the oracle for advice\" or \"I need to consult with the oracle.\"",
   "",
   "# Examples",
   "",

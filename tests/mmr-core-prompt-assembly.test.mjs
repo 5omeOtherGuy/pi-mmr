@@ -133,10 +133,14 @@ describe("Phase D: assembleActiveSurface() public API", () => {
       // fragment is rendered. The rendered block kinds must therefore equal the
       // active recipe's fragment list exactly — this is what makes per-mode
       // fragment selection (e.g. rush dropping diagrams) observable. Smart-family
-      // recipes declare mode-posture but render no block for their empty posture.
+      // recipes declare mode-posture but render no block for their empty posture,
+      // and BASE_PROMPT lists no worker tools, so the optional using-workers
+      // fragment renders no block either.
       const recipe = MMR_MODE_PROMPT_RECIPES[mode];
       const expectedKinds = recipe.fragments.filter(
-        (fragmentId) => fragmentId !== "mode-posture" || recipe.postureSections !== "",
+        (fragmentId) =>
+          (fragmentId !== "mode-posture" || recipe.postureSections !== "") &&
+          fragmentId !== "using-workers",
       );
       assert.deepEqual(
         kinds,

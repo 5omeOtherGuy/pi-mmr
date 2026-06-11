@@ -100,12 +100,22 @@ describe("START_TASK_PARAMETERS fleet schema", () => {
 
 describe("fleet-aware model-visible guidance", () => {
   it("routes fan-out to fleet and forbids narration + restating the settled card", async () => {
-    const { START_TASK_GROUP_FANOUT_GUIDANCE } = await importSource("extensions/mmr-workers/tool-guidance.ts");
+    const { START_TASK_GROUP_FANOUT_GUIDANCE } = await importSource(SCHEMA_MODULE);
     assert.match(START_TASK_GROUP_FANOUT_GUIDANCE, /fleet\.groups\[\]/);
     assert.match(START_TASK_GROUP_FANOUT_GUIDANCE, /do not narrate/i);
     assert.match(START_TASK_GROUP_FANOUT_GUIDANCE, /do not re-emit the card/i);
     // The impossible "single step" mint-then-reuse promise is gone.
     assert.doesNotMatch(START_TASK_GROUP_FANOUT_GUIDANCE, /single step/i);
+  });
+
+  it("worker-tool fan-out guidance teaches grouped background calls, not start_task", async () => {
+    const { WORKER_GROUP_FANOUT_GUIDANCE } = await importSource(
+      "extensions/mmr-core/worker-tool-guidance.ts",
+    );
+    assert.match(WORKER_GROUP_FANOUT_GUIDANCE, /background: true/);
+    assert.match(WORKER_GROUP_FANOUT_GUIDANCE, /same group key/);
+    assert.match(WORKER_GROUP_FANOUT_GUIDANCE, /do not narrate/i);
+    assert.doesNotMatch(WORKER_GROUP_FANOUT_GUIDANCE, /start_task/);
   });
 
   it("frames group_id as the legacy incremental path that defers to fleet", async () => {

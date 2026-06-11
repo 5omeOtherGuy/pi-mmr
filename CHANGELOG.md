@@ -8,6 +8,41 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 ### Added
 
+- mmr-core: new `## Using workers` system-prompt block
+  (`worker-tool-guidance.ts`, fragment `using-workers`, rendered after
+  `## Built-in tool guidance` and only when worker tools are active). It
+  states the cross-worker policies once — when to delegate at all, that
+  workers do not see the conversation, the two-sided blocking-vs-background
+  rule, group fan-out discipline, and background result-delivery semantics —
+  instead of repeating them inside every worker tool's `Guidelines:` bullets.
+  Each paragraph gates on the active tool set, and the module documents the
+  single-entry recipe for adding future worker tools.
+
+### Changed
+
+- **Breaking (model-visible prompt + module layout):** worker tool guidance
+  is de-duplicated. Each worker tool (`Task`, `finder`, `librarian`,
+  `oracle`) and orchestration tool (`start_task`, `task_poll`, `task_wait`,
+  `task_cancel`) now contributes exactly one routing guideline to Pi's
+  `Guidelines:` block; the full when/how guidance lives only in the tool's
+  schema description, which the model already receives. Previously the same
+  text rendered up to three times per request (snippet, guideline bullets,
+  schema description) and the flat `Guidelines:` list ran to dozens of
+  undifferentiated worker bullets.
+- mmr-workers: blocking-vs-background wording now matches the
+  `background: true` surface. The per-tool background lines, the selection
+  rule, and the fan-out guidance no longer route background runs through the
+  deprecated `start_task` alias (`start_task`'s own description still
+  documents the alias and its `fleet` shape). Task's description also gains
+  the missing worker-contract lines (single final report, no mid-run
+  communication, role framing) and teaches grouped `background: true` calls
+  as the fan-out mechanism.
+- mmr-workers: `tool-guidance.ts` is removed; the shared worker-policy
+  constants moved to `mmr-core/worker-tool-guidance.ts` (mmr-core renders
+  the new block and must not import tool modules), and the start_task
+  fleet fan-out text moved next to its only consumer in
+  `async-task-tool-schemas.ts`.
+
 - Workflow tooling: new npm scripts make parallel-worktree development
   token-cheap while preserving every existing safety check.
   `npm run link:node-modules` symlinks a task worktree's `node_modules` at the

@@ -679,25 +679,19 @@ describe("async task tools model-visible surface", () => {
       /Always follow start_task with task_poll or task_wait/i,
       "start_task must not make polling the default completion path",
     );
-    assert.ok(
-      start.promptGuidelines.some((g) => /automatic/i.test(g) && /active agent loop/i.test(g) && /idle/i.test(g)),
-      "guidelines should describe active-loop and idle automatic delivery",
+    // Per-tool guidelines carry routing only: the shared orchestration
+    // policy (delivery semantics, fan-out, the two-sided blocking rule)
+    // renders once in the `## Using workers` block, and the start_task
+    // description keeps the full mechanics for the deprecated alias.
+    assert.match(
+      start.description,
+      /automatic/i,
+      "start_task description should describe automatic delivery",
     );
-    assert.ok(start.promptGuidelines.some((g) => /blocking Task/i.test(g)));
     assert.match(
       start.description,
       /single grouped notification/i,
       "start_task should document the single grouped-notification policy",
-    );
-    assert.ok(
-      start.promptGuidelines.some((g) => /start_task\(\{ fleet: \{ groups:/.test(g) && /task_poll\(\{ task_id \}\)/.test(g)),
-      "guidelines should give a concrete fleet fan-out example with the per-child retrieval call",
-    );
-    assert.ok(
-      start.promptGuidelines.some(
-        (g) => /Choosing a worker/i.test(g) && /does not by itself mean background/i.test(g),
-      ),
-      "start_task guidelines should carry the two-sided blocking-vs-background rule",
     );
     assert.match(
       start.description,
@@ -709,20 +703,15 @@ describe("async task tools model-visible surface", () => {
       /Prefer the blocking Task\/finder\/librarian tools when you need the result before your next reasoning step/i,
       "the one-sided start_task description line must be replaced",
     );
-    assert.ok(
-      start.promptGuidelines.some((g) => /start_task\(\{ agent: "finder"/.test(g)),
-      'start_task guidelines should include a concrete agent:"finder" example',
-    );
-    assert.ok(
-      start.promptGuidelines.some((g) => /start_task\(\{ agent: "librarian"/.test(g)),
-      'start_task guidelines should include a concrete agent:"librarian" example',
-    );
-    assert.ok(
-      !start.promptGuidelines.some((g) =>
-        /prefer the blocking Task\/finder\/librarian tools when you need the result immediately/i.test(g),
-      ),
-      "the one-sided 'prefer blocking ... when you need the result immediately' guideline must be replaced",
-    );
+    assert.equal(start.promptGuidelines.length, 1);
+    assert.match(start.promptGuidelines[0], /deprecated alias/);
+    assert.match(start.promptGuidelines[0], /background: true/);
+    assert.equal(poll.promptGuidelines.length, 1);
+    assert.match(poll.promptGuidelines[0], /task_poll/);
+    assert.equal(wait.promptGuidelines.length, 1);
+    assert.match(wait.promptGuidelines[0], /timeout is not a failure/);
+    assert.equal(cancel.promptGuidelines.length, 1);
+    assert.match(cancel.promptGuidelines[0], /task_cancel/);
   });
 });
 

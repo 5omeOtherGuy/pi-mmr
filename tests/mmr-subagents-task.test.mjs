@@ -162,7 +162,7 @@ describe("Task tool", () => {
     assert.equal(tool.parameters.additionalProperties, false);
     assert.match(tool.description, /bounded/i);
     assert.match(tool.description, /subagent|worker/i);
-    assert.ok(tool.promptGuidelines.some((line) => /when not to use/i.test(line)));
+    assert.match(tool.description, /When NOT to use Task/);
   });
 
   it("runs the injected subagent runner with the task-subagent profile and worker role prompt", async () => {
@@ -1096,21 +1096,41 @@ describe("Task tool", () => {
 });
 
 describe("Task blocking-vs-background guidance", () => {
-  it("states Task is blocking and routes background/fan-out to start_task", async () => {
+  it("keeps guidelines to a single routing line and states blocking/background in the description", async () => {
     const { createTaskTool } = await importSource(TASK_MODULE);
     const tool = createTaskTool({ runner: { async run() { return makeWorkerResult(); } } });
-    assert.match(tool.description, /blocking/i, "Task description must state it is blocking");
-    assert.match(tool.description, /start_task/, "Task description must name start_task as the background path");
+    // The Guidelines block carries exactly one routing line; the
+    // blocking-vs-background policy renders once in the `## Using workers`
+    // block and in the schema description, never in per-tool guidelines.
+    assert.equal(tool.promptGuidelines.length, 1);
+    assert.match(tool.promptGuidelines[0], /bounded worker jobs/);
+    for (const guideline of tool.promptGuidelines) {
+      assert.doesNotMatch(guideline, /start_task|blocking/i);
+    }
+    assert.match(
+      tool.description,
+      /blocking by default/i,
+      "Task description must state it is blocking by default",
+    );
+    assert.match(
+      tool.description,
+      /background: true/,
+      "Task description must name the background: true path",
+    );
+    assert.match(
+      tool.description,
+      /shared group key/,
+      "Task description must teach grouped background calls as the fan-out mechanism",
+    );
+    assert.doesNotMatch(
+      tool.description,
+      /start_task/,
+      "Task description must not route background runs to the deprecated start_task alias",
+    );
     assert.doesNotMatch(
       tool.description,
       /Run workers in parallel only for independent read-only work/i,
       "Task must not teach blocking-parallel as the fan-out mechanism",
-    );
-    assert.ok(
-      tool.promptGuidelines.some(
-        (g) => /start_task/.test(g) && /background|parallel|fan[ -]?out/i.test(g),
-      ),
-      "a Task guideline must route background/parallel orchestration to start_task",
     );
   });
 });

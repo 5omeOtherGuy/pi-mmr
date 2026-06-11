@@ -44,6 +44,7 @@ export type MmrPromptFragmentId =
   | "active-tools"
   | "active-guidelines"
   | "builtin-tool-guidance"
+  | "using-workers"
   | "pi-docs"
   | "shared-tool-guidance"
   | "autonomy"
@@ -104,6 +105,7 @@ export const MMR_DEFAULT_PROMPT_FRAGMENT_SEQUENCE = [
   "active-tools",
   "active-guidelines",
   "builtin-tool-guidance",
+  "using-workers",
   "pi-docs",
   "shared-tool-guidance",
   "diagrams",
@@ -131,6 +133,7 @@ export const MMR_DEEP_PROMPT_FRAGMENT_SEQUENCE = [
   "active-tools",
   "active-guidelines",
   "builtin-tool-guidance",
+  "using-workers",
   "pi-docs",
   "shared-tool-guidance",
   "diagrams",
@@ -195,6 +198,13 @@ export const MMR_PROMPT_FRAGMENTS = {
     source: "mmr-core",
     optional: true,
     summary: "MMR-owned augmentation for active Pi built-in tools; omitted when no curated built-in is active.",
+  },
+  "using-workers": {
+    id: "using-workers",
+    blockKind: "using-workers",
+    source: "mmr-core",
+    optional: true,
+    summary: "MMR-owned cross-worker policy block (delegation, blocking vs background, fan-out, result delivery); omitted when no worker tool is active.",
   },
   "pi-docs": {
     id: "pi-docs",

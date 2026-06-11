@@ -38,7 +38,7 @@ import {
   type MmrWorkerToolResolveInput,
   type MmrWorkerToolSpec,
 } from "./worker-tool-factory.js";
-import { FINDER_BACKGROUND_GUIDANCE } from "./tool-guidance.js";
+import { FINDER_BACKGROUND_GUIDANCE } from "../mmr-core/worker-tool-guidance.js";
 import { type ToolHostLike } from "./worker-host.js";
 import {
   resolveCtxMmrModelRegistry,
@@ -107,18 +107,14 @@ export const FINDER_DEFAULT_MODEL_PREFERENCES: readonly string[] = Object.freeze
 export const FINDER_PROMPT_SNIPPET =
   "Intelligently search your codebase for complex, multi-step search tasks based on functionality or concepts rather than exact matches";
 
+/**
+ * Single routing guideline for Pi's `Guidelines:` block. The full when/how
+ * guidance lives only in {@link FINDER_DESCRIPTION} (the schema the model
+ * already receives); cross-worker policy renders once in the
+ * `## Using workers` block (`mmr-core/worker-tool-guidance.ts`).
+ */
 export const FINDER_PROMPT_GUIDELINES: readonly string[] = [
-  "Use finder for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches; anytime you want to chain multiple grep calls, use finder.",
-  "Use finder when you must locate code by behavior or concept, run multiple greps in sequence, correlate connections between several areas of the codebase, or filter broad terms such as `config`, `logger`, or `cache` by context.",
-  "Use finder for codebase-location questions such as `Where do we validate JWT authentication headers?` or `Which module handles file-watcher retry logic?`.",
-  "Do not use finder when you know the exact file path; use read directly.",
-  "Do not use finder when looking for specific symbols or exact strings; use find or grep directly.",
-  "Do not use finder when you need to create, modify files, or run terminal commands.",
-  "When using finder, ask the read-only worker to run multiple independent search strategies in parallel to maximise speed and formulate the query as a precise engineering request.",
-  "Give finder concrete artifacts, patterns, APIs, technical terms, file types, expected code patterns, scoped directories, and explicit success criteria so the worker knows when to stop.",
-  "Prefer finder queries such as `Find every place we build an HTTP error response.` or `Find watchdog-related files under core and server/src.`; avoid vague or exploratory requests such as `error handling search` or broad root-level filename scans such as `Find files named watchdog anywhere.`",
-  "Prefer scoped finder searches before falling back to repo-wide filename scans.",
-  FINDER_BACKGROUND_GUIDANCE,
+  "Use finder for complex, multi-step codebase discovery: behavior-level questions, flows spanning multiple modules, or correlating related patterns. For direct symbol, path, or exact-string lookups, use grep or find first.",
 ];
 
 export const FINDER_DESCRIPTION = [

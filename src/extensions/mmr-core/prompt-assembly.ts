@@ -3,6 +3,10 @@ import {
   extractActiveBuiltinToolNames,
 } from "./builtin-tool-guidance.js";
 import {
+  buildUsingWorkersGuidance,
+  extractActiveWorkerToolNames,
+} from "./worker-tool-guidance.js";
+import {
   DEEP_ENGINEERING_JUDGMENT,
   resolveModeCodingGuidanceFragment,
   SHARED_CODING_GUIDANCE_FRAGMENTS,
@@ -74,6 +78,7 @@ function renderMmrOwnedTailFragment(
     case "active-tools":
     case "active-guidelines":
     case "builtin-tool-guidance":
+    case "using-workers":
     case "pi-docs":
     case "preserved-tail":
       return undefined;
@@ -294,6 +299,9 @@ export function assembleActiveSurface(
   const builtinToolGuidanceText = buildBuiltinToolGuidance(
     input.activeToolNames ?? extractActiveBuiltinToolNames(toolsBlockText),
   );
+  const usingWorkersText = buildUsingWorkersGuidance(
+    input.activeToolNames ?? extractActiveWorkerToolNames(toolsBlockText),
+  );
 
   // Each fragment owns its trailing separators so that concatenating all
   // rendered blocks reproduces the systemPrompt byte-for-byte.
@@ -333,6 +341,15 @@ export function assembleActiveSurface(
               id: "builtin-tool-guidance",
               kind: "builtin-tool-guidance",
               text: `${builtinToolGuidanceText}\n\n`,
+              source: "mmr-core",
+            }
+          : null;
+      case "using-workers":
+        return usingWorkersText
+          ? {
+              id: "using-workers",
+              kind: "using-workers",
+              text: `${usingWorkersText}\n\n`,
               source: "mmr-core",
             }
           : null;

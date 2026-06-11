@@ -119,6 +119,16 @@ write:
 - Use this tool to create a new file that does not yet exist.
 - For existing files, prefer `edit` instead—even for extensive changes. Only use write to overwrite an existing file when you are replacing nearly all of its content AND the file is small (under ~250 lines).
 
+## Using workers
+
+Do not start a worker for work you can complete directly in a single response (editing one file, running one search, refactoring a function you can already see). Workers do not see your conversation: include everything the worker needs in its prompt — the goal, scope, relevant file paths, coding conventions, and how to verify its work.
+
+Avoid duplicating work a worker is already doing. When a worker finishes, inspect its output and summarize its result for the user; the user cannot see worker output directly.
+
+If you cannot proceed without the result, run the worker blocking (the default); otherwise pass background: true so the work runs while you keep working. Choosing a worker ("use a subagent" or "delegate") does not by itself mean background — only background it when you do not need the result before your next step, or the user explicitly asks for background, fan-out, parallel, or asynchronous workers.
+
+To fan out several workers at once, issue the worker calls as parallel tool calls in one turn, each with background: true and the same group key; the group renders as one live card and settles once. Keep setup silent: do not narrate spawns or group transitions, and go straight to your next action — the live card is the status surface and updates itself as workers run. Keep code-writing single-threaded unless the workers' file targets are clearly disjoint; prefer parallel workers for read-only investigation, review, or verification.
+
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
 - Main documentation: /test/pi/README.md
 - Additional docs: /test/pi/docs
