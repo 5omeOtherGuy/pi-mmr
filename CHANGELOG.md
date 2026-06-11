@@ -224,6 +224,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-subagents` / `mmr-async-tasks`: background worker activity renders through one shared section/card/row path (`background-task-view.ts`); the single, group, and fleet inline cards are the same component, and the live-vs-replay decision is made in one place. No model-visible change; the existing render tests pin the preserved card behavior.
 
+- `mmr-async-tasks` / `mmr-core`: the `start_task` agent surface is now derived from the subagent-profile registry (new profile flags `backgroundable` and `acceptsCapabilityProfile`) instead of hardcoded per-agent branches; enabled custom Markdown subagents can now run as background tasks via `start_task`. No change to the built-in surface; existing tests pin the preserved texts.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest
