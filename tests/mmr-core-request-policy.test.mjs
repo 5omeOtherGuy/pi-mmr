@@ -241,17 +241,19 @@ describe("mmr-core request policy", () => {
     assert.equal(MMR_REQUEST_POLICIES.smart.effectiveMaxInputTokens, 268000);
   });
 
-  it("carries per-mode context triples and clamps smart's input profile to smaller provider registrations", async () => {
+  it("leaves GPT/Codex modes without a context profile and clamps smart's input profile to smaller provider registrations", async () => {
     const { clampPolicyToRegisteredModel, MMR_REQUEST_POLICIES } = await importSource("extensions/mmr-core/request-policy.ts");
 
-    assert.deepEqual(
-      {
-        contextWindow: MMR_REQUEST_POLICIES.rush.contextWindow,
-        maxTokens: MMR_REQUEST_POLICIES.rush.openaiResponses.maxOutputTokens,
-        maxInput: MMR_REQUEST_POLICIES.rush.effectiveMaxInputTokens,
-      },
-      { contextWindow: 256000, maxTokens: 128000, maxInput: 128000 },
-    );
+    // GPT/Codex-primary modes set no context profile, so they run at Pi's own
+    // registered window. Only the request policy (max output) is carried.
+    for (const mode of ["smartGPT", "rush", "deep"]) {
+      assert.equal(MMR_REQUEST_POLICIES[mode].contextWindow, undefined, `${mode} carries no contextWindow`);
+      assert.equal(MMR_REQUEST_POLICIES[mode].effectiveMaxInputTokens, undefined, `${mode} carries no effectiveMaxInputTokens`);
+      assert.equal(MMR_REQUEST_POLICIES[mode].openaiResponses.maxOutputTokens, 128000, `${mode} still carries its output policy`);
+      // Clamping against a registered codex model must not invent a window.
+      const clamped = clampPolicyToRegisteredModel(MMR_REQUEST_POLICIES[mode], { contextWindow: 272_000, maxTokens: 128_000 });
+      assert.equal(clamped.contextWindow, undefined, `${mode} stays native after clamping`);
+    }
 
     // smart's display profile is now 300k/268k. Callers pass the already-capped
     // active model here, so a 300k Opus window leaves the profile unchanged.

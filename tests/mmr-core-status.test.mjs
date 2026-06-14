@@ -126,9 +126,11 @@ describe("mmr-core footer status", () => {
     const { updateMmrStatus } = await importSource("extensions/mmr-core/status.ts");
     const cases = [
       { modeKey: "smart", effectiveContextWindow: 1000000, effectiveMaxInputTokens: 968000, tokens: 60000, usageContextWindow: 1000000, usagePercent: 20, percent: "20.0", contextWindow: "1.0M", model: "opus-4.8", mode: "smart" },
-      { modeKey: "rush", effectiveContextWindow: 256000, effectiveMaxInputTokens: 128000, tokens: 78000, usageContextWindow: 256000, usagePercent: 30.5, percent: 30.5, contextWindow: "256k", model: "gpt-5.5", mode: "rush" },
+      // rush/deep carry no pi-mmr profile, so the footer denominator is Pi's
+      // own registered window reported through getContextUsage (here 272k).
+      { modeKey: "rush", effectiveContextWindow: undefined, effectiveMaxInputTokens: undefined, tokens: 78000, usageContextWindow: 272000, usagePercent: 28.7, percent: 28.7, contextWindow: "272k", model: "gpt-5.5", mode: "rush" },
       { modeKey: "large", effectiveContextWindow: 1000000, effectiveMaxInputTokens: 968000, tokens: 195000, usageContextWindow: 1000000, usagePercent: 19.5, percent: 19.5, contextWindow: "1.0M", model: "opus-4.6", mode: "large" },
-      { modeKey: "deep", effectiveContextWindow: 256000, effectiveMaxInputTokens: 128000, tokens: 78000, usageContextWindow: 1000000, usagePercent: 26, percent: 30.5, contextWindow: "256k", model: "gpt-5.5", mode: "deep" },
+      { modeKey: "deep", effectiveContextWindow: undefined, effectiveMaxInputTokens: undefined, tokens: 78000, usageContextWindow: 272000, usagePercent: 28.7, percent: 28.7, contextWindow: "272k", model: "gpt-5.5", mode: "deep" },
     ];
 
     for (const testCase of cases) {
@@ -328,15 +330,15 @@ describe("mmr-core /mmr-status", () => {
         modelApplied: true,
         fallbackApplied: false,
       },
-      effectiveContextWindow: 256000,
+      effectiveContextWindow: undefined,
       effectiveMaxOutputTokens: 128000,
-      effectiveMaxInputTokens: 128000,
+      effectiveMaxInputTokens: undefined,
     });
 
     const status = formatMmrStatus(deepCodex);
-    // Codex streams output in-window, so max-out is never sent and the derived
-    // max-in would understate real usable input; show only the total.
-    assert.match(status, /Context: 256k total/);
+    // deep carries no pi-mmr context profile and Codex streams output in-window,
+    // so there is no total/max-out/max-in to show — Pi's native window applies.
+    assert.match(status, /Context: provider default/);
     assert.doesNotMatch(status, /max out/);
     assert.doesNotMatch(status, /max in/);
   });

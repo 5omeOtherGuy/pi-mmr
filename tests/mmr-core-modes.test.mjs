@@ -47,9 +47,9 @@ describe("mmr-core mode table", () => {
     const list = formatMmrModeList();
 
     assert.match(list, /smart\s+claude-opus-4-8 → gpt-5\.5 — thinking: Anthropic adaptive\/high; context: 300k total \/ 32k max out \/ 268k max in/);
-    assert.match(list, /rush\s+gpt-5\.5 → claude-haiku-4-5-20251001 → claude-haiku-4-5 — thinking: OpenAI Responses none; context: 256k total \/ 128k max out \/ 128k max in/);
+    assert.match(list, /rush\s+gpt-5\.5 → claude-haiku-4-5-20251001 → claude-haiku-4-5 — thinking: OpenAI Responses none; context: 128k max out/);
     assert.match(list, /large\s+claude-opus-4-6 → gpt-5\.4 — thinking: Anthropic adaptive\/medium; context: 1M total \/ 32k max out \/ 968k max in/);
-    assert.match(list, /deep\s+gpt-5\.5 → claude-opus-4-8 — thinking: Anthropic adaptive\/medium; context: 256k total \/ 128k max out \/ 128k max in/);
+    assert.match(list, /deep\s+gpt-5\.5 → claude-opus-4-8 — thinking: Anthropic adaptive\/medium; context: 128k max out/);
   });
 
   it("does not warn that shipped librarian support is still reserved", async () => {

@@ -332,6 +332,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - Blocking tools' result `details` carry renderer-only `sessionKey`/`taskId` board references; model-visible `content` is unchanged.
 
+- `mmr-core`: GPT/Codex-primary modes (`smartGPT`, `rush`, `deep`) now run at Pi's registered context window instead of a hardcoded pi-mmr cap, so their context window follows Pi's metadata automatically. `smart` and `large` keep their intentional caps.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest

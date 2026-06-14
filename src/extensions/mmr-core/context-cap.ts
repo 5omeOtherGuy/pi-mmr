@@ -8,9 +8,9 @@
  * whose `contextWindow` is capped to the mode's advertised window therefore
  * makes Pi compact and display exactly as it natively would at that window —
  * no bespoke compaction shim required — even when the route's native window is
- * larger (e.g. a 1M Opus route, or the openai-codex gpt-5.5 route whose 300k
- * registry window exceeds Codex's real ~272k input ceiling, under a 300k/256k
- * mode profile).
+ * larger (e.g. `smart` pins its 1M Opus route to 300k). The GPT/Codex-primary
+ * modes (`smartGPT`, `rush`, `deep`) set no `contextWindow`, so this is a pure
+ * no-op for them and every GPT/Codex route runs at Pi's own registered window.
  *
  * The cap is derived from each mode's own request policy so the window Pi
  * compacts against and the window the mode advertises stay in sync (single
@@ -40,9 +40,9 @@ export function getMmrModeContextWindowCap(modeKey: string): number | undefined 
 
 /**
  * Clone-and-cap a model's `contextWindow` for a given mode. No-op unless the
- * mode declares a cap (every locked mode does; `free` does not) and the
- * model's window exceeds that cap. Caps DOWN only, so a custom provider with a
- * smaller window stays authoritative.
+ * mode declares a cap (`smart` and `large`; `free` and the GPT/Codex-primary
+ * modes do not) and the model's window exceeds that cap. Caps DOWN only, so a
+ * custom provider with a smaller window stays authoritative.
  *
  * Returns the input reference unchanged when no cap applies, so callers can
  * use identity comparison (`result !== model`) to detect whether a cap was

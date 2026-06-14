@@ -82,10 +82,11 @@ override for that dimension (use the selected provider's registered
 behavior). These values are not persisted and are never written to provider
 payloads. mmr-core passes the selected registry model directly to
 `pi.setModel(...)`; Pi-native auto-compaction follows the selected provider
-route's registered model metadata. The built-in locked modes currently use
-these max-input profiles (`smart` 968k, `smartGPT` 272k, `rush` 272k,
-`large` 968k, `deep` 272k before provider-size clamping); `free` has no MMR
-cap.
+route's registered model metadata. Only `smart` (268k max-input under its
+300k profile) and `large` (968k under its 1M profile) carry an MMR context
+profile before provider-size clamping; the GPT/Codex-primary modes
+(`smartGPT`, `rush`, `deep`) and `free` carry no MMR context override and run
+at the selected provider's registered window.
 
 `MmrModeState.baselineCaptured` / `baselineModel` are runtime-only
 status diagnostics. They show whether mmr-core has a pre-MMR restore

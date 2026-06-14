@@ -270,10 +270,10 @@ export interface MmrModeState {
   /**
    * Runtime-only context window of the selected provider model that Pi will
    * actually compact against. This is the registry-declared window after the
-   * mode's active-model cap (`withMmrModeContextCap`) is applied: every locked
-   * mode caps down to its profile total (e.g. smart 300k, smartGPT/rush/deep
-   * 256k, large 1M), so for a route at/above the profile this equals the
-   * profile window. Captured so diagnostics can detect when this effective
+   * mode's active-model cap (`withMmrModeContextCap`) is applied: a mode that
+   * sets a profile caps down to it (e.g. smart 300k), while the GPT/Codex
+   * modes set none and keep Pi's registered window. For a capped route
+   * at/above the profile this equals the profile window. Captured so diagnostics can detect when this effective
    * window exceeds the mode's display profile (`effectiveContextWindow`).
    * Pi-native compaction follows this window; the per-mode cap normally
    * collapses both to the profile total, so the mismatch diagnostic stays

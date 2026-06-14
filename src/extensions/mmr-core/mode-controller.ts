@@ -365,11 +365,12 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
         modeThinkingLevel: effectiveThinkingLevel,
         registry: ctx.modelRegistry,
         // Cap the active model's context window to the mode's advertised
-        // profile window (e.g. smart 300k, smartGPT/rush/deep 256k, large 1M).
-        // Native Pi stores the passed object directly and keys all
-        // compaction/overflow/footer/usage off `model.contextWindow`, so a
-        // capped clone makes Pi compact and display exactly as it would at the
-        // capped window. No-op for `free`, for modes without a cap, and for
+        // profile window (e.g. smart pins Opus to 300k). The GPT/Codex-primary
+        // modes set no profile, so this is a no-op and they run at Pi's own
+        // registered window. Native Pi stores the passed object directly and
+        // keys all compaction/overflow/footer/usage off `model.contextWindow`,
+        // so a capped clone makes Pi compact and display exactly as it would at
+        // the capped window. No-op for `free`, for modes without a cap, and for
         // routes already at/under the cap.
         setModel: async (model) => pi.setModel(withMmrModeContextCap(mode.key, model)),
       });

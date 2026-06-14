@@ -34,9 +34,9 @@ describe("withMmrModeContextCap (pure)", () => {
   it("resolves the per-mode cap from each mode's request policy", async () => {
     const { getMmrModeContextWindowCap } = await importContextCap();
     assert.equal(getMmrModeContextWindowCap("smart"), 300_000);
-    assert.equal(getMmrModeContextWindowCap("smartGPT"), 256_000);
-    assert.equal(getMmrModeContextWindowCap("rush"), 256_000);
-    assert.equal(getMmrModeContextWindowCap("deep"), 256_000);
+    assert.equal(getMmrModeContextWindowCap("smartGPT"), undefined, "GPT-primary modes run at Pi's native window");
+    assert.equal(getMmrModeContextWindowCap("rush"), undefined, "GPT-primary modes run at Pi's native window");
+    assert.equal(getMmrModeContextWindowCap("deep"), undefined, "GPT-primary modes run at Pi's native window");
     assert.equal(getMmrModeContextWindowCap("large"), 1_000_000);
     assert.equal(getMmrModeContextWindowCap("free"), undefined, "free has no policy, so no cap");
     assert.equal(getMmrModeContextWindowCap("nonsense"), undefined, "unknown modes do not cap");
@@ -54,15 +54,13 @@ describe("withMmrModeContextCap (pure)", () => {
     assert.equal(model.contextWindow, 1_000_000, "must not mutate the input");
   });
 
-  it("caps smartGPT/rush/deep down to their 256k profile window", async () => {
+  it("does not cap smartGPT/rush/deep — GPT/Codex routes keep Pi's native window", async () => {
     const { withMmrModeContextCap } = await importContextCap();
     for (const mode of ["smartGPT", "rush", "deep"]) {
       const model = { provider: "openai", id: "gpt-5.5", contextWindow: 1_000_000, maxTokens: 128_000 };
-      const capped = withMmrModeContextCap(mode, model);
-      assert.notEqual(capped, model, `expected a capped clone for mode=${mode}`);
-      assert.equal(capped.contextWindow, 256_000, `expected 256k cap for mode=${mode}`);
-      assert.equal(capped.id, "gpt-5.5");
-      assert.equal(model.contextWindow, 1_000_000, "must not mutate the input");
+      const result = withMmrModeContextCap(mode, model);
+      assert.equal(result, model, `expected the untouched model for mode=${mode}`);
+      assert.equal(result.contextWindow, 1_000_000, `expected the native window for mode=${mode}`);
     }
   });
 
@@ -196,10 +194,11 @@ describe("mmr-core defensive reassertion", () => {
     assert.equal(setModelCalls.at(-1).id, "claude-opus-4-8");
   });
 
-  it("reasserts a non-smart mode cap (smartGPT 256k) when the active model drifts to an uncapped window", async () => {
+  it("leaves a GPT-primary mode (smartGPT) at Pi's native window through session_start and input", async () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
-    // smartGPT routes to an OpenAI model; give it a 1M native window so the
-    // 256k profile cap must engage on drift.
+    // smartGPT routes to an OpenAI model; give it a 1M native window to prove
+    // the GPT/Codex modes carry no pi-mmr cap and pass the native window
+    // through untouched.
     const models = [
       { provider: "openai", id: "gpt-5.5", contextWindow: 1_000_000, maxTokens: 128_000 },
     ];
@@ -210,14 +209,14 @@ describe("mmr-core defensive reassertion", () => {
 
     extension(pi);
     await handlers.get("session_start")({ type: "session_start", reason: "new" }, ctx);
-    assert.equal(setModelCalls.at(-1).contextWindow, 256_000, "session_start caps smartGPT to 256k");
+    assert.equal(setModelCalls.at(-1).contextWindow, 1_000_000, "session_start keeps smartGPT at the native window");
 
-    // Simulate a provider (re)registration restoring the uncapped 1M window.
+    // Simulate a provider (re)registration; the native window must be preserved.
     setModelCalls.push(models[0]);
     assert.equal(ctx.model.contextWindow, 1_000_000);
 
     await handlers.get("input")({ type: "input", text: "hi", source: "interactive" }, ctx);
-    assert.equal(setModelCalls.at(-1).contextWindow, 256_000, "input hook reasserts the smartGPT cap");
+    assert.equal(setModelCalls.at(-1).contextWindow, 1_000_000, "input hook keeps the native window");
     assert.equal(setModelCalls.at(-1).id, "gpt-5.5");
   });
 

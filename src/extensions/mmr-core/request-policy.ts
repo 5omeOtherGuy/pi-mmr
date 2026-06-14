@@ -87,15 +87,16 @@ export interface MmrRequestPolicy {
  *   `summary=auto`, plus `max_output_tokens=128000`.
  * - Context triples are the mode's total context window / max output / max
  *   input. They are surfaced in `/mode` and `/mmr-status`. This module does
- *   not write any context fields into provider payloads. Every locked mode
- *   caps the active model's `contextWindow` to its profile total at the
- *   `setModel` call site (see `context-cap.ts`), so Pi's native
+ *   not write any context fields into provider payloads. A mode that sets a
+ *   `contextWindow` caps the active model's `contextWindow` to that profile
+ *   total at the `setModel` call site (see `context-cap.ts`), so Pi's native
  *   compaction/overflow/footer run at the advertised window even when the
- *   route's native window is larger (e.g. a 1M Opus route, or the openai-codex
- *   gpt-5.5 route whose 300k registry window exceeds Codex's real ~272k input
- *   ceiling, under a 300k/256k profile). The cap is cap-down only, so a smaller
- *   custom route
- *   stays authoritative, and `free` (no policy) is never capped.
+ *   route's native window is larger (e.g. `smart` pins its Opus route to 300k).
+ *   The GPT/Codex-primary modes (`smartGPT`, `rush`, `deep`) intentionally set
+ *   no `contextWindow`, so every GPT/Codex route runs at Pi's own registered
+ *   window (the observed Codex backend limit) with no pi-mmr override. The cap
+ *   is cap-down only, so a smaller custom route stays authoritative, and `free`
+ *   (no policy) is never capped.
  */
 export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "free">, MmrRequestPolicy> = {
   smart: {
@@ -120,13 +121,9 @@ export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "free">, MmrReques
       maxOutputTokens: 128000,
       reasoning: { effort: "medium", summary: "auto" },
     },
-    // Codex gpt-5.5 enforces a real input cap around 272k (pi#3641), below the
-    // 300k the openai-codex registry advertises. Cap to 256k so Pi's native
-    // compaction triggers (~256k - 16k reserve = ~240k) and the compaction
-    // summary request both stay under Codex's real ceiling instead of
-    // overflowing with context_length_exceeded.
-    contextWindow: 256000,
-    effectiveMaxInputTokens: 128000,
+    // No context override: GPT/Codex routes run at Pi's own registered window
+    // (the observed Codex backend limit, pi#3641). pi-mmr deliberately does not
+    // carry its own number here so it cannot drift from Pi's metadata.
   },
   large: {
     anthropic: {
@@ -144,10 +141,8 @@ export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "free">, MmrReques
       maxOutputTokens: 128000,
       reasoning: { effort: "none" },
     },
-    // 256k cap keeps Pi's compaction under Codex gpt-5.5's real ~272k input
-    // ceiling (pi#3641); see smartGPT above.
-    contextWindow: 256000,
-    effectiveMaxInputTokens: 128000,
+    // No context override; GPT/Codex routes run at Pi's registered window. See
+    // smartGPT above.
   },
   deep: {
     anthropic: {
@@ -157,10 +152,9 @@ export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "free">, MmrReques
       maxOutputTokens: 128000,
       reasoning: { effort: "medium", summary: "auto" },
     },
-    // 256k cap keeps Pi's compaction under Codex gpt-5.5's real ~272k input
-    // ceiling (pi#3641); see smartGPT above.
-    contextWindow: 256000,
-    effectiveMaxInputTokens: 128000,
+    // No context override; GPT/Codex routes run at Pi's registered window. The
+    // Opus fallback likewise runs at its native window (only `smart` pins Opus).
+    // See smartGPT above.
   },
 };
 
