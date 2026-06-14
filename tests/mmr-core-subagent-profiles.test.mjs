@@ -127,8 +127,8 @@ describe("mmr-core subagent profile registry", () => {
     );
     assert.equal(
       profile.thinkingLevel,
-      "high",
-      "oracle profile must use high reasoning by default",
+      "xhigh",
+      "oracle profile must use xhigh reasoning by default",
     );
     assert.ok(Array.isArray(profile.modelPreferences));
     assert.ok(profile.modelPreferences.length >= 2, "oracle must list a primary and at least one fallback");

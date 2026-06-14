@@ -279,14 +279,14 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
     name: "oracle",
     displayName: "Oracle",
     // Oracle is the high-capability advisory worker. Primary route is
-    // GPT-5.5 at HIGH reasoning; the Claude Opus 4.6 fallback also
-    // runs at HIGH so both routes deliver the same advisor posture
-    // even when the primary provider is not authenticated.
+    // GPT-5.5 at XHIGH reasoning; the Claude Opus 4.6 fallback runs at
+    // HIGH so the advisor still delivers strong reasoning even when the
+    // primary provider is not authenticated.
     modelPreferences: [
-      { model: "gpt-5.5" },
+      { model: "gpt-5.5", thinkingLevel: "xhigh" },
       { model: "claude-opus-4-6", thinkingLevel: "high" },
     ],
-    thinkingLevel: "high",
+    thinkingLevel: "xhigh",
     // The full advisory tool surface. Pi-native concrete names where a
     // direct equivalent exists (Read → read, Grep → grep, glob → find);
     // mmr-web / mmr-history names where the tool is owned by a sibling

@@ -106,7 +106,7 @@ Concrete prompts live in [`prompts.ts`](prompts.ts):
 
 ### Oracle
 
-- Profile/tool name: `oracle`. Standalone; builder `oracle`. Model prefs `gpt-5.5` → `claude-opus-4-6`, high thinking.
+- Profile/tool name: `oracle`. Standalone; builder `oracle`. Model prefs `gpt-5.5` xhigh → `claude-opus-4-6` high thinking.
 - Profile tool intent: `[read, grep, find, web_search, read_web_page, read_session, find_session]`. `allowMcp: false`, `allowToolbox: false`.
 - Parent intentionally skips explicit `--tools`: sibling web/history tools may be absent in the child, so the child computes its registered-tool intersection.
 - Parameters: `{ task: string, context?: string, files?: string[] }`, `additionalProperties: false`. Text attachments inside cwd inline up to `DEFAULT_ORACLE_PER_FILE_BYTE_LIMIT` (32 KiB each); images and outside-workspace files are reported to the worker as notes rather than read.
