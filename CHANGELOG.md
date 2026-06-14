@@ -334,6 +334,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-core`: GPT/Codex-primary modes (`smartGPT`, `rush`, `deep`) now run at Pi's registered context window instead of a hardcoded pi-mmr cap, so their context window follows Pi's metadata automatically. `smart` and `large` keep their intentional caps.
 
+- `mmr-core`: the `oracle` advisory worker's primary GPT-5.5 route now runs at `xhigh` reasoning effort (previously `high`); the Claude Opus 4.6 fallback stays at `high`.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest
