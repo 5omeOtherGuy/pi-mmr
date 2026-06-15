@@ -324,16 +324,16 @@ describe("mmr-core tool registry - per-mode matrices", () => {
     assert.equal(resolved.deferredTools.includes("Task"), true);
   });
 
-  it("resolves deep using bash, apply_patch, edit, and write (each requested directly)", async () => {
+  it("resolves deep using bash, apply_patch, and write (each requested directly)", async () => {
     const { resolveMmrTools } = await importSource("extensions/mmr-core/runtime.ts");
 
     const withConcretePatch = resolveMmrTools("deep", ["read", "bash", "edit", "write", "grep", "find", "ls", "apply_patch"]);
-    assert.deepEqual([...withConcretePatch.activeTools].sort(), ["apply_patch", "bash", "edit", "write"]);
+    assert.deepEqual([...withConcretePatch.activeTools].sort(), ["apply_patch", "bash", "write"]);
 
-    // Without apply_patch, deep still activates the directly requested edit/write/bash.
+    // Without apply_patch, deep still activates the directly requested write/bash.
     const fallback = resolveMmrTools("deep", ["read", "bash", "edit", "write", "grep", "find", "ls"]);
     assert.equal(fallback.activeTools.includes("bash"), true);
-    assert.equal(fallback.activeTools.includes("edit"), true);
+    assert.equal(fallback.activeTools.includes("edit"), false);
     assert.equal(fallback.activeTools.includes("write"), true);
     assert.equal(fallback.deferredTools.includes("apply_patch"), true);
     // deep does not request read directly; reading is delegated.

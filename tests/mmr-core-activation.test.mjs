@@ -139,7 +139,7 @@ describe("mmr-core mode activation", () => {
     await commands.get("mode").handler("deep", ctx);
 
     assert.equal(calls.setActiveTools.length, 1);
-    assert.equal(calls.setActiveTools[0].includes("edit"), true);
+    assert.equal(calls.setActiveTools[0].includes("edit"), false);
     assert.equal(calls.setActiveTools[0].includes("write"), true);
   });
 

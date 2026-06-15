@@ -123,7 +123,6 @@ describe("mmr-core locked-mode extra tools - activation", () => {
       assert.equal(active.includes("deep_tool"), true, "deep-bucket extra is active");
       assert.equal(active.includes("smart_only"), false, "smart-only extra is not active in deep");
       // Base deep tools still present.
-      assert.equal(active.includes("edit"), true);
       assert.equal(active.includes("write"), true);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
@@ -196,7 +195,7 @@ describe("mmr-core locked-mode extra tools - activation", () => {
       // Activation succeeded (deep base tools applied); ghost tool not active.
       const active = calls.setActiveTools.at(-1);
       assert.equal(active.includes("ghost_tool"), false);
-      assert.equal(active.includes("edit"), true);
+      assert.equal(active.includes("write"), true);
       const state = runtime.getMmrModeState();
       assert.equal(state.mode, "deep");
       assert.equal(state.missingTools.includes("ghost_tool"), true);

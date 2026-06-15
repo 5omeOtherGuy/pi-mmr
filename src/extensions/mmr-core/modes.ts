@@ -182,13 +182,12 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
     ],
     // Default thinking level; alt+r toggles between medium and xhigh.
     thinkingLevel: "medium",
-    // `edit` and `write` are deliberately exposed in deep alongside
-    // `apply_patch`. Narrow edit/create tools matter when an atomic patch is
-    // heavier than needed; revisit when the deep tool set is hardened further.
+    // `write` is deliberately exposed in deep alongside `apply_patch`. A narrow
+    // create tool matters when an atomic patch is heavier than needed; revisit
+    // when the deep tool set is hardened further.
     tools: [
       "bash",
       "apply_patch",
-      "edit",
       "write",
       "web_search",
       "read_web_page",

@@ -121,7 +121,7 @@ Implemented:
 - ✅ Missing reserved tools are non-fatal and are shown as missing/deferred in status and prompt text.
 - ✅ Locked modes set active tools, block disallowed `tool_call` events, and fail closed when no active tools resolve.
 - ✅ Prompt snapshot/consistency tests catch active/missing/deferred tool drift.
-- ✅ Per-mode tool matrices follow the project tool capability matrix: smart/large delegate search/list to model-backed tools, rush keeps direct `grep`/`find`, deep requests `bash`, `apply_patch`, `edit`, and `write` directly.
+- ✅ Per-mode tool matrices follow the project tool capability matrix: smart/large delegate search/list to model-backed tools, rush keeps direct `grep`/`find`, deep requests `bash`, `apply_patch`, and `write` directly.
 - ✅ Registry rules carry metadata: requested name, chosen Pi tool name, owner extension (e.g. `mmr-subagents`, `mmr-history`, `mmr-web`, `mmr-toolbox`, `mmr-toolbox-mcp`, `mmr-skills`), explicit status (`active`/`missing`/`deferred`/`gated`/`disabled`), and user-facing diagnostic text exposed in `MmrToolDecision`.
 - ✅ `registerMmrToolProvider(...)` API: later extensions claim ownership for the exact names they own and report `active`/`gated`/`disabled`/`deferred` status; latest registration wins. An exact-name catalog credits owning extensions for deferred tools.
 - ✅ Tests cover identity dedup (same name requested twice) and gated/disabled tools (excluded from `activeTools`, surfaced in dedicated `gatedTools` / `disabledTools` buckets, blocked by `tool_call`).
