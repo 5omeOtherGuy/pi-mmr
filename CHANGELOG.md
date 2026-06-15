@@ -704,6 +704,7 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 - `mmr-subagents`: remove the inert, `@deprecated` `defaultModelPreferences` member from the public `MmrAdvisorToolConfig` type and from `ORACLE_TOOL_CONFIG`. It was never read by `createMmrAdvisorTool` (model preferences resolve solely through the `oracle` subagent profile via `resolveAdvisorModelPreferences`), so its presence falsely implied it influenced routing. This is a subtractive change to a public type, but the member was optional and already documented as unused, so only a hypothetical external consumer that *set* it (a no-op) sees a type change. `ORACLE_DEFAULT_MODEL_PREFERENCES` stays exported as a profile-derived legacy convenience constant. Covered by a new `ORACLE_TOOL_CONFIG` regression assertion in `tests/mmr-subagents-oracle.test.mjs`.
 - BREAKING — `createMmrSubagentsExtension`/`createMmrAsyncTasksExtension` (and their overrides types) are replaced by `createMmrWorkersExtension`/`MmrWorkersFactoryOverrides`.
 - BREAKING — `prepareTaskRun`, `PreparedTaskRun`, `PrepareTaskRunResult`, and `buildTaskRunnerThrowResult` are removed; the background surface prepares Task runs through the worker-tool factory exactly like the blocking tool.
+- `mmr-core`: deep mode no longer exposes the `edit` tool; deep edits now go through `apply_patch` and `write`.
 
 ### Added
 
