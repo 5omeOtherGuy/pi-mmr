@@ -336,6 +336,8 @@ The format follows the project [`docs/changelog-template.md`](docs/changelog-tem
 
 - `mmr-core`: the `oracle` advisory worker's primary GPT-5.5 route now runs at `xhigh` reasoning effort (previously `high`); the Claude Opus 4.6 fallback stays at `high`.
 
+- `mmr-core`: Smart mode now reserves 64k Anthropic output tokens and reports the matching 300k/236k/64k context profile.
+
 ### Added
 
 - `mmr-core`: added a declarative extension capability manifest
