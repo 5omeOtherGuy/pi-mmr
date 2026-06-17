@@ -268,12 +268,12 @@ describe("mmr-core subagent activation", () => {
     );
   });
 
-  it("applies the finder profile's MINIMAL thinking level", async () => {
-    // Finder's worker is a search/grep planner; we encode `minimal`
+  it("applies the finder profile's LOW thinking level", async () => {
+    // Finder's worker is a search/grep planner; we encode `low`
     // explicitly so providers that support a low-effort reasoning lane
     // (Anthropic, OpenAI Responses) use it instead of defaulting to a
     // higher provider default. Providers without such a lane resolve
-    // `minimal` via mmr-core's existing thinking-level policy.
+    // `low` via mmr-core's existing thinking-level policy.
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const { pi, handlers, calls } = createPi({
       flags: { "mmr-subagent": "finder" },
@@ -284,7 +284,7 @@ describe("mmr-core subagent activation", () => {
     extension(pi);
     await handlers.get("session_start")({ type: "session_start", reason: "new" }, ctx);
     assert.equal(calls.setThinkingLevel.length, 1, "setThinkingLevel must be called for finder profile");
-    assert.equal(calls.setThinkingLevel[0], "minimal");
+    assert.equal(calls.setThinkingLevel[0], "low");
   });
 
   it("exposes subagent runtime state via getMmrSubagentState after activation", async () => {

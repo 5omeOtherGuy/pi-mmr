@@ -255,8 +255,8 @@ Implemented:
 - ✅ Deep-frozen subagent profile registry
   (`MMR_SUBAGENT_PROFILE_TABLE`, `getMmrSubagentProfile`,
   `listMmrSubagentProfiles`). Initial profile: `finder` (worker model
-  `antigravity/gemini-3.5-flash-extra-low` → `gpt-5.4-mini` →
-  `claude-haiku-4-5`, MINIMAL thinking, tool allowlist
+  `antigravity/gemini-3.5-flash` → `gpt-5.4-mini` →
+  `claude-haiku-4-5`, LOW thinking, tool allowlist
   `[grep, find, read]`).
 - ✅ Pure subagent route resolver (`resolveMmrSubagentRoute`) that picks
   the first registered + authenticated provider/model from the

@@ -228,19 +228,19 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
     name: "finder",
     displayName: "Finder",
     modelPreferences: [
-      // Finder pins thinking to MINIMAL, so the provider-pinned Flash
+      // Finder pins thinking to LOW, so the provider-pinned Flash
       // route is used as the low-effort primary while keeping higher-
       // effort routes available for reasoning-heavy modes.
-      { model: "gemini-3.5-flash-extra-low", providers: ["antigravity"] },
+      { model: "gemini-3.5-flash", providers: ["antigravity"] },
       { model: "gpt-5.4-mini" },
       { model: "claude-haiku-4-5" },
     ],
     // Finder is a search/grep planner, not a reasoner. Pin worker
-    // thinking to MINIMAL so providers that support a low-effort
+    // thinking to LOW so providers that support a low-effort
     // reasoning lane (Anthropic, OpenAI Responses) actually use it.
-    // Providers without such a lane resolve `minimal` via mmr-core's
+    // Providers without such a lane resolve `low` via mmr-core's
     // existing thinking-level policy / Pi's clamp.
-    thinkingLevel: "minimal",
+    thinkingLevel: "low",
     tools: ["grep", "find", "read"],
     promptRoute: "standalone",
     promptBuilder: "finder",

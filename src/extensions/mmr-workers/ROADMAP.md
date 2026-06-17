@@ -56,9 +56,9 @@ Finder slice shipped:
   output by UTF-8 byte length.
 - ✅ `finder` Pi tool: parameters `{ query: string }`
   (`additionalProperties: false`), `--tools grep,find,read` allowlist,
-  worker model preference `antigravity/gemini-3.5-flash-extra-low` →
+  worker model preference `antigravity/gemini-3.5-flash` →
   `openai-codex/gpt-5.4-mini` → `claude-subscription/claude-haiku-4-5`,
-  MINIMAL thinking, returns a
+  LOW thinking, returns a
   short summary plus file/line evidence, exposes typed `FinderDetails`,
   surfaces partial output and a placeholder status during execution,
   recorded as MMR-owned so Free mode strips it like other MMR tools.

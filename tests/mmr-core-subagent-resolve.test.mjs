@@ -35,7 +35,7 @@ describe("resolveMmrSubagentRoute", () => {
     const profile = getMmrSubagentProfile("finder");
     const registry = makeRegistry([
       { provider: "google", id: "gemini-3.5-flash" },
-      { provider: "antigravity", id: "gemini-3.5-flash-extra-low" },
+      { provider: "antigravity", id: "gemini-3.5-flash" },
       { provider: "openai-codex", id: "gpt-5.4-mini" },
       { provider: "claude-subscription", id: "claude-haiku-4-5" },
     ]);
@@ -43,7 +43,7 @@ describe("resolveMmrSubagentRoute", () => {
     const result = resolveMmrSubagentRoute({ profile, registry });
     assert.equal(result.ok, true);
     assert.equal(result.selected.provider, "antigravity");
-    assert.equal(result.selected.model, "gemini-3.5-flash-extra-low");
+    assert.equal(result.selected.model, "gemini-3.5-flash");
     assert.deepEqual([...result.tools], ["grep", "find", "read"]);
     assert.equal(result.promptRoute, "standalone");
     assert.equal(result.profile.name, "finder");

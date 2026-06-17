@@ -48,15 +48,15 @@ describe("mmr-core subagent profile registry", () => {
     assert.deepEqual([...profile.tools], ["grep", "find", "read"]);
     assert.equal(
       profile.thinkingLevel,
-      "minimal",
-      "finder profile must pin worker thinking to MINIMAL so providers with a low-effort lane use it",
+      "low",
+      "finder profile must pin worker thinking to LOW so providers with a low-effort lane use it",
     );
     assert.ok(Array.isArray(profile.modelPreferences));
     assert.ok(profile.modelPreferences.length >= 1, "finder must list at least one model preference");
     const ids = profile.modelPreferences.map((preference) => preference.model);
     assert.deepEqual(
       ids,
-      ["gemini-3.5-flash-extra-low", "gpt-5.4-mini", "claude-haiku-4-5"],
+      ["gemini-3.5-flash", "gpt-5.4-mini", "claude-haiku-4-5"],
       "finder profile model preferences must match the canonical worker preference list",
     );
     assert.deepEqual(

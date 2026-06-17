@@ -231,7 +231,7 @@ describe("FINDER_DEFAULT_MODEL_PREFERENCES", () => {
   it("lists the provider-pinned Flash route first, then GPT-5.4 Mini, then Claude Haiku 4.5 as fallbacks", async () => {
     const { FINDER_DEFAULT_MODEL_PREFERENCES } = await importSource(FINDER_MODULE);
     const prefs = [...FINDER_DEFAULT_MODEL_PREFERENCES];
-    const firstGemini = prefs.findIndex((entry) => /gemini-3\.5-flash-extra-low$/.test(entry));
+    const firstGemini = prefs.findIndex((entry) => /gemini-3\.5-flash$/.test(entry));
     const firstGptMini = prefs.findIndex((entry) => /gpt-5\.4-mini$/.test(entry));
     const firstHaiku = prefs.findIndex((entry) => /claude-haiku-4-5$/.test(entry));
     assert.notEqual(firstGemini, -1, "expected a Gemini 3.5 Flash preference");
@@ -476,13 +476,13 @@ describe("finder execute() seam", () => {
       cwd: "/abs/project",
       modelRegistry: makeRegistry([
         { provider: "google", id: "gemini-3.5-flash", contextWindow: 128_000 },
-        { provider: "antigravity", id: "gemini-3.5-flash-extra-low", contextWindow: 1_000_000 },
+        { provider: "antigravity", id: "gemini-3.5-flash", contextWindow: 1_000_000 },
         { provider: "openai-codex", id: "gpt-5.4-mini", contextWindow: 300_000 },
       ]),
     };
     const result = await tool.execute("c", { query: "find foo" }, undefined, undefined, ctx);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].model, "antigravity/gemini-3.5-flash-extra-low");
+    assert.equal(calls[0].model, "antigravity/gemini-3.5-flash");
     assert.equal(result.details.contextWindow, 1_000_000);
   });
 
@@ -941,7 +941,7 @@ describe("finder parent↔child route agreement", () => {
     // Registry includes the profile's provider-pinned primary plus both
     // fallbacks so the resolver has a real route to pick.
     const registry = makeRegistry([
-      { provider: "antigravity", id: "gemini-3.5-flash-extra-low" },
+      { provider: "antigravity", id: "gemini-3.5-flash" },
       { provider: "openai-codex", id: "gpt-5.4-mini" },
       { provider: "claude-subscription", id: "claude-haiku-4-5" },
     ]);

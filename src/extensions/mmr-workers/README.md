@@ -94,8 +94,8 @@ Concrete prompts live in [`prompts.ts`](prompts.ts):
 ### Finder
 
 - Profile/tool name: `finder`. Prompt assembly: `standalone`; builder `finder`.
-- Model preferences: `antigravity/gemini-3.5-flash-extra-low` → `gpt-5.4-mini` → `claude-haiku-4-5`. Gemini primary is provider-pinned; fallbacks expand with standard provider hints against the parent registry.
-- Thinking: `minimal`. `allowMcp: false`, `allowToolbox: false`. Tools: `[grep, find, read]`.
+- Model preferences: `antigravity/gemini-3.5-flash` → `gpt-5.4-mini` → `claude-haiku-4-5`. Gemini primary is provider-pinned; fallbacks expand with standard provider hints against the parent registry.
+- Thinking: `low`. `allowMcp: false`, `allowToolbox: false`. Tools: `[grep, find, read]`.
 - Concrete tool registered through `pi.registerTool` and recorded as MMR-owned (Free mode strips it).
 - Parameters: `{ query: string }`; `additionalProperties: false`.
 - Spawns `pi --mode json -p --no-session` via `runMmrSubagentWorker` with `--mmr-subagent finder`. Parent passes `--model` when it can select one, but intentionally **not** `--tools` — the child resolves `[grep, find, read]` against its own registered inventory and applies the profile's effective set. This prevents `tools.mismatch` if parent and child registries differ. System prompt assembled via `assembleMmrSubagentSurface(...)`.
