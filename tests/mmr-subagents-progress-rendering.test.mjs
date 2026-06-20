@@ -28,8 +28,9 @@ function renderLines(component, width = 240) {
 
 function stripAnsi(text) {
   return text
+    .replace(/\u001b\]8;;[^\u001b\u0007]*(?:\u0007|\u001b\\)(.*?)\u001b\]8;;(?:\u0007|\u001b\\)/g, "$1")
     .replace(/\u001b\[[0-9;]*m/g, "")
-    .replace(/\u001b\][^\u0007]*\u0007/g, "");
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "");
 }
 
 function visibleTextWidth(text) {
