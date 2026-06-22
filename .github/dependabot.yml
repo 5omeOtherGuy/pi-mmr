@@ -18,17 +18,18 @@ updates:
     commit-message:
       prefix: deps
       include: scope
-    # Group all non-major updates into one PR per week to reduce noise.
+    # Keep Pi package updates together so pi-mmr follows one Pi dependency set.
     groups:
+      pi-agent-stack:
+        patterns:
+          - "@earendil-works/pi-*"
       npm-minor-and-patch:
         update-types:
           - minor
           - patch
     ignore:
-      # peerDependencies: pinned to "*" intentionally; updating doesn't help.
-      - dependency-name: "@earendil-works/pi-agent-core"
-      - dependency-name: "@earendil-works/pi-coding-agent"
-      - dependency-name: "@earendil-works/pi-tui"
+      # Runtime schema dependency: keep in sync with @earendil-works/pi-coding-agent.
+      - dependency-name: "typebox"
 
   # Update versions of GitHub Actions used in workflows (uses: actions/...@vN).
   - package-ecosystem: github-actions

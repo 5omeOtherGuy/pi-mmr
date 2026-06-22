@@ -13,6 +13,10 @@ async function readPackageJson() {
   return JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
 }
 
+async function readPackageLock() {
+  return JSON.parse(await readFile(path.join(repoRoot, "package-lock.json"), "utf8"));
+}
+
 describe("mmr-web package wiring", () => {
   it("registers mmr-web as a Pi extension after mmr-core", async () => {
     const pkg = await readPackageJson();
@@ -23,11 +27,21 @@ describe("mmr-web package wiring", () => {
     assert.ok(indexOfWeb > indexOfCore, "mmr-web must load after mmr-core so the runtime singleton is available.");
   });
 
-  it("declares an engines.node floor matching AbortSignal.any (>=20.3.0)", async () => {
+  it("declares an engines.node floor matching Pi's runtime package", async () => {
     const pkg = await readPackageJson();
+    const lock = await readPackageLock();
+    const piCodingAgent = lock.packages["node_modules/@earendil-works/pi-coding-agent"];
+
     assert.ok(pkg.engines, "package.json must declare an engines field");
-    assert.equal(typeof pkg.engines.node, "string");
-    assert.match(pkg.engines.node, />=\s*20\.3(\.\d+)?/, `engines.node must require >=20.3.0; got ${pkg.engines.node}`);
+    assert.equal(pkg.engines.node, piCodingAgent.engines.node);
+  });
+
+  it("uses Pi's pinned runtime schema version", async () => {
+    const pkg = await readPackageJson();
+    const lock = await readPackageLock();
+    const piCodingAgent = lock.packages["node_modules/@earendil-works/pi-coding-agent"];
+
+    assert.equal(pkg.dependencies.typebox, piCodingAgent.dependencies.typebox);
   });
 
   it("exposes a package subpath for direct extension loading", async () => {
