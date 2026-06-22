@@ -11,7 +11,7 @@ async function buildState(overrides = {}) {
 
   const modeKey = overrides.modeKey ?? "smart";
   const mode = { ...getMmrMode(modeKey), ...(overrides.modeOverrides ?? {}) };
-  const baseModelResolution = modeKey === "free"
+  const baseModelResolution = modeKey === "free" || modeKey === "open"
     ? {
       targetModel: "",
       requestedModels: [],
@@ -392,6 +392,39 @@ describe("mmr-core /mmr-status", () => {
 
     const status = formatMmrStatus(await buildState({ modeOverrides: { availabilityNotes: [] } }));
 
+    assert.match(status, /Policy warnings: none/);
+  });
+
+  it("reports open mode as native Pi controls with Smart-derived tools and no model policy", async () => {
+    const { formatMmrStatus } = await importSource("extensions/mmr-core/status.ts");
+
+    const status = formatMmrStatus(await buildState({
+      modeKey: "open",
+      tools: {
+        requestedTools: ["read", "web_search", "Task"],
+        activeTools: ["read", "web_search", "Task"],
+        missingTools: [],
+        deferredTools: [],
+        gatedTools: [],
+        disabledTools: [],
+        decisions: [
+          { requested: "read", chosen: "read", chosenTools: ["read"], candidates: ["read"], status: "active", owner: "mmr-core", diagnostic: "read → read" },
+          { requested: "web_search", chosen: "web_search", chosenTools: ["web_search"], candidates: ["web_search"], status: "active", owner: "mmr-web", diagnostic: "web_search → web_search" },
+          { requested: "Task", chosen: "Task", chosenTools: ["Task"], candidates: ["Task"], status: "active", owner: "mmr-subagents", diagnostic: "Task → Task" },
+        ],
+      },
+    }));
+
+    assert.match(status, /Mode: Open \(open\)/);
+    assert.match(status, /Mode control: native Pi model\/thinking\/prompt/);
+    assert.match(status, /Tool surface: Smart tools/);
+    assert.match(status, /Resolved model: none/);
+    assert.match(status, /Thinking: Pi native \(request policy: native Pi controls\)/);
+    assert.match(status, /Context cap: none/);
+    assert.match(status, /Prompt surface: Pi standard prompt \(passthrough\)/);
+    assert.match(status, /Active tools: read, web_search, Task/);
+    assert.match(status, /web_search -> web_search \(active\) via mmr-web/);
+    assert.match(status, /Task -> Task \(active\) via mmr-subagents/);
     assert.match(status, /Policy warnings: none/);
   });
 

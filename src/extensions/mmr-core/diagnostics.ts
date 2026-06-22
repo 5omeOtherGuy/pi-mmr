@@ -26,13 +26,61 @@ const FALLBACK_PROVIDER_WARNING =
  * The compact status bar in `status.ts` summarizes mode/model state only and
  * does not re-render diagnostic messages.
  *
- * Free mode never emits diagnostics: native Pi controls are in charge and
- * MMR-specific model/tool/policy state is intentionally absent.
+ * Native-control modes never emit model/request/prompt diagnostics: native Pi
+ * controls are in charge and MMR-specific model/policy state is intentionally absent.
  */
 export function getMmrPolicyDiagnostics(state: MmrModeState): MmrPolicyDiagnostic[] {
   if (state.mode === "free") return [];
 
   const diagnostics: MmrPolicyDiagnostic[] = [];
+
+  if (state.mode === "open") {
+    if (state.activeTools.length === 0) {
+      diagnostics.push({
+        code: "tools.none-active",
+        severity: "warning",
+        source: SOURCE,
+        message: "no active tools resolved",
+      });
+    }
+    if (state.missingTools.length > 0) {
+      diagnostics.push({
+        code: "tools.missing",
+        severity: "warning",
+        source: SOURCE,
+        message: `missing tools: ${state.missingTools.join(", ")}`,
+        data: { tools: [...state.missingTools] },
+      });
+    }
+    if (state.gatedTools.length > 0) {
+      diagnostics.push({
+        code: "tools.gated",
+        severity: "warning",
+        source: SOURCE,
+        message: `gated tools: ${state.gatedTools.join(", ")}`,
+        data: { tools: [...state.gatedTools] },
+      });
+    }
+    if (state.disabledTools.length > 0) {
+      diagnostics.push({
+        code: "tools.disabled",
+        severity: "warning",
+        source: SOURCE,
+        message: `disabled tools: ${state.disabledTools.join(", ")}`,
+        data: { tools: [...state.disabledTools] },
+      });
+    }
+    for (const note of state.availabilityNotes) {
+      diagnostics.push({
+        code: "availability",
+        severity: "warning",
+        source: SOURCE,
+        message: note,
+        data: { note },
+      });
+    }
+    return diagnostics;
+  }
 
   if (!state.modelApplied) {
     diagnostics.push({
@@ -207,7 +255,7 @@ export function buildPromptAssemblyObservation(
   surface: Pick<MmrPromptAssemblyResult, "passthroughReason">,
   options: MmrSystemPromptOptionsView | undefined,
 ): MmrPromptAssemblyObservation | undefined {
-  if (state.mode === "free") return undefined;
+  if (state.mode === "free" || state.mode === "open") return undefined;
   const observation: MmrPromptAssemblyObservation = {};
 
   const reason = surface.passthroughReason;

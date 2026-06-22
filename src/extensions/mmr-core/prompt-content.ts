@@ -9,7 +9,7 @@
  */
 import type { MmrModeKey } from "./types.js";
 
-type PromptedMmrModeKey = Exclude<MmrModeKey, "free">;
+type PromptedMmrModeKey = Exclude<MmrModeKey, "open" | "free">;
 
 function block(lines: readonly string[]): string {
   return lines.join("\n");

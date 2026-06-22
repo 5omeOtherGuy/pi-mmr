@@ -77,46 +77,49 @@ describe("mmr-core persisted state", () => {
     });
   });
 
-  it("persists and restores free mode without model routing fields", async () => {
+  it("persists and restores native-control modes without model routing fields", async () => {
     const { createMmrModeState, findLatestPersistedModeState, MMR_MODE_STATE_ENTRY, toPersistedModeState } = await importSource("extensions/mmr-core/state.ts");
     const { getMmrMode } = await importSource("extensions/mmr-core/modes.ts");
 
-    const state = createMmrModeState({
-      mode: getMmrMode("free"),
-      source: "command",
-      modelResolution: {
+    for (const mode of ["open", "free"]) {
+      const activeTools = mode === "open" ? ["read", "bash", "Task"] : ["read", "bash"];
+      const state = createMmrModeState({
+        mode: getMmrMode(mode),
+        source: "command",
+        modelResolution: {
+          targetModel: "",
+          requestedModels: [],
+          modelFound: false,
+          modelApplied: false,
+          fallbackApplied: false,
+          candidates: [],
+        },
+        tools: { requestedTools: mode === "open" ? activeTools : [], activeTools, missingTools: [], decisions: [] },
+        appliedAt: "2026-05-08T00:00:00.000Z",
+      });
+
+      const persisted = toPersistedModeState(state);
+
+      assert.deepEqual(persisted, {
+        version: 1,
+        mode,
+        source: "command",
         targetModel: "",
         requestedModels: [],
-        modelFound: false,
-        modelApplied: false,
-        fallbackApplied: false,
-        candidates: [],
-      },
-      tools: { requestedTools: [], activeTools: ["read", "bash"], missingTools: [], decisions: [] },
-      appliedAt: "2026-05-08T00:00:00.000Z",
-    });
-
-    const persisted = toPersistedModeState(state);
-
-    assert.deepEqual(persisted, {
-      version: 1,
-      mode: "free",
-      source: "command",
-      targetModel: "",
-      requestedModels: [],
-      provider: "",
-      model: "",
-      modelFallbackApplied: false,
-      modelFallbackReason: undefined,
-      thinkingLevel: undefined,
-      activeTools: ["read", "bash"],
-      missingTools: [],
-      deferredTools: [],
-      gatedTools: [],
-      disabledTools: [],
-      appliedAt: "2026-05-08T00:00:00.000Z",
-    });
-    assert.equal(findLatestPersistedModeState([{ type: "custom", customType: MMR_MODE_STATE_ENTRY, data: persisted }])?.mode, "free");
+        provider: "",
+        model: "",
+        modelFallbackApplied: false,
+        modelFallbackReason: undefined,
+        thinkingLevel: undefined,
+        activeTools,
+        missingTools: [],
+        deferredTools: [],
+        gatedTools: [],
+        disabledTools: [],
+        appliedAt: "2026-05-08T00:00:00.000Z",
+      });
+      assert.equal(findLatestPersistedModeState([{ type: "custom", customType: MMR_MODE_STATE_ENTRY, data: persisted }])?.mode, mode);
+    }
   });
 
   it("writes version 1 on every persisted state", async () => {

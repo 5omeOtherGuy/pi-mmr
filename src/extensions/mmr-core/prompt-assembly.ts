@@ -220,7 +220,7 @@ function passthroughResult(
   };
 }
 
-type PromptedMmrModeKey = Exclude<MmrModeKey, "free">;
+type PromptedMmrModeKey = Exclude<MmrModeKey, "open" | "free">;
 
 function isPromptedMode(mode: string): mode is PromptedMmrModeKey {
   return getMmrModePromptRecipe(mode) !== undefined;

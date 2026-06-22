@@ -73,8 +73,15 @@ describe("mmr-core mode routing", () => {
     ]);
   });
 
-  it("accepts free from flags and persisted session state", async () => {
+  it("accepts open and free from flags and persisted session state", async () => {
     const { resolveMmrModeSelection } = await importSource("extensions/mmr-core/routing.ts");
+
+    assert.deepEqual(resolveMmrModeSelection({ flagValue: "open", persistedMode: "deep" }), {
+      mode: "open",
+      source: "flag",
+      warnings: [],
+      rejectedSources: [],
+    });
 
     assert.deepEqual(resolveMmrModeSelection({ flagValue: "free", persistedMode: "deep" }), {
       mode: "free",

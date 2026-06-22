@@ -3,7 +3,31 @@ import { MMR_REQUEST_POLICIES, formatMmrPolicyContext, formatMmrPolicyThinking }
 
 export const DEFAULT_MMR_MODE: MmrModeKey = "smart";
 
-export const MMR_MODE_KEYS = ["smart", "smartGPT", "rush", "test", "large", "deep", "free"] as const satisfies readonly MmrModeKey[];
+export const MMR_MODE_KEYS = ["smart", "smartGPT", "rush", "test", "large", "deep", "open", "free"] as const satisfies readonly MmrModeKey[];
+
+export const MMR_SMART_TOOL_NAMES = [
+  "read",
+  "bash",
+  "write",
+  "edit",
+  "web_search",
+  "read_web_page",
+  "read_session",
+  "find_session",
+  "skill",
+  "oracle",
+  "librarian",
+  "Task",
+  "start_task",
+  "task_poll",
+  "task_wait",
+  "task_cancel",
+  "task_list",
+  "finder",
+  "code_review",
+  "handoff",
+  "read_mcp_resource",
+] satisfies string[];
 
 /**
  * MMR mode table.
@@ -34,29 +58,7 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
     // shortcut flips it between the two presets in `MMR_MODE_THINKING_TOGGLES`
     // (medium/high) without releasing the mode.
     thinkingLevel: "medium",
-    tools: [
-      "read",
-      "bash",
-      "write",
-      "edit",
-      "web_search",
-      "read_web_page",
-      "read_session",
-      "find_session",
-      "skill",
-      "oracle",
-      "librarian",
-      "Task",
-      "start_task",
-      "task_poll",
-      "task_wait",
-      "task_cancel",
-      "task_list",
-      "finder",
-      "code_review",
-      "handoff",
-      "read_mcp_resource",
-    ],
+    tools: MMR_SMART_TOOL_NAMES,
     promptRoute: "default",
     featureGates: ["mmr-subagents", "mmr-async-tasks"],
   },
@@ -248,6 +250,16 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
     featureGates: ["mmr-subagents", "mmr-async-tasks", "mmr-history", "mmr-web"],
   },
 
+  open: {
+    key: "open",
+    displayName: "Open",
+    description: "Native Pi model, thinking, and prompt controls with Smart tools active.",
+    modelPreferences: [],
+    tools: MMR_SMART_TOOL_NAMES,
+    promptRoute: "default",
+    featureGates: ["mmr-subagents", "mmr-async-tasks"],
+  },
+
   free: {
     key: "free",
     displayName: "Free",
@@ -269,7 +281,7 @@ export function getMmrMode(key: MmrModeKey): MmrModeDefinition {
 export function formatMmrModeList(): string {
   return MMR_MODE_KEYS.map((key) => {
     const mode = MMR_MODES[key];
-    const policy = key === "free" ? undefined : MMR_REQUEST_POLICIES[key];
+    const policy = key === "free" || key === "open" ? undefined : MMR_REQUEST_POLICIES[key];
     const models = mode.modelPreferences.length > 0
       ? mode.modelPreferences
         .map((preference) => preference.model)

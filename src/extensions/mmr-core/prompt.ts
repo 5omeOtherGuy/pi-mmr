@@ -26,7 +26,7 @@ export interface MmrPromptLayerContext {
  * paths..."); the policy is to never edit Pi-authored blocks.
  *
  * Returns Pi's prompt unchanged when:
- *   - the mode is `free`;
+ *   - the mode is `open` or `free`;
  *   - the Pi-auto head cannot be located (`--system-prompt` / `SYSTEM.md`
  *     custom prompt, or unexpected layout);
  *   - the auto sections are out of the expected order

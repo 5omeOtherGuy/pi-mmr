@@ -29,8 +29,8 @@ export const MMR_SMART_CONTEXT_WINDOW = getMmrModeContextWindowCap("smart") ?? 3
 
 /**
  * Resolve the context-window cap for a mode, or `undefined` when the mode does
- * not cap. Modes without a request policy (`free`) and unknown mode keys never
- * cap. The cap value is the mode's advertised `contextWindow` profile.
+ * not cap. Modes without a request policy (`open`, `free`) and unknown mode
+ * keys never cap. The cap value is the mode's advertised `contextWindow` profile.
  */
 export function getMmrModeContextWindowCap(modeKey: string): number | undefined {
   const policies = MMR_REQUEST_POLICIES as Record<string, { contextWindow?: number } | undefined>;
@@ -40,8 +40,8 @@ export function getMmrModeContextWindowCap(modeKey: string): number | undefined 
 
 /**
  * Clone-and-cap a model's `contextWindow` for a given mode. No-op unless the
- * mode declares a cap (`smart` and `large`; `free` and the GPT/Codex-primary
- * modes do not) and the model's window exceeds that cap. Caps DOWN only, so a
+ * mode declares a cap (`smart` and `large`; `open`, `free`, and the
+ * GPT/Codex-primary modes do not) and the model's window exceeds that cap. Caps DOWN only, so a
  * custom provider with a smaller window stays authoritative.
  *
  * Returns the input reference unchanged when no cap applies, so callers can

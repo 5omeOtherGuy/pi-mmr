@@ -19,10 +19,10 @@ import type {
   MmrToolResolution,
 } from "./types.js";
 
-type LockedMmrModeKey = Exclude<MmrModeState["mode"], "free">;
+type LockedMmrModeKey = Exclude<MmrModeState["mode"], "open" | "free">;
 
 function getRequestPolicyForState(state: MmrModeState) {
-  if (state.mode === "free") return undefined;
+  if (state.mode === "free" || state.mode === "open") return undefined;
   const policy = MMR_REQUEST_POLICIES[state.mode as LockedMmrModeKey];
   // Toggleable modes carry a runtime thinking level that the static policy
   // does not encode. Derive the displayed policy from the applied level so
@@ -82,7 +82,7 @@ function formatBaseline(state: MmrModeState): string {
 }
 
 function formatMmrContextCap(effectiveMaxInputTokens: number | undefined, mode: string): string {
-  if (mode === "free") return "none";
+  if (mode === "free" || mode === "open") return "none";
   if (typeof effectiveMaxInputTokens === "number" && Number.isFinite(effectiveMaxInputTokens) && effectiveMaxInputTokens > 0) {
     return `${effectiveMaxInputTokens} input tokens (mode profile)`;
   }
@@ -315,7 +315,7 @@ export function updateMmrStatus(ctx: ExtensionContext, state: MmrModeState | und
     return;
   }
 
-  if (state.mode === "free") {
+  if (state.mode === "free" || state.mode === "open") {
     ctx.ui.setStatus("mmr-mode", undefined);
     ctx.ui.setFooter?.(undefined);
     return;
@@ -467,6 +467,36 @@ export function formatMmrStatus(state: MmrModeState | undefined, options: Format
       formatSettingsFilesRead(state),
       formatSettingsWarnings(state),
       `Policy warnings: ${formatPolicyWarnings(state)}`,
+      `State version: ${state.version}`,
+      `Applied at: ${state.appliedAt}`,
+      options.debug ? formatDebugSection(state, options) : undefined,
+    ]);
+  }
+
+  if (state.mode === "open") {
+    return joinLines([
+      "Mode: Open (open)",
+      `Selected source: ${state.source}`,
+      formatRejectedSources(state),
+      "Mode control: native Pi model/thinking/prompt",
+      "Tool surface: Smart tools",
+      "Resolved model: none",
+      "Thinking: Pi native (request policy: native Pi controls)",
+      "Context: native Pi controls",
+      "Context cap: none",
+      `Baseline captured: ${formatBaseline(state)}`,
+      "Prompt surface: Pi standard prompt (passthrough)",
+      `Active tools: ${state.activeTools.join(", ") || "none"}`,
+      `Missing tools: ${state.missingTools.join(", ") || "none"}`,
+      `Deferred tools: ${state.deferredTools.join(", ") || "none"}`,
+      `Gated tools: ${state.gatedTools.join(", ") || "none"}`,
+      `Disabled tools: ${state.disabledTools.join(", ") || "none"}`,
+      formatToolDecisions(state.resolution.toolDecisions),
+      formatFeatureGates(state),
+      formatSettingsFilesRead(state),
+      formatSettingsWarnings(state),
+      `Policy warnings: ${formatPolicyWarnings(state)}`,
+      formatDiagnosticsBySeverity(state),
       `State version: ${state.version}`,
       `Applied at: ${state.appliedAt}`,
       options.debug ? formatDebugSection(state, options) : undefined,

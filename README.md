@@ -6,7 +6,7 @@
 
 > Switch your entire Pi coding harness — model, thinking, tools, and prompt — with one command. Fully reversible.
 
-`pi-mmr` turns Pi into a coding harness you control. Instead of one fixed model-and-prompt configuration, you pick a mode — `smart`, `smartGPT`, `rush`, `test`, `large`, or `deep` — and `pi-mmr` swaps the **whole** profile in a single switch: that mode's provider-neutral model preferences, thinking policy, context profile, active-tool allowlist, worker profile, and prompt behavior. Every knob is exposed instead of hidden, and `free` releases every lock to return you to stock Pi at any time.
+`pi-mmr` turns Pi into a coding harness you control. Instead of one fixed model-and-prompt configuration, you pick a locked mode — `smart`, `smartGPT`, `rush`, `test`, `large`, or `deep` — and `pi-mmr` swaps the **whole** profile in a single switch: that mode's provider-neutral model preferences, thinking policy, context profile, active-tool allowlist, worker profile, and prompt behavior. `open` keeps Pi's native model/thinking/prompt controls while activating Smart's parent-session tools, and `free` releases every lock to return you to stock Pi at any time.
 
 It is a modular Pi extension package, not a fork or a separate IDE — it builds on Pi's native behavior instead of replacing it. Each mode's prompt is assembled from its own fragments and surgically swapped into Pi's auto-rendered prompt head, preserving Pi's own tool list, guidelines, documentation, and tail. Tool resolution is exact-name based, runtime state is session-scoped, and everything runs on your own provider subscriptions and API keys.
 
@@ -18,7 +18,7 @@ Beyond modes, `pi-mmr` adds Pi-native tools for codebase search, expert review, 
 - **A framework, not a black box.** Model routing, thinking policy, tool allowlists, and prompt assembly are all explicit, inspectable via `/mmr-status`, and configurable in settings.
 - **Provider-neutral by design.** Modes use explicit preference order: subscription/OAuth provider entries first, then API-key entries, then other registered providers — so the same mode follows you across providers.
 - **Right-sized delegation.** Use `finder`, `oracle`, `Task`, and `librarian`, run independent jobs as a background fleet, or ship your own Markdown subagents — without hand-picking child models and tools.
-- **Fail-closed and reversible.** A locked mode refuses to activate without a usable model and active tools; `free` releases every MMR-owned lock and tool registration.
+- **Fail-closed and reversible.** A locked mode refuses to activate without a usable model and active tools; `open` keeps native Pi model/thinking/prompt behavior with Smart tools, while `free` releases every MMR-owned lock and tool registration.
 - **Optional reach, off by default.** Web, GitHub, and local session-history tools stay gated until you explicitly enable them.
 - **Runs on your stack.** Open source (MIT), self-hosted as a Pi package, driven by the providers you already authenticate.
 
@@ -67,6 +67,7 @@ Pi (`@earendil-works/pi-coding-agent`) and `@earendil-works/pi-agent-core` are p
    ```text
    /mode rush       # fast, low-token turns
    /mode deep       # hard reasoning, planning, review
+   /mode open       # native Pi model/thinking/prompt, Smart tools active
    /mode free       # stock Pi behavior; MMR-owned tools removed
    ```
 
@@ -96,6 +97,7 @@ Pi (`@earendil-works/pi-coding-agent`) and `@earendil-works/pi-agent-core` are p
 | Test Opus without smart-mode request shaping | `test` | Rush-style profile pinned to Opus 4.8 with medium thinking |
 | Work with long context | `large` | Long-context model preferences and broad-context posture |
 | Plan, debug, or review deeply | `deep` | High-reasoning route, diagnostic posture, deep-specific tools |
+| Keep native controls with rich tools | `open` | Native Pi model/thinking/prompt, Smart tool surface active |
 | Return to stock Pi | `free` | Releases MMR locks and removes MMR-owned tools |
 
 Mode selection precedence: `--mmr-mode` flag → persisted session → `mmrCore.defaultMode` → `smart`.
@@ -107,7 +109,7 @@ Useful controls:
 /mode deep         # switch mode
 /mmr-status        # locked-mode status (add `debug` for model/tool resolution)
 Ctrl+Shift+S       # mode picker  (Alt+M fallback)
-Ctrl+Space         # cycle smart → smartGPT → rush → test → large → deep
+Ctrl+Space         # cycle smart → smartGPT → rush → test → large → deep → open
 Alt+R              # toggle the active mode's thinking preset (where supported)
 ```
 

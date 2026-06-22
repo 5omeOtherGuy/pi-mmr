@@ -171,7 +171,7 @@ export function registerMmrLifecycleHooks(pi: ExtensionAPI, controller: MmrModeC
     if (getMmrSubagentState()) return;
 
     const state = getMmrModeState();
-    if (!state || state.mode === "free") return;
+    if (!state || state.mode === "free" || state.mode === "open") return;
 
     // Assemble directly (rather than via buildMmrPromptLayer) so we can read
     // the passthrough reason and reconcile the resolved active tools against

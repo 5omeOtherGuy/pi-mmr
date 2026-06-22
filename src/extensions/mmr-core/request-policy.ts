@@ -68,8 +68,8 @@ export interface MmrRequestPolicy {
 }
 
 /**
- * Per-mode policies for each locked MMR mode. Free mode has no policy;
- * mmr-core's hook is a no-op while the mode is `free`.
+ * Per-mode policies for each locked MMR mode. Open and Free modes have no
+ * policy; mmr-core's hook is a no-op while either native-control mode is active.
  *
  * Notes on the shape choices:
  * - SMART uses adaptive thinking with `output_config.effort=high` and
@@ -98,7 +98,7 @@ export interface MmrRequestPolicy {
  *   is cap-down only, so a smaller custom route stays authoritative, and `free`
  *   (no policy) is never capped.
  */
-export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "free">, MmrRequestPolicy> = {
+export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "open" | "free">, MmrRequestPolicy> = {
   smart: {
     anthropic: {
       maxTokens: 64000,

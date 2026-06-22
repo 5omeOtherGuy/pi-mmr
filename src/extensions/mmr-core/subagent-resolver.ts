@@ -401,7 +401,7 @@ function resolvePromptBaseMode(
   if (profile.baseMode !== "from-parent") {
     return { promptBaseMode: profile.baseMode };
   }
-  if (!parentMode || parentMode === "free") {
+  if (!parentMode || parentMode === "open" || parentMode === "free") {
     // Child activation is downstream of parent prompt assembly: the
     // parent already delivered the worker system prompt via
     // `--system-prompt` before spawning. Older callers may not provide

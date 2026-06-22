@@ -162,11 +162,16 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
     };
   }
 
-  function createFreeModeState(source: MmrModeSelectionSource, activeTools: string[], rejectedSources?: readonly MmrRejectedModeSource[]): MmrModeState {
-    const free = getMmrMode("free");
+  function createNativeControlModeState(
+    modeKey: "open" | "free",
+    source: MmrModeSelectionSource,
+    tools: Parameters<typeof createMmrModeState>[0]["tools"],
+    rejectedSources?: readonly MmrRejectedModeSource[],
+  ): MmrModeState {
+    const mode = getMmrMode(modeKey);
     return createMmrModeState({
       ...currentBaselineFields(),
-      mode: free,
+      mode,
       source,
       rejectedSources,
       modelResolution: {
@@ -177,19 +182,23 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
         fallbackApplied: false,
         candidates: [],
       },
-      tools: {
-        requestedTools: [],
-        activeTools,
-        missingTools: [],
-        deferredTools: [],
-        gatedTools: [],
-        disabledTools: [],
-        decisions: [],
-      },
-      featureGateDecisions: resolveMmrFeatureGates(free.featureGates ?? []),
+      tools,
+      featureGateDecisions: resolveMmrFeatureGates(mode.featureGates ?? []),
       settingsFilesRead,
       settingsWarnings,
     });
+  }
+
+  function createFreeModeState(source: MmrModeSelectionSource, activeTools: string[], rejectedSources?: readonly MmrRejectedModeSource[]): MmrModeState {
+    return createNativeControlModeState("free", source, {
+      requestedTools: [],
+      activeTools,
+      missingTools: [],
+      deferredTools: [],
+      gatedTools: [],
+      disabledTools: [],
+      decisions: [],
+    }, rejectedSources);
   }
 
   function notifyFreeMode(ctx: ExtensionContext, state: MmrModeState, options: ApplyModeOptions): void {
@@ -236,6 +245,75 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
       fallbackApplied: state.modelFallbackApplied,
       fallbackReason: state.modelFallbackReason,
     });
+  }
+
+  async function applyOpenMode(ctx: ExtensionContext, options: ApplyModeOptions): Promise<MmrModeState | undefined> {
+    activePolicy = undefined;
+    clearMmrManagedModelOverride();
+    const mode = getMmrMode("open");
+    captureBaseline(ctx);
+    const previousState = getMmrModeState();
+    const availableTools = pi.getAllTools().map((tool) => tool.name);
+    const baseResolution = resolveMmrTools("open", availableTools);
+    if (mode.tools.length > 0 && baseResolution.activeTools.length === 0) {
+      if (options.notify) ctx.ui.notify(formatZeroToolActivationFailure(mode, baseResolution, previousState), "error");
+      updateMmrStatus(ctx, previousState);
+      return previousState;
+    }
+
+    const smart = getMmrMode("smart");
+    const settingsExtraNames = excludeReservedSubagentNames(selectExtraToolNames(
+      "smart",
+      configuredLockedModeExtraTools,
+      smart.tools,
+    ));
+    const providerExtraNames = resolveMmrModeExtraTools("smart", ctx.cwd);
+    const baseToolSet = new Set(mode.tools);
+    const seenExtra = new Set<string>();
+    const extraToolNames: string[] = [];
+    for (const name of [...settingsExtraNames, ...providerExtraNames]) {
+      if (baseToolSet.has(name) || seenExtra.has(name)) continue;
+      seenExtra.add(name);
+      extraToolNames.push(name);
+    }
+    const toolResolution = extraToolNames.length > 0
+      ? mergeToolResolutions(baseResolution, relabelExtraOwners(resolveMmrToolNames(extraToolNames, availableTools)))
+      : baseResolution;
+
+    applyingMmrMode = true;
+    try {
+      pi.setActiveTools(toolResolution.activeTools);
+    } finally {
+      applyingMmrMode = false;
+    }
+
+    const state = createNativeControlModeState("open", options.source, toolResolution, options.rejectedSources);
+    setMmrModeState(state);
+    publishStateChange();
+    recordModeTransition(previousState, state);
+
+    if (options.persist) {
+      pi.appendEntry(MMR_MODE_STATE_ENTRY, toPersistedModeState(state));
+    }
+
+    updateMmrStatus(ctx, state);
+
+    if (options.notify) {
+      const deferredMessages = toolResolution.decisions
+        .filter((decision) => decision.status === "deferred")
+        .map((decision) => decision.diagnostic);
+      const suffix = deferredMessages.length > 0 ? `\nWarnings:\n- ${deferredMessages.join("\n- ")}` : "";
+      ctx.ui.notify(
+        [
+          "MMR Open mode activated (open).",
+          "Native Pi model/thinking/prompt controls are active.",
+          "Smart tools are active in the parent session.",
+        ].join("\n") + suffix,
+        deferredMessages.length > 0 ? "warning" : "info",
+      );
+    }
+
+    return state;
   }
 
   async function applyFreeMode(ctx: ExtensionContext, options: ApplyModeOptions): Promise<MmrModeState> {
@@ -301,6 +379,9 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
 
     if (mode.key === "free") {
       return applyFreeMode(ctx, options);
+    }
+    if (mode.key === "open") {
+      return applyOpenMode(ctx, options);
     }
 
     captureBaseline(ctx);
@@ -490,7 +571,7 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
     options: Pick<ApplyModeOptions, "nativeModel" | "nativeThinkingLevel"> = {},
   ): Promise<void> {
     const state = getMmrModeState();
-    if (!state || state.mode === "free") {
+    if (!state || state.mode === "free" || state.mode === "open") {
       captureBaseline(ctx, {
         force: true,
         model: options.nativeModel ?? ctx.model,

@@ -17,7 +17,7 @@ export const MMR_ADDITIONAL_TOOLS_LINE =
 
 export const MMR_RESPONSE_STYLE_HEADING = "## Response style";
 
-type PromptedMmrModeKey = Exclude<MmrModeKey, "free">;
+type PromptedMmrModeKey = Exclude<MmrModeKey, "open" | "free">;
 
 export type MmrPromptBaseId = "pi-native-default-v1";
 

@@ -143,7 +143,7 @@ export async function applyMmrSubagentProfile(
     : undefined;
   let parentMode: MmrModeKey | undefined;
   if (explicitFlags.parentMode !== undefined) {
-    if (!isMmrModeKey(explicitFlags.parentMode) || explicitFlags.parentMode === "free") {
+    if (!isMmrModeKey(explicitFlags.parentMode) || explicitFlags.parentMode === "open" || explicitFlags.parentMode === "free") {
       failClosedSubagent(
         `Subagent "${profile.name}" was invoked with invalid --mmr-parent-mode ${JSON.stringify(explicitFlags.parentMode)}.`,
         ctx,

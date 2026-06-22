@@ -165,7 +165,7 @@ export async function runMmrConfigFlow(
     // Re-read disk so the "current" values reflect external edits / prior
     // writes this session, not the startup snapshot held by the bindings.
     const configuredModelPreferences = readPersistedPreferences(ctx, bindings).modePreferences;
-    const modeChoices = MMR_MODE_KEYS.filter((key) => key !== "free").map((key) => {
+    const modeChoices = MMR_MODE_KEYS.filter((key) => key !== "open" && key !== "free").map((key) => {
       const defaults = getMmrMode(key).modelPreferences;
       const current = configuredModelPreferences[key];
       return `${key} — ${describeConfiguredPreferences(current, defaults)}`;
@@ -173,7 +173,7 @@ export async function runMmrConfigFlow(
     const modeSelection = await ctx.ui.select("Pick the MMR mode to configure", modeChoices);
     if (!modeSelection) return;
     const modeKey = modeSelection.split(" \u2014 ")[0] ?? modeSelection.split(" — ")[0];
-    if (!isMmrModeKey(modeKey) || modeKey === "free") return;
+    if (!isMmrModeKey(modeKey) || modeKey === "open" || modeKey === "free") return;
 
     const picked = await pickModelPreference(ctx, `mode "${modeKey}"`);
     if (!picked) return;

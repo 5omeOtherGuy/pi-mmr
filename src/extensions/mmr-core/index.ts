@@ -5,7 +5,7 @@ import { registerMmrLifecycleHooks } from "./lifecycle-hooks.js";
 
 export default function mmrCoreExtension(pi: ExtensionAPI): void {
   pi.registerFlag("mmr-mode", {
-    description: "Start with an MMR mode: smart, smartGPT, rush, test, large, deep, or free",
+    description: "Start with an MMR mode: smart, smartGPT, rush, test, large, deep, open, or free",
     type: "string",
   });
 

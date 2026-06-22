@@ -130,7 +130,7 @@ describe("mmr-core mode shortcuts", () => {
 
     await shortcuts.get("alt+m").handler(ctx);
 
-    assert.deepEqual(selectCalls[0].options, ["smart", "smartGPT", "rush", "test", "large", "deep", "free"]);
+    assert.deepEqual(selectCalls[0].options, ["smart", "smartGPT", "rush", "test", "large", "deep", "open", "free"]);
     assert.match(selectCalls[0].title, /current: smart/);
     assert.equal(runtime.getMmrModeState()?.mode, "large");
     assert.equal(calls.setModel.length, 1);

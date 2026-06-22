@@ -93,19 +93,28 @@ describe("mmr-core mode table", () => {
     }
   });
 
-  it("defines free as the native Pi control mode and includes it in /mode list", async () => {
+  it("defines open as native Pi controls with Smart-equivalent tools, while free remains pure native", async () => {
     const { formatMmrModeList, getMmrMode, isMmrModeKey, MMR_MODE_KEYS } = await importSource("extensions/mmr-core/modes.ts");
 
+    const smart = getMmrMode("smart");
+    const open = getMmrMode("open");
     const free = getMmrMode("free");
 
-    assert.deepEqual(MMR_MODE_KEYS, ["smart", "smartGPT", "rush", "test", "large", "deep", "free"]);
-    assert.equal(isMmrModeKey("test"), true);
+    assert.deepEqual(MMR_MODE_KEYS, ["smart", "smartGPT", "rush", "test", "large", "deep", "open", "free"]);
+    assert.equal(isMmrModeKey("open"), true);
     assert.equal(isMmrModeKey("free"), true);
+    assert.equal(open.displayName, "Open");
+    assert.deepEqual(open.modelPreferences, []);
+    assert.equal(open.thinkingLevel, undefined);
+    assert.deepEqual(open.tools, smart.tools);
+    assert.equal(open.tools, smart.tools, "open must share Smart's tool intent instead of duplicating it");
+    assert.match(open.description, /Smart tools/i);
     assert.equal(free.displayName, "Free");
     assert.deepEqual(free.modelPreferences, []);
     assert.equal(free.thinkingLevel, undefined);
     assert.deepEqual(free.tools, []);
     assert.match(free.description, /native Pi/i);
+    assert.match(formatMmrModeList(), /open\s+native Pi controls/i);
     assert.match(formatMmrModeList(), /free\s+native Pi controls/i);
   });
 });

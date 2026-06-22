@@ -138,6 +138,21 @@ describe("mmr-core before_provider_request hook", () => {
     assert.deepEqual(payload, { model: "claude-opus-4-8", messages: [], max_tokens: 4096 });
   });
 
+  it("switching to open leaves provider payloads unchanged", async () => {
+    const extension = (await importSource("extensions/mmr-core/index.ts")).default;
+    const { ctx } = createContext([SMART_MODEL]);
+    const { pi, commands, handlers } = createPi({ model: SMART_MODEL });
+    extension(pi);
+
+    await commands.get("mode").handler("open", ctx);
+
+    const payload = { model: "claude-opus-4-8", messages: [], system: [], max_tokens: 4096 };
+    const result = await handlers.get("before_provider_request")({ type: "before_provider_request", payload }, ctx);
+
+    assert.equal(result, undefined);
+    assert.deepEqual(payload, { model: "claude-opus-4-8", messages: [], system: [], max_tokens: 4096 });
+  });
+
   it("rush mode applies OpenAI Responses max output and no-thinking effort", async () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const { ctx } = createContext([RUSH_MODEL]);

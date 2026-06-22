@@ -6,12 +6,12 @@
 
 ## Summary
 
-`pi-mmr` is additive to Pi. It does not remove or rename anything you install; it only changes what is *active* while one of its **locked modes** (`smart`, `smartGPT`, `rush`, `large`, `deep`) is selected. In **`free` mode**, `pi-mmr` releases all enforcement and behaves as if it were not installed (it only drops its own tool registrations), so every Pi extension works normally.
+`pi-mmr` is additive to Pi. It does not remove or rename anything you install; it only changes what is *active* while one of its **locked modes** (`smart`, `smartGPT`, `rush`, `test`, `large`, `deep`) is selected. In **`open` mode**, Pi-native model/thinking/prompt controls stay active while Smart-equivalent parent-session tools are selected. In **`free` mode**, `pi-mmr` releases all enforcement and behaves as if it were not installed (it only drops its own tool registrations), so every Pi extension works normally.
 
 Three locked-mode mechanics drive every interaction below:
 
 - **Tool allowlist.** A locked mode sets the active tool set to its fixed allowlist (plus any `lockedModeExtraTools`) and blocks other tools at `tool_call`.
-- **Native opt-out.** A native model or thinking-level change (`/model`, model-cycle, `shift+tab`) drops you from the locked mode to `free`, by design.
+- **Native opt-out.** A native model or thinking-level change (`/model`, model-cycle, `shift+tab`) drops you from a locked mode to `free`, by design. Use `open` when you want native controls while keeping Smart tools active.
 - **Model preference resolution.** Locked modes use explicit model preference order. Known family names (`claude-*`, `gpt-*`, `gemini-*`/`gemma-*`) expand to known provider ids with subscription/OAuth entries first.
 
 The stance below is per scenario. "Supported" means it works in locked modes today; "Supported (free)" means it works in `free` mode and we recommend `free` for it; "Not supported" means it is intentionally constrained, with the reason.

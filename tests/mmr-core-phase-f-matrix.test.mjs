@@ -351,9 +351,10 @@ describe("Phase F: planned-tool negative-injection across the renderer-flattened
   }
 });
 
-describe("Phase F: free-mode passthrough invariant", () => {
+describe("Phase F: native-control passthrough invariant", () => {
+  for (const mode of ["open", "free"]) {
   for (const toolSet of BASELINE_TOOL_SETS) {
-    it(`free / ${toolSet}: assembled systemPrompt equals base; manifest forwarded unchanged; no MMR-authored text injected`, async () => {
+    it(`${mode} / ${toolSet}: assembled systemPrompt equals base; manifest forwarded unchanged; no MMR-authored text injected`, async () => {
       const {
         assembleActiveSurface,
         MMR_TOOL_USE_POSTURE_LINE,
@@ -361,12 +362,12 @@ describe("Phase F: free-mode passthrough invariant", () => {
       } = await importSource("extensions/mmr-core/prompt-assembly.ts");
       const activeToolManifest = await buildBaselineManifest(toolSet);
       const result = assembleActiveSurface({
-        state: createState("free"),
+        state: createState(mode),
         baseSystemPrompt: BASE_PROMPT,
         activeToolManifest,
       });
-      assert.equal(result.systemPrompt, BASE_PROMPT, `free / ${toolSet}: systemPrompt must equal base`);
-      assert.deepEqual(result.activeToolManifest, activeToolManifest, `free / ${toolSet}: manifest must be forwarded unchanged`);
+      assert.equal(result.systemPrompt, BASE_PROMPT, `${mode} / ${toolSet}: systemPrompt must equal base`);
+      assert.deepEqual(result.activeToolManifest, activeToolManifest, `${mode} / ${toolSet}: manifest must be forwarded unchanged`);
       // No MMR-authored block markers must appear because BASE_PROMPT itself
       // contains none. If any of these strings appear, mode-specific text
       // leaked into a passthrough surface.
@@ -387,12 +388,13 @@ describe("Phase F: free-mode passthrough invariant", () => {
         assert.equal(
           result.systemPrompt.includes(tok),
           false,
-          `free / ${toolSet}: MMR-authored token "${tok}" must not appear in passthrough surface`,
+          `${mode} / ${toolSet}: MMR-authored token "${tok}" must not appear in passthrough surface`,
         );
       }
       // Result.blocks must be the single preserved-tail passthrough.
-      assert.equal(result.blocks.length, 1, `free / ${toolSet}: blocks must be a single preserved-tail`);
-      assert.equal(result.blocks[0].kind, "preserved-tail", `free / ${toolSet}: only block must be preserved-tail`);
+      assert.equal(result.blocks.length, 1, `${mode} / ${toolSet}: blocks must be a single preserved-tail`);
+      assert.equal(result.blocks[0].kind, "preserved-tail", `${mode} / ${toolSet}: only block must be preserved-tail`);
     });
+  }
   }
 });
