@@ -144,7 +144,7 @@ describe("code_review tool definition", () => {
 });
 
 describe("code-review subagent profile", () => {
-  it("is standalone, read-only by contract, backgroundable, and prefers antigravity Gemini 3.1 Pro", async () => {
+  it("is standalone, read-only by contract, backgroundable, and prefers GPT-5.2", async () => {
     const { getMmrSubagentProfile } = await importSource(PROFILES_MODULE);
     const profile = getMmrSubagentProfile("code-review");
     assert.ok(profile, "mmr-core must expose a code-review subagent profile");
@@ -154,10 +154,11 @@ describe("code-review subagent profile", () => {
     assert.equal(profile.allowMcp, false);
     assert.equal(profile.allowToolbox, false);
     assert.notEqual(profile.backgroundable, false, "code-review must be backgroundable");
-    assert.deepEqual(profile.modelPreferences[0], {
-      model: "gemini-3.1-pro",
-      providers: ["antigravity"],
-    });
+    assert.deepEqual([...profile.modelPreferences], [
+      { model: "gpt-5.2", thinkingLevel: "high" },
+      { model: "gemini-3.1-pro", providers: ["antigravity"], thinkingLevel: "high" },
+      { model: "claude-opus-4-6", thinkingLevel: "high" },
+    ]);
   });
 
   it("derives CODE_REVIEW_WORKER_TOOLS from the profile", async () => {
