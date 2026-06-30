@@ -21,7 +21,7 @@
 
 Implemented in `mmr-core`:
 
-- locked modes: `smart`, `smartGPT`, `rush`, `test`, `large`, and `deep`; native-control modes: `open` and `free`;
+- locked modes: `smart`, `smartGPT`, `smartSonnet`, `rush`, `test`, `large`, and `deep`; native-control modes: `open` and `free`;
 - mode selection via `--mmr-mode`, `/mode`, persisted session state, settings, or default;
 - provider-neutral model preference resolution with subscription-first preference ordering;
 - thinking-level application for the selected model;
@@ -180,9 +180,9 @@ All tool names below are concrete Pi tool names. Modes, subagent profiles, custo
 | `chart` | `mmr-toolbox` | Deferred. |
 | `web_search` | `mmr-web` | Active when network is enabled. Uses SearXNG when configured, Brave when keyed, and DuckDuckGo HTML as a no-key fallback. `WebSearchDetails.backend` reports the concrete path. |
 | `read_web_page` | `mmr-web` | Active when network is enabled; uses the custom in-process reader and needs no provider key. |
-| `Task` | `mmr-subagents` | Active in `smart`/`smartGPT`/`rush`/`test`/`large`/`deep` and `open` modes. Mode-derived bounded worker uses `mmr-core`'s `task-subagent` profile. |
-| `finder` | `mmr-subagents` | Active in `smart`/`smartGPT`/`rush`/`test`/`large`/`deep` and `open` modes. Read-only worker (`--tools grep,find,read`) uses `mmr-core`'s subagent execution profile. |
-| `oracle` | `mmr-subagents` | Active in `smart`/`smartGPT`/`rush`/`test`/`large`/`deep` and `open` modes. Advisory worker uses `mmr-core`'s `oracle` profile. |
+| `Task` | `mmr-subagents` | Active in `smart`/`smartGPT`/`smartSonnet`/`rush`/`test`/`large`/`deep` and `open` modes. Mode-derived bounded worker uses `mmr-core`'s `task-subagent` profile. |
+| `finder` | `mmr-subagents` | Active in `smart`/`smartGPT`/`smartSonnet`/`rush`/`test`/`large`/`deep` and `open` modes. Read-only worker (`--tools grep,find,read`) uses `mmr-core`'s subagent execution profile. |
+| `oracle` | `mmr-subagents` | Active in `smart`/`smartGPT`/`smartSonnet`/`rush`/`test`/`large`/`deep` and `open` modes. Advisory worker uses `mmr-core`'s `oracle` profile. |
 | `librarian` | `mmr-subagents` | Gated behind source-owned read-only `mmr-github` tools; remote repository research uses the `librarian` profile. |
 | `read_github` | `mmr-github` | Active when GitHub access is enabled; reads files or lists directories. |
 | `list_directory_github` | `mmr-github` | Active when GitHub access is enabled; lists directory entries. |

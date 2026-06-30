@@ -8,7 +8,7 @@
 
 ## What `mmr-core` writes to the system prompt
 
-- `smart`, `smartGPT`, `rush`, `test`, `large`, and `deep` each use a pi-mmr-authored mode template (intro, posture sections, closing line) in `src/extensions/mmr-core/prompt-content.ts` (re-exported by the `prompt-templates.ts` compatibility shim).
+- `smart`, `smartGPT`, `smartSonnet`, `rush`, `test`, `large`, and `deep` each use a pi-mmr-authored mode template (intro, posture sections, closing line) in `src/extensions/mmr-core/prompt-content.ts` (re-exported by the `prompt-templates.ts` compatibility shim).
 - `large` has explicit broad-context discipline rather than being identical to `smart`.
 - `rush` uses low-latency, targeted-work guidance.
 - `deep` uses deliberate-investigation guidance with an explicit `## Diagnostic gate` Markdown section.

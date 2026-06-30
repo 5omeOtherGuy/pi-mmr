@@ -6,7 +6,7 @@
 
 ## Summary
 
-`pi-mmr` is additive to Pi. It does not remove or rename anything you install; it only changes what is *active* while one of its **locked modes** (`smart`, `smartGPT`, `rush`, `test`, `large`, `deep`) is selected. In **`open` mode**, Pi-native model/thinking/prompt controls stay active while Smart-equivalent parent-session tools are selected. In **`free` mode**, `pi-mmr` releases all enforcement and behaves as if it were not installed (it only drops its own tool registrations), so every Pi extension works normally.
+`pi-mmr` is additive to Pi. It does not remove or rename anything you install; it only changes what is *active* while one of its **locked modes** (`smart`, `smartGPT`, `smartSonnet`, `rush`, `test`, `large`, `deep`) is selected. In **`open` mode**, Pi-native model/thinking/prompt controls stay active while Smart-equivalent parent-session tools are selected. In **`free` mode**, `pi-mmr` releases all enforcement and behaves as if it were not installed (it only drops its own tool registrations), so every Pi extension works normally.
 
 Three locked-mode mechanics drive every interaction below:
 

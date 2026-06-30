@@ -9,7 +9,7 @@ after(cleanupLoadedSource);
 // pin the structural invariants of MMR_MODE_PROMPT_TEMPLATES so accidental
 // deletion or key drift fails loudly without requiring a fixture refresh.
 
-const PROMPTED_MODES = ["smart", "smartGPT", "rush", "test", "large", "deep"];
+const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
 
 describe("mmr-core prompt templates - structural invariants", () => {
   it("exports exactly one template per prompted (non-free) locked mode", async () => {
@@ -33,7 +33,7 @@ describe("mmr-core prompt templates - structural invariants", () => {
     }
     // The smart family mirrors the authoritative default template, whose
     // framing lives entirely in the intro and body fragments — no posture.
-    for (const mode of ["smart", "smartGPT", "large"]) {
+    for (const mode of ["smart", "smartGPT", "smartSonnet", "large"]) {
       assert.equal(MMR_MODE_PROMPT_TEMPLATES[mode].postureSections, "", `${mode}: smart-family modes render no posture section`);
     }
     for (const mode of ["rush", "deep"]) {

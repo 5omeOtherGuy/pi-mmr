@@ -26,6 +26,7 @@ Current modes:
 | --- | --- | --- | --- |
 | `smart` | `claude-opus-4-8` → `gpt-5.5` | Anthropic adaptive/high or OpenAI Responses medium | `default` |
 | `smartGPT` | `gpt-5.5` | OpenAI Responses | `default` |
+| `smartSonnet` | `claude-sonnet-5` (claude-subscription) | Anthropic adaptive, toggleable low/medium/high | `default` |
 | `rush` | `gpt-5.5` → `claude-haiku-4-5-20251001` → `claude-haiku-4-5` | OpenAI Responses none, Haiku fallback thinking off | `rush` |
 | `test` | `claude-opus-4-8` | Rush-style request policy with medium Pi thinking | `rush` |
 | `large` | `claude-opus-4-6` → `gpt-5.4` | Anthropic adaptive/medium or OpenAI Responses medium | `default` |
@@ -33,13 +34,13 @@ Current modes:
 | `open` | native Pi controls | native Pi controls | Pi standard prompt |
 | `free` | native Pi controls | native Pi controls | Pi standard prompt |
 
-`smart`, `smartGPT`, `rush`, `test`, `large`, `deep`, `open`, and `free`
-are stable development mode keys; see the public-safety checklist in the
+`smart`, `smartGPT`, `smartSonnet`, `rush`, `test`, `large`, `deep`, `open`, and
+`free` are stable development mode keys; see the public-safety checklist in the
 top-level roadmap.
 
 Implemented surfaces:
 
-- `--mmr-mode smart|smartGPT|rush|test|large|deep|open|free`
+- `--mmr-mode smart|smartGPT|smartSonnet|rush|test|large|deep|open|free`
 - `/mode`, `/mode <mode>`
 - `/mmr-status` (with mode/source, model found/applied, active/missing/deferred/gated tools, settings files read, diagnostics by severity, optional `Debug` section)
 - `/mmr-status` policy warnings for fallback, missing-tool, zero-tool, and mode availability diagnostics

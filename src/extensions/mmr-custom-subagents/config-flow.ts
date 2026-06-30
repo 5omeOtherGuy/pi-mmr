@@ -134,7 +134,7 @@ function parseModeList(raw: string): MmrLockedModeKey[] | undefined {
   const tokens = raw.split(",").map((token) => token.trim()).filter(Boolean);
   const modes: MmrLockedModeKey[] = [];
   for (const token of tokens) {
-    if (!isMmrModeKey(token) || token === "free") return undefined;
+    if (!isMmrModeKey(token) || token === "open" || token === "free") return undefined;
     if (!modes.includes(token as MmrLockedModeKey)) modes.push(token as MmrLockedModeKey);
   }
   return modes.length > 0 ? modes : undefined;
@@ -193,11 +193,11 @@ async function pickModes(ctx: ExtensionContext): Promise<MmrCustomSubagentModeSc
   if (choice.startsWith("allLocked")) return "allLocked";
   if (choice === "deep") return ["deep"];
   if (choice === "smart") return ["smart"];
-  const raw = await ctx.ui.input("Modes (comma-separated: smart, smartGPT, rush, test, large, deep)", "deep");
+  const raw = await ctx.ui.input("Modes (comma-separated: smart, smartGPT, smartSonnet, rush, test, large, deep)", "deep");
   if (raw === undefined) return undefined;
   const modes = parseModeList(raw);
   if (!modes) {
-    ctx.ui.notify("No valid locked modes entered; expected smart, smartGPT, rush, test, large, or deep.", "error");
+    ctx.ui.notify("No valid locked modes entered; expected smart, smartGPT, smartSonnet, rush, test, large, or deep.", "error");
     return undefined;
   }
   return modes;

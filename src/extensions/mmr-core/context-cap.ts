@@ -40,8 +40,8 @@ export function getMmrModeContextWindowCap(modeKey: string): number | undefined 
 
 /**
  * Clone-and-cap a model's `contextWindow` for a given mode. No-op unless the
- * mode declares a cap (`smart` and `large`; `open`, `free`, and the
- * GPT/Codex-primary modes do not) and the model's window exceeds that cap. Caps DOWN only, so a
+ * mode declares a cap (`smart`, `smartSonnet`, and `large`; `open`, `free`,
+ * and the GPT/Codex-primary modes do not) and the model's window exceeds that cap. Caps DOWN only, so a
  * custom provider with a smaller window stays authoritative.
  *
  * Returns the input reference unchanged when no cap applies, so callers can

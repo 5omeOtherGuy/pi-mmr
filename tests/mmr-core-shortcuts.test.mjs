@@ -8,10 +8,11 @@ import { createMockExtensionContext, createMockPi } from "./helpers/pi-stub.mjs"
 after(cleanupLoadedSource);
 
 const SMART_MODEL = { provider: "claude-subscription", id: "claude-opus-4-8" };
+const SONNET_MODEL = { provider: "claude-subscription", id: "claude-sonnet-5" };
 const RUSH_MODEL = { provider: "claude-subscription", id: "claude-haiku-4-5" };
 const LARGE_MODEL = { provider: "openai-codex", id: "gpt-5.4" };
 const DEEP_MODEL = { provider: "openai-codex", id: "gpt-5.5" };
-const MODELS = [SMART_MODEL, RUSH_MODEL, LARGE_MODEL, DEEP_MODEL];
+const MODELS = [SMART_MODEL, SONNET_MODEL, RUSH_MODEL, LARGE_MODEL, DEEP_MODEL];
 
 function createState(mode) {
   const displayName = mode[0].toUpperCase() + mode.slice(1);
@@ -101,6 +102,33 @@ describe("mmr-core mode shortcuts", () => {
     assert.equal(runtime.getMmrModeState()?.effectiveMaxOutputTokens, 64000);
   });
 
+  it("cycles smartSonnet's thinking level through all three presets via alt+r", async () => {
+    const extension = (await importSource("extensions/mmr-core/index.ts")).default;
+    const runtime = await importRuntime();
+    runtime.setMmrModeState(createState("smartSonnet"));
+    const { ctx, notifications } = createContext();
+    const { pi, calls, shortcuts } = createPi();
+    extension(pi);
+
+    // smartSonnet default toggle level is medium; the cycle is
+    // medium -> high -> low -> medium, and every preset keeps the 32k budget.
+    await shortcuts.get("alt+r").handler(ctx);
+    assert.equal(runtime.getMmrModeState()?.mode, "smartSonnet");
+    assert.equal(runtime.getMmrModeState()?.thinkingLevel, "high");
+    assert.deepEqual(calls.setThinkingLevel, ["high"]);
+    assert.match(notifications.at(-1)?.message ?? "", /MMR thinking: smartSonnet → high, max out 32k/);
+
+    await shortcuts.get("alt+r").handler(ctx);
+    assert.equal(runtime.getMmrModeState()?.thinkingLevel, "low");
+    assert.deepEqual(calls.setThinkingLevel, ["high", "low"]);
+    assert.match(notifications.at(-1)?.message ?? "", /MMR thinking: smartSonnet → low, max out 32k/);
+
+    await shortcuts.get("alt+r").handler(ctx);
+    assert.equal(runtime.getMmrModeState()?.thinkingLevel, "medium");
+    assert.deepEqual(calls.setThinkingLevel, ["high", "low", "medium"]);
+    assert.match(notifications.at(-1)?.message ?? "", /MMR thinking: smartSonnet → medium, max out 32k/);
+  });
+
   it("alt+r is a no-op notice in non-toggleable modes", async () => {
     const extension = (await importSource("extensions/mmr-core/index.ts")).default;
     const runtime = await importRuntime();
@@ -113,7 +141,7 @@ describe("mmr-core mode shortcuts", () => {
 
     assert.equal(runtime.getMmrModeState()?.mode, "rush");
     assert.deepEqual(calls.setThinkingLevel, []);
-    assert.match(notifications.at(-1)?.message ?? "", /only available in smart, smartGPT, or deep/);
+    assert.match(notifications.at(-1)?.message ?? "", /only available in smart, smartGPT, smartSonnet, or deep/);
   });
 
   it("opens a picker that includes large mode", async () => {
@@ -130,7 +158,7 @@ describe("mmr-core mode shortcuts", () => {
 
     await shortcuts.get("alt+m").handler(ctx);
 
-    assert.deepEqual(selectCalls[0].options, ["smart", "smartGPT", "rush", "test", "large", "deep", "open", "free"]);
+    assert.deepEqual(selectCalls[0].options, ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep", "open", "free"]);
     assert.match(selectCalls[0].title, /current: smart/);
     assert.equal(runtime.getMmrModeState()?.mode, "large");
     assert.equal(calls.setModel.length, 1);

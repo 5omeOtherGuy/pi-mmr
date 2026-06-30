@@ -113,4 +113,4 @@ Public text includes docs, code comments, test names, fixtures, snapshots, packa
 - Describe behavior only in `pi-mmr` terms.
 - Do not include credentials, raw provider payloads, local session data, private analysis, exact local paths, or non-public provenance.
 - Keep model-visible prompt/tool metadata aligned with the implementation and the active tool surface.
-- Keep mode keys (`smart`, `smartGPT`, `rush`, `test`, `large`, `deep`, `open`, `free`) and subagent names (`finder`, `oracle`, `librarian`, `history-reader`, `task-subagent`, `Task`) stable unless a coordinated migration plan exists.
+- Keep mode keys (`smart`, `smartGPT`, `smartSonnet`, `rush`, `test`, `large`, `deep`, `open`, `free`) and subagent names (`finder`, `oracle`, `librarian`, `history-reader`, `task-subagent`, `Task`) stable unless a coordinated migration plan exists.

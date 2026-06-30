@@ -31,7 +31,7 @@ Shell and GitHub-backed worker slices shipped:
   logical name (`Task`, `finder`, `oracle`, `librarian`); `finder`,
   `oracle`, and `Task` resolve through `{ kind: "active" }`
   and are reported as **active** in modes that request them (`smart`,
-  `smartGPT`, `rush`, `large`, `deep`); `librarian` resolves active only
+  `smartGPT`, `smartSonnet`, `rush`, `large`, `deep`); `librarian` resolves active only
   while the required read-only GitHub tools are registered by `mmr-github`
   and source-owned, otherwise it is provider-attributed `gated` behind the
   `mmr-subagents` feature gate with the per-tool `mmr-github` prerequisite reason.

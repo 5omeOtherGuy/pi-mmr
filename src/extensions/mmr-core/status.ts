@@ -35,7 +35,7 @@ function getRequestPolicyForState(state: MmrModeState) {
 }
 
 function isMmrToggleThinkingLevel(value: string | undefined): value is MmrToggleThinkingLevel {
-  return value === "medium" || value === "high" || value === "xhigh";
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh";
 }
 
 function getContextOverridesForState(state: MmrModeState) {

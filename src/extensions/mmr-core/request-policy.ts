@@ -79,6 +79,11 @@ export interface MmrRequestPolicy {
  * - LARGE uses adaptive thinking with `output_config.effort=medium` for its
  *   Opus 4.6 profile (and `max_tokens=32000`). LARGE's GPT fallback sets
  *   Responses reasoning effort only, matching the generic OpenAI default.
+ * - SMARTSONNET pins Claude Sonnet 5 on the `claude-subscription` provider
+ *   (no fallback model) with adaptive thinking and `max_tokens=32000`,
+ *   mirroring LARGE's Anthropic shape. Its toggle presets (low/medium/high)
+ *   set no `anthropicEffort` override, so the Pi level echoes directly as the
+ *   Anthropic adaptive effort (see `MMR_MODE_THINKING_TOGGLES.smartSonnet`).
  * - RUSH uses OpenAI Responses with `reasoning.effort=none` and
  *   `max_output_tokens=128000` for the GPT-5.5 profile. Its Haiku fallback
  *   relies on the mode's `thinkingLevel: "off"` rather than an Anthropic
@@ -136,6 +141,16 @@ export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "open" | "free">, 
     contextWindow: 1000000,
     effectiveMaxInputTokens: 968000,
   },
+  smartSonnet: {
+    anthropic: {
+      maxTokens: 32000,
+      // No anthropicEffort override on the toggle presets: the Pi level
+      // (low/medium/high) echoes directly as the Anthropic adaptive effort.
+      thinking: { type: "adaptive", display: "summarized", outputConfigEffort: "medium" },
+    },
+    contextWindow: 1000000,
+    effectiveMaxInputTokens: 968000,
+  },
   rush: {
     openaiResponses: {
       maxOutputTokens: 128000,
@@ -173,7 +188,7 @@ export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "open" | "free">, 
  * (`none|minimal|low|medium|high|xhigh`), so the level can drive both wire
  * shapes without casts.
  */
-export type MmrToggleThinkingLevel = "medium" | "high" | "xhigh";
+export type MmrToggleThinkingLevel = "low" | "medium" | "high" | "xhigh";
 
 /**
  * One toggle preset for a toggleable mode. `level` is the Pi/session thinking
@@ -191,20 +206,29 @@ export interface MmrModeThinkingOption {
 }
 
 /**
- * Modes whose thinking level can be toggled between exactly two presets.
+ * Modes whose thinking level can be toggled between two or more presets.
  * Index 0 is the default preset (also the mode's static `thinkingLevel`).
+ * The type requires at least two presets so a single-preset "toggle" can
+ * never be declared by mistake.
  *
  * Smart's high preset asks for Anthropic `xhigh` effort (Pi `high` maps to
  * Anthropic `xhigh` on the Opus route) while keeping the Anthropic output
  * budget at the mode default (64k). Both Smart presets therefore send the
  * same 64k admission shape and differ only in adaptive reasoning effort
  * (`high` vs `xhigh`).
+ *
+ * SmartSonnet cycles three presets (medium -> high -> low -> medium); none
+ * override `anthropicEffort`, so each Pi level echoes directly as the
+ * Anthropic adaptive effort.
  */
+export type MmrModeThinkingToggleOptions = readonly [MmrModeThinkingOption, MmrModeThinkingOption, ...MmrModeThinkingOption[]];
+
 export const MMR_MODE_THINKING_TOGGLES = {
   smart: [{ level: "medium", anthropicEffort: "high" }, { level: "high", anthropicEffort: "xhigh" }],
   smartGPT: [{ level: "medium" }, { level: "xhigh" }],
+  smartSonnet: [{ level: "medium" }, { level: "high" }, { level: "low" }],
   deep: [{ level: "medium" }, { level: "xhigh" }],
-} as const satisfies Partial<Record<MmrModeKey, readonly [MmrModeThinkingOption, MmrModeThinkingOption]>>;
+} as const satisfies Partial<Record<MmrModeKey, MmrModeThinkingToggleOptions>>;
 
 export type MmrToggleableModeKey = keyof typeof MMR_MODE_THINKING_TOGGLES;
 
@@ -214,7 +238,7 @@ export function isToggleableMmrMode(modeKey: MmrModeKey): modeKey is MmrToggleab
 
 export function getMmrModeThinkingOptions(
   modeKey: MmrToggleableModeKey,
-): readonly [MmrModeThinkingOption, MmrModeThinkingOption] {
+): MmrModeThinkingToggleOptions {
   return MMR_MODE_THINKING_TOGGLES[modeKey];
 }
 
@@ -224,17 +248,21 @@ export function getDefaultToggleThinkingLevel(modeKey: MmrToggleableModeKey): Mm
 }
 
 /**
- * Compute the toggle target from the currently applied level. When the current
- * level is the second preset, return the first; otherwise (default level or an
- * unrecognized value) return the second preset. This makes repeated presses
- * alternate cleanly between the two configured levels.
+ * Compute the toggle target from the currently applied level: advance one
+ * step through the mode's configured preset cycle, wrapping back to the
+ * first preset after the last. An unrecognized or undefined current level is
+ * treated as sitting at the first (default) preset, so the next press lands
+ * on the second preset — this also reproduces the original two-preset
+ * alternation for modes with exactly two presets.
  */
 export function getOtherToggleThinkingLevel(
   modeKey: MmrToggleableModeKey,
   current: string | undefined,
 ): MmrToggleThinkingLevel {
-  const [first, second] = MMR_MODE_THINKING_TOGGLES[modeKey];
-  return current === second.level ? first.level : second.level;
+  const options = MMR_MODE_THINKING_TOGGLES[modeKey];
+  const currentIndex = options.findIndex((option) => option.level === current);
+  const nextIndex = (Math.max(currentIndex, 0) + 1) % options.length;
+  return options[nextIndex].level;
 }
 
 function findThinkingOption(modeKey: MmrToggleableModeKey, level: MmrToggleThinkingLevel): MmrModeThinkingOption | undefined {

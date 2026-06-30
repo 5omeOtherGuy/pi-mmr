@@ -56,7 +56,7 @@ import { DEFAULT_MMR_MODE, MMR_MODE_KEYS, MMR_MODES, getMmrMode, isMmrModeKey } 
 import type { MmrModeDefinition, MmrModeKey } from "pi-mmr";
 ```
 
-- `MMR_MODE_KEYS`: ordered tuple `("smart", "smartGPT", "rush", "test", "large", "deep", "open", "free")`.
+- `MMR_MODE_KEYS`: ordered tuple `("smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep", "open", "free")`.
 - `MMR_MODES`: read-only mode table.
 - `getMmrMode(key)`: returns the `MmrModeDefinition` for a key.
 - `isMmrModeKey(value)`: type guard for incoming user/session strings.
@@ -85,8 +85,9 @@ behavior). These values are not persisted and are never written to provider
 payloads. mmr-core passes the selected registry model directly to
 `pi.setModel(...)`; Pi-native auto-compaction follows the selected provider
 route's registered model metadata. Only `smart` (268k max-input under its
-300k profile) and `large` (968k under its 1M profile) carry an MMR context
-profile before provider-size clamping; the GPT/Codex-primary modes
+300k profile), `smartSonnet` (968k under its 1M profile), and `large` (968k
+under its 1M profile) carry an MMR context profile before provider-size
+clamping; the GPT/Codex-primary modes
 (`smartGPT`, `rush`, `test`, `deep`) carry no MMR context override and run
 at the selected provider's registered window. `open` and `free` carry no MMR
 context profile because Pi-native model/context controls stay in charge.
