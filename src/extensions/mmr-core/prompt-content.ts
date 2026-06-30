@@ -171,7 +171,7 @@ export const SHARED_CODING_GUIDANCE = SHARED_CODING_GUIDANCE_FRAGMENT_IDS.map(
 // --- Mode-specific coding-guidance overrides ---
 //
 // The shared fragments above are the base text (rush renders them unchanged).
-// Smart-family modes (smart, smartGPT, large) and deep override the four body
+// Smart-family modes (smart, smartGPT, smartSonnet, large) and deep override the four body
 // fragments where the authoritative mode framings diverge: smart-family uses
 // the default-template framing (action-assumptive, absolute investigate rule,
 // hard verification floor); deep uses the deep-template framing (outcome-first
@@ -308,6 +308,7 @@ export const MODE_CODING_GUIDANCE_OVERRIDES: Partial<
 > = {
   smart: SMART_FAMILY_CODING_GUIDANCE_OVERRIDES,
   smartGPT: SMART_FAMILY_CODING_GUIDANCE_OVERRIDES,
+  smartSonnet: SMART_FAMILY_CODING_GUIDANCE_OVERRIDES,
   large: SMART_FAMILY_CODING_GUIDANCE_OVERRIDES,
   deep: DEEP_CODING_GUIDANCE_OVERRIDES,
 };
@@ -364,8 +365,8 @@ export interface MmrModeBlockTemplate {
 }
 
 /**
- * Smart-family template body (smart, smartGPT, large). The three modes render
- * the smart system prompt verbatim — same intro, no posture section (the
+ * Smart-family template body (smart, smartGPT, smartSonnet, large). The four
+ * modes render the smart system prompt verbatim — same intro, no posture section (the
  * authoritative default template carries its framing entirely in the intro and
  * body fragments), same closing line — and differ only in the mode tag.
  */
@@ -384,6 +385,10 @@ export const MMR_MODE_PROMPT_TEMPLATES = {
   },
   smartGPT: {
     tag: "smartGPT",
+    ...SMART_FAMILY_TEMPLATE_BODY,
+  },
+  smartSonnet: {
+    tag: "smartSonnet",
     ...SMART_FAMILY_TEMPLATE_BODY,
   },
   rush: {

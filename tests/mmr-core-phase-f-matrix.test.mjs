@@ -36,15 +36,16 @@ const UPDATE_FIXTURES = process.env.PI_MMR_UPDATE_FIXTURES === "1";
 // (MATRIX_MARKER_MODES) so that the per-mode tag isolation invariant still
 // covers them.
 const MATRIX_MODES = ["smart", "rush", "large", "deep"];
-const MATRIX_MARKER_MODES = ["smart", "smartGPT", "rush", "test", "large", "deep"];
+const MATRIX_MARKER_MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
 
-// Distinguishing per-mode markers. The smart family (smart, smartGPT, large)
-// shares one prompt body, so each member is identified by its
-// <mmr_mode name="..."> tag. Rush and Deep have distinctive posture-body
+// Distinguishing per-mode markers. The smart family (smart, smartGPT,
+// smartSonnet, large) shares one prompt body, so each member is identified by
+// its <mmr_mode name="..."> tag. Rush and Deep have distinctive posture-body
 // sentences.
 const MODE_MARKERS = {
   smart: '<mmr_mode name="smart">',
   smartGPT: '<mmr_mode name="smartGPT">',
+  smartSonnet: '<mmr_mode name="smartSonnet">',
   rush: "You run with no extended reasoning",
   test: '<mmr_mode name="test">',
   large: '<mmr_mode name="large">',
@@ -55,12 +56,13 @@ const MODE_MARKERS = {
 // distinctive markers). The smart family shares its prompt body, so its
 // members exclude each other's mode tags rather than body text.
 const MODE_FOREIGN_MARKERS = {
-  smart: ['<mmr_mode name="smartGPT">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  smartGPT: ['<mmr_mode name="smart">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  rush: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="test">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
-  test: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="rush">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
-  large: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="test">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  deep: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning"],
+  smart: ['<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  smartGPT: ['<mmr_mode name="smart">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  smartSonnet: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  rush: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
+  test: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="rush">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
+  large: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  deep: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning"],
 };
 
 // Expected coarse block order. Matches the existing Phase B baseline.
@@ -229,7 +231,7 @@ describe("Phase F: per-mode structural invariants across the matrix", () => {
       const carefulActionsIdx = sp.indexOf("## Executing actions with care");
       // Only rush and deep render a mode posture; the smart family carries its
       // framing in the intro and body fragments.
-      const postureMarker = mode === "rush" || mode === "test" ? "## Rush mode" : mode === "deep" ? "## Deep mode" : undefined;
+      const postureMarker = mode === "rush" || mode === "test" ? "## Rush mode" : mode === "deep" ? "## Deep mode" : undefined; // smartSonnet falls through to undefined (smart-family, no posture)
       const collaborationIdx = sp.indexOf("## Working with the user");
       const responseStyleIdx = sp.indexOf("## Response style");
       const toolHeadingIdx = sp.indexOf(MMR_TOOL_USE_HEADING);
@@ -376,6 +378,7 @@ describe("Phase F: native-control passthrough invariant", () => {
         MMR_RESPONSE_STYLE_HEADING,
         '<mmr_mode name="smart">',
         '<mmr_mode name="smartGPT">',
+        '<mmr_mode name="smartSonnet">',
         '<mmr_mode name="rush">',
         '<mmr_mode name="test">',
         '<mmr_mode name="large">',

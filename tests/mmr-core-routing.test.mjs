@@ -47,6 +47,13 @@ describe("mmr-core mode routing", () => {
       rejectedSources: [],
     });
 
+    assert.deepEqual(resolveMmrModeSelection({ settingsMode: "smartSonnet" }), {
+      mode: "smartSonnet",
+      source: "settings",
+      warnings: [],
+      rejectedSources: [],
+    });
+
     assert.deepEqual(resolveMmrModeSelection({ settingsMode: "fast" }), {
       mode: "smart",
       source: "default",

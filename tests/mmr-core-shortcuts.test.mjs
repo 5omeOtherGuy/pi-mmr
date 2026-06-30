@@ -113,7 +113,7 @@ describe("mmr-core mode shortcuts", () => {
 
     assert.equal(runtime.getMmrModeState()?.mode, "rush");
     assert.deepEqual(calls.setThinkingLevel, []);
-    assert.match(notifications.at(-1)?.message ?? "", /only available in smart, smartGPT, or deep/);
+    assert.match(notifications.at(-1)?.message ?? "", /only available in smart, smartGPT, smartSonnet, or deep/);
   });
 
   it("opens a picker that includes large mode", async () => {
@@ -130,7 +130,7 @@ describe("mmr-core mode shortcuts", () => {
 
     await shortcuts.get("alt+m").handler(ctx);
 
-    assert.deepEqual(selectCalls[0].options, ["smart", "smartGPT", "rush", "test", "large", "deep", "open", "free"]);
+    assert.deepEqual(selectCalls[0].options, ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep", "open", "free"]);
     assert.match(selectCalls[0].title, /current: smart/);
     assert.equal(runtime.getMmrModeState()?.mode, "large");
     assert.equal(calls.setModel.length, 1);

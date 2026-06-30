@@ -313,6 +313,7 @@ function recipe(
 export const MMR_MODE_PROMPT_RECIPES = {
   smart: recipe("smart"),
   smartGPT: recipe("smartGPT"),
+  smartSonnet: recipe("smartSonnet"),
   rush: recipe("rush", MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE),
   test: recipe("test", MMR_RUSH_PROMPT_FRAGMENT_SEQUENCE),
   large: recipe("large"),
@@ -331,6 +332,7 @@ function templateFromRecipe(recipe: MmrModePromptRecipe): MmrModeBlockTemplate {
 export const MMR_MODE_PROMPT_TEMPLATES = {
   smart: templateFromRecipe(MMR_MODE_PROMPT_RECIPES.smart),
   smartGPT: templateFromRecipe(MMR_MODE_PROMPT_RECIPES.smartGPT),
+  smartSonnet: templateFromRecipe(MMR_MODE_PROMPT_RECIPES.smartSonnet),
   rush: templateFromRecipe(MMR_MODE_PROMPT_RECIPES.rush),
   test: templateFromRecipe(MMR_MODE_PROMPT_RECIPES.test),
   large: templateFromRecipe(MMR_MODE_PROMPT_RECIPES.large),

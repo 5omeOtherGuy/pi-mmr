@@ -38,6 +38,7 @@ describe("withMmrModeContextCap (pure)", () => {
     assert.equal(getMmrModeContextWindowCap("rush"), undefined, "GPT-primary modes run at Pi's native window");
     assert.equal(getMmrModeContextWindowCap("deep"), undefined, "GPT-primary modes run at Pi's native window");
     assert.equal(getMmrModeContextWindowCap("large"), 1_000_000);
+    assert.equal(getMmrModeContextWindowCap("smartSonnet"), 1_000_000);
     assert.equal(getMmrModeContextWindowCap("free"), undefined, "free has no policy, so no cap");
     assert.equal(getMmrModeContextWindowCap("nonsense"), undefined, "unknown modes do not cap");
   });
@@ -69,6 +70,9 @@ describe("withMmrModeContextCap (pure)", () => {
     // large's profile window equals the native 1M Opus window: cap-down only, so no-op.
     const opus = { provider: "claude-subscription", id: "claude-opus-4-8", contextWindow: 1_000_000 };
     assert.equal(withMmrModeContextCap("large", opus), opus, "large 1M == native 1M is a no-op");
+    // smartSonnet's profile window equals the native 1M Sonnet 5 window: cap-down only, so no-op.
+    const sonnet = { provider: "claude-subscription", id: "claude-sonnet-5", contextWindow: 1_000_000 };
+    assert.equal(withMmrModeContextCap("smartSonnet", sonnet), sonnet, "smartSonnet 1M == native 1M is a no-op");
     // free (and unknown modes) have no policy window, so they never cap.
     const model = { provider: "claude-subscription", id: "claude-opus-4-6", contextWindow: 1_000_000 };
     for (const mode of ["free", "nonsense"]) {
