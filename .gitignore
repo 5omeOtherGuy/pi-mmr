@@ -8,6 +8,7 @@ coverage/
 .DS_Store
 .pi/npm/
 .pi/git/
+.pi/agent/
 # mmr-debug capture output (contains full prompt/session text; never commit)
 .pi/mmr-debug/
 *.mmr-capture.jsonl
