@@ -97,8 +97,8 @@ export interface MmrRequestPolicy {
  *   total at the `setModel` call site (see `context-cap.ts`), so Pi's native
  *   compaction/overflow/footer run at the advertised window even when the
  *   route's native window is larger (e.g. `smart` pins its Opus route to 300k).
- *   The GPT/Codex-primary modes (`smartGPT`, `rush`, `deep`) intentionally set
- *   no `contextWindow`, so every GPT/Codex route runs at Pi's own registered
+ *   The GPT/Codex/Fable-primary modes (`smartGPT`, `smartFable`, `rush`, `deep`)
+ *   intentionally set no `contextWindow`, so every route runs at Pi's own registered
  *   window (the observed Codex backend limit) with no pi-mmr override. The cap
  *   is cap-down only, so a smaller custom route stays authoritative, and `free`
  *   (no policy) is never capped.
@@ -150,6 +150,13 @@ export const MMR_REQUEST_POLICIES: Record<Exclude<MmrModeKey, "open" | "free">, 
     },
     contextWindow: 1000000,
     effectiveMaxInputTokens: 968000,
+  },
+  smartFable: {
+    openaiResponses: {
+      maxOutputTokens: 128000,
+      reasoning: { effort: "medium", summary: "auto" },
+    },
+    // No context override: Fable routes run at Pi's registered window.
   },
   rush: {
     openaiResponses: {
@@ -217,9 +224,9 @@ export interface MmrModeThinkingOption {
  * same 64k admission shape and differ only in adaptive reasoning effort
  * (`high` vs `xhigh`).
  *
- * SmartSonnet cycles three presets (medium -> high -> low -> medium); none
- * override `anthropicEffort`, so each Pi level echoes directly as the
- * Anthropic adaptive effort.
+ * SmartSonnet and SmartFable cycle three presets (medium -> high -> low ->
+ * medium). SmartSonnet does not override `anthropicEffort`, so each Pi level
+ * echoes directly as the Anthropic adaptive effort.
  */
 export type MmrModeThinkingToggleOptions = readonly [MmrModeThinkingOption, MmrModeThinkingOption, ...MmrModeThinkingOption[]];
 
@@ -227,6 +234,7 @@ export const MMR_MODE_THINKING_TOGGLES = {
   smart: [{ level: "medium", anthropicEffort: "high" }, { level: "high", anthropicEffort: "xhigh" }],
   smartGPT: [{ level: "medium" }, { level: "xhigh" }],
   smartSonnet: [{ level: "medium" }, { level: "high" }, { level: "low" }],
+  smartFable: [{ level: "medium" }, { level: "high" }, { level: "low" }],
   deep: [{ level: "medium" }, { level: "xhigh" }],
 } as const satisfies Partial<Record<MmrModeKey, MmrModeThinkingToggleOptions>>;
 

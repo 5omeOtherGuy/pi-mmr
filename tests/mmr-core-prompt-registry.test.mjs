@@ -4,7 +4,7 @@ import { cleanupLoadedSource, importSource } from "./helpers/load-src.mjs";
 
 after(cleanupLoadedSource);
 
-const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
+const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep"];
 const EXPECTED_SEQUENCE = [
   "identity",
   "autonomy",
@@ -154,7 +154,7 @@ describe("mmr-core prompt registry", () => {
       false,
       "engineering-judgment is deep-only",
     );
-    for (const mode of ["smart", "smartGPT", "smartSonnet", "large", "deep"]) {
+    for (const mode of ["smart", "smartGPT", "smartSonnet", "smartFable", "large", "deep"]) {
       assert.equal(
         MMR_MODE_PROMPT_RECIPES[mode].fragments.includes("diagrams"),
         true,

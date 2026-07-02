@@ -112,7 +112,7 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
     "- MMR tool allowlist is disabled.",
     "- Standard Pi tools are restored.",
     "",
-    "Use /mode smart, /mode smartGPT, /mode smartSonnet, /mode rush, /mode test, /mode large, /mode deep, or /mode open to re-enter a managed mode.",
+    "Use /mode smart, /mode smartGPT, /mode smartSonnet, /mode smartFable, /mode rush, /mode test, /mode large, /mode deep, or /mode open to re-enter a managed mode.",
   ].join("\n");
 
   let configuredModelPreferences: Partial<Record<MmrModeKey, MmrModelPreference[]>> = {};
@@ -126,7 +126,7 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
   let modeCycleQueue: Promise<void> = Promise.resolve();
   let thinkingToggleQueue: Promise<void> = Promise.resolve();
   // Per-mode, session-scoped thinking-level toggle overrides for toggleable
-  // modes (smart/smartGPT/smartSonnet/deep). Lives only in process memory: persisted mode
+  // modes (smart/smartGPT/smartSonnet/smartFable/deep). Lives only in process memory: persisted mode
   // state records the applied thinking level for diagnostics, but the toggle
   // default is re-derived on each apply so stale persisted levels never pin a
   // mode away from its default after a reload.
@@ -414,7 +414,7 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
 
     captureBaseline(ctx);
 
-    // Toggleable modes (smart/smartGPT/smartSonnet/deep) carry a runtime thinking-level
+    // Toggleable modes (smart/smartGPT/smartSonnet/smartFable/deep) carry a runtime thinking-level
     // override flipped by the MMR-owned alt+r shortcut. Re-derive the effective level on every
     // apply (override or the mode default), force every candidate to it so the
     // active and fallback routes agree with the wire reasoning effort, and use
@@ -718,7 +718,7 @@ export function createMmrModeController(pi: ExtensionAPI): MmrModeController {
     if (!state || !isToggleableMmrMode(state.mode)) {
       if (state && ctx.hasUI !== false) {
         ctx.ui.notify(
-          `MMR thinking toggle is only available in smart, smartGPT, smartSonnet, or deep (current: ${state?.mode ?? "none"}).`,
+          `MMR thinking toggle is only available in smart, smartGPT, smartSonnet, smartFable, or deep (current: ${state?.mode ?? "none"}).`,
           "info",
         );
       }

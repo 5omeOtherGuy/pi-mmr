@@ -193,11 +193,11 @@ async function pickModes(ctx: ExtensionContext): Promise<MmrCustomSubagentModeSc
   if (choice.startsWith("allLocked")) return "allLocked";
   if (choice === "deep") return ["deep"];
   if (choice === "smart") return ["smart"];
-  const raw = await ctx.ui.input("Modes (comma-separated: smart, smartGPT, smartSonnet, rush, test, large, deep)", "deep");
+  const raw = await ctx.ui.input("Modes (comma-separated: smart, smartGPT, smartSonnet, smartFable, rush, test, large, deep)", "deep");
   if (raw === undefined) return undefined;
   const modes = parseModeList(raw);
   if (!modes) {
-    ctx.ui.notify("No valid locked modes entered; expected smart, smartGPT, smartSonnet, rush, test, large, or deep.", "error");
+    ctx.ui.notify("No valid locked modes entered; expected smart, smartGPT, smartSonnet, smartFable, rush, test, large, or deep.", "error");
     return undefined;
   }
   return modes;

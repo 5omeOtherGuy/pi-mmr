@@ -24,7 +24,7 @@ after(cleanupLoadedSource);
 const promptFixtureDir = path.join(import.meta.dirname, "fixtures/mmr-core-prompts");
 const BASE_PROMPT = readFileSync(path.join(promptFixtureDir, "base.md"), "utf8");
 
-const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
+const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep"];
 const ALL_MODES = [...PROMPTED_MODES, "open", "free"];
 
 function createState(mode) {

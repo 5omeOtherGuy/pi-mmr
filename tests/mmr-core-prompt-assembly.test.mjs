@@ -52,7 +52,7 @@ function createState(mode) {
   };
 }
 
-const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
+const PROMPTED_MODES = ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep"];
 
 describe("Phase D: assembleActiveSurface() public API", () => {
   let assembleActiveSurface;

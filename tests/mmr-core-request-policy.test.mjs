@@ -246,7 +246,7 @@ describe("mmr-core request policy", () => {
 
     // GPT/Codex-primary modes set no context profile, so they run at Pi's own
     // registered window. Only the request policy (max output) is carried.
-    for (const mode of ["smartGPT", "rush", "test", "deep"]) {
+    for (const mode of ["smartGPT", "smartFable", "rush", "test", "deep"]) {
       assert.equal(MMR_REQUEST_POLICIES[mode].contextWindow, undefined, `${mode} carries no contextWindow`);
       assert.equal(MMR_REQUEST_POLICIES[mode].effectiveMaxInputTokens, undefined, `${mode} carries no effectiveMaxInputTokens`);
       assert.equal(MMR_REQUEST_POLICIES[mode].openaiResponses.maxOutputTokens, 128000, `${mode} still carries its output policy`);
@@ -283,7 +283,7 @@ describe("mmr-core thinking-level toggle", () => {
     const { isToggleableMmrMode, getDefaultToggleThinkingLevel, getMmrModeThinkingOptions } =
       await importSource("extensions/mmr-core/request-policy.ts");
 
-    for (const mode of ["smart", "smartGPT", "smartSonnet", "deep"]) {
+    for (const mode of ["smart", "smartGPT", "smartSonnet", "smartFable", "deep"]) {
       assert.equal(isToggleableMmrMode(mode), true, `${mode} should be toggleable`);
       assert.equal(getDefaultToggleThinkingLevel(mode), "medium");
     }
@@ -294,6 +294,7 @@ describe("mmr-core thinking-level toggle", () => {
     assert.deepEqual(getMmrModeThinkingOptions("smart"), [{ level: "medium", anthropicEffort: "high" }, { level: "high", anthropicEffort: "xhigh" }]);
     assert.deepEqual(getMmrModeThinkingOptions("smartGPT"), [{ level: "medium" }, { level: "xhigh" }]);
     assert.deepEqual(getMmrModeThinkingOptions("smartSonnet"), [{ level: "medium" }, { level: "high" }, { level: "low" }]);
+    assert.deepEqual(getMmrModeThinkingOptions("smartFable"), [{ level: "medium" }, { level: "high" }, { level: "low" }]);
     assert.deepEqual(getMmrModeThinkingOptions("deep"), [{ level: "medium" }, { level: "xhigh" }]);
   });
 
@@ -308,16 +309,18 @@ describe("mmr-core thinking-level toggle", () => {
     assert.equal(getOtherToggleThinkingLevel("deep", "xhigh"), "medium");
   });
 
-  it("cycles smartSonnet's three presets in order and wraps around", async () => {
+  it("cycles three-preset modes in order and wraps around", async () => {
     const { getOtherToggleThinkingLevel } = await importSource("extensions/mmr-core/request-policy.ts");
 
     // medium (default) -> high -> low -> medium (wraps).
-    assert.equal(getOtherToggleThinkingLevel("smartSonnet", "medium"), "high");
-    assert.equal(getOtherToggleThinkingLevel("smartSonnet", "high"), "low");
-    assert.equal(getOtherToggleThinkingLevel("smartSonnet", "low"), "medium");
-    // Unrecognized/undefined current level lands on the second preset, same as
-    // the two-preset modes.
-    assert.equal(getOtherToggleThinkingLevel("smartSonnet", undefined), "high");
+    for (const mode of ["smartSonnet", "smartFable"]) {
+      assert.equal(getOtherToggleThinkingLevel(mode, "medium"), "high");
+      assert.equal(getOtherToggleThinkingLevel(mode, "high"), "low");
+      assert.equal(getOtherToggleThinkingLevel(mode, "low"), "medium");
+      // Unrecognized/undefined current level lands on the second preset, same as
+      // the two-preset modes.
+      assert.equal(getOtherToggleThinkingLevel(mode, undefined), "high");
+    }
   });
 
   it("maps Smart high to Anthropic xhigh effort while keeping the 64k output default, without mutating the source", async () => {
@@ -351,6 +354,12 @@ describe("mmr-core thinking-level toggle", () => {
     assert.equal(gptXhigh.openaiResponses.reasoning.effort, "xhigh");
     assert.equal(gptXhigh.openaiResponses.maxOutputTokens, 128000);
     assert.equal(MMR_REQUEST_POLICIES.smartGPT.openaiResponses.reasoning.effort, "medium");
+
+    for (const level of ["low", "medium", "high"]) {
+      const fable = applyMmrThinkingLevelToPolicy("smartFable", MMR_REQUEST_POLICIES.smartFable, level);
+      assert.equal(fable.openaiResponses.reasoning.effort, level);
+      assert.equal(fable.openaiResponses.maxOutputTokens, 128000);
+    }
   });
 
   it("echoes each smartSonnet toggle level directly as the Anthropic adaptive effort, without mutating the source", async () => {

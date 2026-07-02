@@ -317,16 +317,12 @@ const MMR_SUBAGENT_PROFILE_TABLE: Record<string, MmrSubagentProfile> = {
   "code-review": deepFreeze({
     name: "code-review",
     displayName: "Code Review",
-    // Ordered reviewer chain across distinct model families so the
-    // reviewer often differs from the parent mode's model. Fallbacks keep
-    // the reviewer available when the antigravity provider is not
-    // registered or authenticated.
+    // Code review uses GPT-5.5 at medium effort; settings can still override
+    // `subagentModelPreferences.code-review` when an operator needs a local route.
     modelPreferences: [
-      { model: "gemini-3.5-flash", providers: ["antigravity"], thinkingLevel: "high" },
-      { model: "claude-sonnet-4-6", thinkingLevel: "high" },
-      { model: "gpt-5.4-mini", thinkingLevel: "high" },
+      { model: "gpt-5.5", thinkingLevel: "medium" },
     ],
-    thinkingLevel: "high",
+    thinkingLevel: "medium",
     // Read-only review surface: local reads/searches plus bash for the
     // whitelisted merge-base git diff commands. The worker prompt forbids
     // edits and git state mutation; the profile keeps mutation tools out

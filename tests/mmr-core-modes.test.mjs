@@ -56,19 +56,25 @@ describe("mmr-core mode table", () => {
     assert.deepEqual(test.featureGates, rush.featureGates);
   });
 
-  it("defines smartSonnet as a Smart-family mode pinned to Claude Sonnet 5 on the subscription provider", async () => {
+  it("defines smart-family model-pinned variants", async () => {
     const { getMmrMode } = await importSource("extensions/mmr-core/modes.ts");
 
     const smart = getMmrMode("smart");
     const smartSonnet = getMmrMode("smartSonnet");
+    const smartFable = getMmrMode("smartFable");
 
     assert.deepEqual(smartSonnet.modelPreferences, [
       { model: "claude-sonnet-5", providers: ["claude-subscription"] },
     ]);
-    assert.equal(smartSonnet.thinkingLevel, "medium");
-    assert.deepEqual(smartSonnet.tools, smart.tools);
-    assert.equal(smartSonnet.promptRoute, smart.promptRoute);
-    assert.deepEqual(smartSonnet.featureGates, smart.featureGates);
+    assert.deepEqual(smartFable.modelPreferences, [
+      { model: "fable" },
+    ]);
+    for (const mode of [smartSonnet, smartFable]) {
+      assert.equal(mode.thinkingLevel, "medium");
+      assert.deepEqual(mode.tools, smart.tools);
+      assert.equal(mode.promptRoute, smart.promptRoute);
+      assert.deepEqual(mode.featureGates, smart.featureGates);
+    }
   });
 
   it("renders mode list using per-mode request thinking and context metadata", async () => {
@@ -115,7 +121,7 @@ describe("mmr-core mode table", () => {
     const open = getMmrMode("open");
     const free = getMmrMode("free");
 
-    assert.deepEqual(MMR_MODE_KEYS, ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep", "open", "free"]);
+    assert.deepEqual(MMR_MODE_KEYS, ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep", "open", "free"]);
     assert.equal(isMmrModeKey("open"), true);
     assert.equal(isMmrModeKey("free"), true);
     assert.equal(open.displayName, "Open");

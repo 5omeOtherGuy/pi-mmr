@@ -29,23 +29,24 @@ const BASE_PROMPT = readFileSync(path.join(promptFixtureDir, "base.md"), "utf8")
 
 const UPDATE_FIXTURES = process.env.PI_MMR_UPDATE_FIXTURES === "1";
 
-// smartGPT and large render the smart system prompt verbatim apart from the
+// smart-family variants render the smart system prompt verbatim apart from the
 // <mmr_mode name="..."> tag. They are excluded from the matrix snapshots and
 // the per-(mode × tool-set) invariant loops so that release-time renames touch
 // fewer fixtures, but they stay in the structural marker checks
 // (MATRIX_MARKER_MODES) so that the per-mode tag isolation invariant still
 // covers them.
 const MATRIX_MODES = ["smart", "rush", "large", "deep"];
-const MATRIX_MARKER_MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
+const MATRIX_MARKER_MODES = ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep"];
 
 // Distinguishing per-mode markers. The smart family (smart, smartGPT,
-// smartSonnet, large) shares one prompt body, so each member is identified by
-// its <mmr_mode name="..."> tag. Rush and Deep have distinctive posture-body
-// sentences.
+// smartSonnet, smartFable, large) shares one prompt body, so each member is
+// identified by its <mmr_mode name="..."> tag. Rush and Deep have distinctive
+// posture-body sentences.
 const MODE_MARKERS = {
   smart: '<mmr_mode name="smart">',
   smartGPT: '<mmr_mode name="smartGPT">',
   smartSonnet: '<mmr_mode name="smartSonnet">',
+  smartFable: '<mmr_mode name="smartFable">',
   rush: "You run with no extended reasoning",
   test: '<mmr_mode name="test">',
   large: '<mmr_mode name="large">',
@@ -56,13 +57,14 @@ const MODE_MARKERS = {
 // distinctive markers). The smart family shares its prompt body, so its
 // members exclude each other's mode tags rather than body text.
 const MODE_FOREIGN_MARKERS = {
-  smart: ['<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  smartGPT: ['<mmr_mode name="smart">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  smartSonnet: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  rush: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
-  test: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="rush">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
-  large: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
-  deep: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning"],
+  smart: ['<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="smartFable">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  smartGPT: ['<mmr_mode name="smart">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="smartFable">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  smartSonnet: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartFable">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  smartFable: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  rush: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="smartFable">', '<mmr_mode name="test">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
+  test: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="smartFable">', '<mmr_mode name="rush">', '<mmr_mode name="large">', "Deep mode is for difficult reasoning,"],
+  large: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="smartFable">', '<mmr_mode name="test">', "You run with no extended reasoning", "Deep mode is for difficult reasoning,"],
+  deep: ['<mmr_mode name="smart">', '<mmr_mode name="smartGPT">', '<mmr_mode name="smartSonnet">', '<mmr_mode name="smartFable">', '<mmr_mode name="test">', '<mmr_mode name="large">', "You run with no extended reasoning"],
 };
 
 // Expected coarse block order. Matches the existing Phase B baseline.

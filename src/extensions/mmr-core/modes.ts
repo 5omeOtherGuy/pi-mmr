@@ -3,7 +3,7 @@ import { MMR_REQUEST_POLICIES, formatMmrPolicyContext, formatMmrPolicyThinking }
 
 export const DEFAULT_MMR_MODE: MmrModeKey = "smart";
 
-export const MMR_MODE_KEYS = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep", "open", "free"] as const satisfies readonly MmrModeKey[];
+export const MMR_MODE_KEYS = ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep", "open", "free"] as const satisfies readonly MmrModeKey[];
 
 export const MMR_SMART_TOOL_NAMES = [
   "read",
@@ -109,6 +109,20 @@ export const MMR_MODES: Record<MmrModeKey, MmrModeDefinition> = {
     description: "Smart-style balanced mode with Claude Sonnet 5 (Claude Code subscription) as its model preference. Toggleable thinking (low/medium/high).",
     modelPreferences: [
       { model: "claude-sonnet-5", providers: ["claude-subscription"] },
+    ],
+    // Default thinking level; alt+r cycles through medium -> high -> low.
+    thinkingLevel: "medium",
+    tools: MMR_SMART_TOOL_NAMES,
+    promptRoute: "default",
+    featureGates: ["mmr-subagents", "mmr-async-tasks"],
+  },
+
+  smartFable: {
+    key: "smartFable",
+    displayName: "SmartFable",
+    description: "Smart-style balanced mode with Fable as its model preference. Toggleable thinking (low/medium/high).",
+    modelPreferences: [
+      { model: "fable" },
     ],
     // Default thinking level; alt+r cycles through medium -> high -> low.
     thinkingLevel: "medium",

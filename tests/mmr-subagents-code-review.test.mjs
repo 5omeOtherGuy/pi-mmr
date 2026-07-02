@@ -15,7 +15,7 @@
 //   3. Guidelines stay a single routing line naming code_review.
 //   4. The `code-review` subagent profile is standalone, read-only by
 //      contract (read/grep/find/bash, no MCP/toolbox), backgroundable, and
-//      prefers the antigravity Gemini 3.1 Pro route.
+//      uses GPT-5.5 at medium effort.
 //   5. The worker system prompt pins the review method: merge-base
 //      origin/HEAD reference commands, read-only guardrails, low
 //      persistence, the oversized-diff abort, severity/type taxonomy, and
@@ -56,7 +56,7 @@ function makeWorkerResult(overrides = {}) {
     finalOutput: "Summary: looks good.\n\nFindings:\n- src/foo.ts:10-12 — severity: low; type: compliment",
     truncatedFinalOutput: "Summary: looks good.\n\nFindings:\n- src/foo.ts:10-12 — severity: low; type: compliment",
     usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
-    model: "gemini-3.1-pro",
+    model: "gpt-5.5",
     stopReason: "end_turn",
     errorMessage: undefined,
     prompt: "Review the following diff: all uncommitted changes",
@@ -144,7 +144,7 @@ describe("code_review tool definition", () => {
 });
 
 describe("code-review subagent profile", () => {
-  it("is standalone, read-only by contract, backgroundable, and prefers antigravity Gemini 3.5 Flash", async () => {
+  it("is standalone, read-only by contract, backgroundable, and uses GPT-5.5 medium", async () => {
     const { getMmrSubagentProfile } = await importSource(PROFILES_MODULE);
     const profile = getMmrSubagentProfile("code-review");
     assert.ok(profile, "mmr-core must expose a code-review subagent profile");
@@ -154,10 +154,9 @@ describe("code-review subagent profile", () => {
     assert.equal(profile.allowMcp, false);
     assert.equal(profile.allowToolbox, false);
     assert.notEqual(profile.backgroundable, false, "code-review must be backgroundable");
+    assert.equal(profile.thinkingLevel, "medium");
     assert.deepEqual([...profile.modelPreferences], [
-      { model: "gemini-3.5-flash", providers: ["antigravity"], thinkingLevel: "high" },
-      { model: "claude-sonnet-4-6", thinkingLevel: "high" },
-      { model: "gpt-5.4-mini", thinkingLevel: "high" },
+      { model: "gpt-5.5", thinkingLevel: "medium" },
     ]);
   });
 
@@ -261,7 +260,7 @@ describe("code_review execute() seam", () => {
     assert.equal(calls.length, 0, "runner must not be invoked when params are invalid");
   });
 
-  it("calls the injected runner with the assembled prompt, profile, and the antigravity route", async () => {
+  it("calls the injected runner with the assembled prompt, profile, and the GPT-5.5 route", async () => {
     const { createCodeReviewTool, CODE_REVIEW_WORKER_TOOLS } = await importSource(CODE_REVIEW_MODULE);
     const { runWorker, calls } = makeRunnerSpy();
     const tool = createCodeReviewTool({
@@ -275,7 +274,7 @@ describe("code_review execute() seam", () => {
       undefined,
       {
         cwd: "/abs/project",
-        modelRegistry: makeRegistry([{ provider: "antigravity", id: "gemini-3.5-flash" }]),
+        modelRegistry: makeRegistry([{ provider: "openai-codex", id: "gpt-5.5" }]),
       },
     );
     assert.equal(calls.length, 1);
@@ -286,7 +285,7 @@ describe("code_review execute() seam", () => {
     // does not mirror --tools (same contract as finder).
     assert.equal(options.tools, undefined);
     assert.equal(options.systemPrompt, "SP for /abs/project");
-    assert.equal(options.model, "antigravity/gemini-3.5-flash");
+    assert.equal(options.model, "openai-codex/gpt-5.5");
     assert.equal(options.profileName, "code-review");
     assert.equal(result.details.cwd, "/abs/project");
     assert.deepEqual([...result.details.workerTools], [...CODE_REVIEW_WORKER_TOOLS]);

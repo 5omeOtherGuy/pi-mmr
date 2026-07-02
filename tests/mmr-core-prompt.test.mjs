@@ -41,7 +41,7 @@ function createState(overrides = {}) {
   };
 }
 
-const MODES = ["smart", "smartGPT", "smartSonnet", "rush", "test", "large", "deep"];
+const MODES = ["smart", "smartGPT", "smartSonnet", "smartFable", "rush", "test", "large", "deep"];
 
 const PI_IDENTITY_LINE = "You are an expert coding assistant operating inside pi, a coding agent harness.";
 
@@ -49,6 +49,7 @@ const MODE_MARKER_OPENINGS = {
   smart: '<mmr_mode name="smart">You are pair programming with the user to solve their coding task.',
   smartGPT: '<mmr_mode name="smartGPT">You are pair programming with the user to solve their coding task.',
   smartSonnet: '<mmr_mode name="smartSonnet">You are pair programming with the user to solve their coding task.',
+  smartFable: '<mmr_mode name="smartFable">You are pair programming with the user to solve their coding task.',
   rush: '<mmr_mode name="rush">You and the user share one workspace.',
   test: '<mmr_mode name="test">You and the user share one workspace.',
   large: '<mmr_mode name="large">You are pair programming with the user to solve their coding task.',
